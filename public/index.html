@@ -1,0 +1,331 @@
+<!-- public/index.html -->
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Teste</title>
+
+<style>
+body{
+    margin:0;
+    overflow:hidden;
+    background:#000;
+}
+canvas{
+    display:block;
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+}
+</style>
+</head>
+<body>
+
+<canvas id="jogoCanvas"></canvas>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const socket = io({
+    transports: ["websocket"]
+});
+const canvas = document.getElementById("jogoCanvas");
+const ctx = canvas.getContext("2d");
+
+/* =========================
+CONFIG
+========================= */
+const LARGURA_VIRTUAL = 1920;
+const ALTURA_VIRTUAL  = 1080;
+const PROPORCAO_MIN   = 4/3;
+const PROPORCAO_MAX   = 21/9;
+
+const raioMapa = 1500;
+const raioBase = 200;
+
+/* buffer adaptativo */
+let BUFFER_MS = 140;
+
+let escalaGlobal = 1;
+let meuId = null;
+
+/* clock sync */
+let serverOffset = 0;
+
+/* jitter stats */
+let ultimoChegou = performance.now();
+let deltas = [];
+
+/* =========================
+RESIZE
+========================= */
+function resize(){
+    let w = innerWidth;
+    let h = innerHeight;
+
+    const p = w / h;
+
+    if(p < PROPORCAO_MIN) h = w / PROPORCAO_MIN;
+    else if(p > PROPORCAO_MAX) w = h * PROPORCAO_MAX;
+
+    canvas.width = w;
+    canvas.height = h;
+
+    escalaGlobal = Math.min(
+        w / LARGURA_VIRTUAL,
+        h / ALTURA_VIRTUAL
+    );
+}
+addEventListener("resize", resize);
+resize();
+
+/* =========================
+INPUTS
+========================= */
+const teclasValidas = [
+"arrowup","arrowdown","arrowleft","arrowright",
+"w","a","s","d"
+];
+
+addEventListener("keydown", e=>{
+    const t = e.key.toLowerCase();
+    if(teclasValidas.includes(t)){
+        socket.emit("inputDown", t);
+    }
+});
+
+addEventListener("keyup", e=>{
+    const t = e.key.toLowerCase();
+    if(teclasValidas.includes(t)){
+        socket.emit("inputUp", t);
+    }
+});
+
+/* =========================
+REDE
+========================= */
+socket.on("connect", ()=>{
+    meuId = socket.id;
+});
+
+const snapshots = [];
+
+socket.on("estado", dados => {
+
+    const agora = performance.now();
+
+    /* medir jitter */
+    const delta = agora - ultimoChegou;
+    ultimoChegou = agora;
+
+    deltas.push(delta);
+    if(deltas.length > 30) deltas.shift();
+
+    const media = deltas.reduce((a,b)=>a+b,0)/deltas.length;
+
+    const jitter = Math.sqrt(
+        deltas.map(v=>(v-media)**2)
+              .reduce((a,b)=>a+b,0)/deltas.length
+    );
+
+    BUFFER_MS = Math.max(100, Math.min(260, media + jitter * 2));
+
+    /* sync clock */
+    const localNow = Date.now();
+    const novoOffset = localNow - dados.tempo;
+    serverOffset = serverOffset * 0.9 + novoOffset * 0.1;
+
+    snapshots.push({
+        time: dados.tempo,
+        jogadores: structuredClone(dados.jogadores)
+    });
+
+    while(snapshots.length > 60){
+        snapshots.shift();
+    }
+
+});
+
+/* =========================
+UTILS
+========================= */
+function lerp(a,b,t){
+    return a + (b-a)*t;
+}
+
+function lerpAng(a,b,t){
+    let d = b-a;
+
+    while(d < -Math.PI) d += Math.PI*2;
+    while(d >  Math.PI) d -= Math.PI*2;
+
+    return a + d*t;
+}
+
+/* =========================
+INTERPOLATION
+========================= */
+function obterEstadoRender(){
+
+    if(snapshots.length === 0) return null;
+    if(snapshots.length === 1) return snapshots[0].jogadores;
+
+    const serverNow = Date.now() - serverOffset;
+    const renderTime = serverNow - BUFFER_MS;
+
+    let antigo = snapshots[0];
+    let novo   = snapshots[1];
+
+    for(let i=0;i<snapshots.length-1;i++){
+
+        if(
+            snapshots[i].time <= renderTime &&
+            snapshots[i+1].time >= renderTime
+        ){
+            antigo = snapshots[i];
+            novo   = snapshots[i+1];
+            break;
+        }
+
+        antigo = snapshots[i];
+        novo   = snapshots[i+1];
+    }
+
+    const intervalo = novo.time - antigo.time || 1;
+
+    let t = (renderTime - antigo.time) / intervalo;
+    t = Math.max(0, Math.min(t,1));
+
+    const render = {};
+
+    const ids = new Set([
+        ...Object.keys(antigo.jogadores),
+        ...Object.keys(novo.jogadores)
+    ]);
+
+    for(const id of ids){
+
+        const a = antigo.jogadores[id];
+        const b = novo.jogadores[id];
+
+        if(!a && b){
+            render[id] = b;
+            continue;
+        }
+
+        if(a && !b){
+            continue;
+        }
+
+        render[id] = {
+            ...b,
+            x: lerp(a.x,b.x,t),
+            y: lerp(a.y,b.y,t),
+            angulo: lerpAng(a.angulo,b.angulo,t)
+        };
+    }
+
+    return render;
+}
+
+/* =========================
+DRAW
+========================= */
+function desenharBase(j){
+    ctx.globalAlpha = 0.66;
+    ctx.fillStyle = j.cor;
+
+    ctx.beginPath();
+    ctx.arc(j.baseX,j.baseY,raioBase,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = j.cor;
+
+    ctx.beginPath();
+    ctx.arc(j.baseX,j.baseY,raioBase,0,Math.PI*2);
+    ctx.stroke();
+}
+
+function desenharJogador(j){
+
+    ctx.save();
+
+    ctx.translate(j.x,j.y);
+    ctx.rotate(j.angulo);
+
+    ctx.fillStyle = "rgba(0,0,0,.12)";
+    ctx.fillRect(-30,-30,70,70);
+
+    ctx.fillStyle = j.cor;
+    ctx.fillRect(-35,-35,70,70);
+
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = "#000";
+    ctx.strokeRect(-35,-35,70,70);
+
+    ctx.fillStyle="#fff";
+    ctx.fillRect(18,-23,12,12);
+    ctx.fillRect(18,11,12,12);
+
+    ctx.fillStyle="#000";
+    ctx.fillRect(24,-20,6,6);
+    ctx.fillRect(24,14,6,6);
+
+    ctx.restore();
+}
+
+/* =========================
+RENDER
+========================= */
+function render(){
+
+    requestAnimationFrame(render);
+
+    const estado = obterEstadoRender();
+    if(!estado) return;
+
+    const eu = estado[meuId];
+    if(!eu) return;
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    ctx.save();
+
+    ctx.translate(canvas.width/2,canvas.height/2);
+    ctx.scale(escalaGlobal,escalaGlobal);
+    ctx.translate(-eu.x,-eu.y);
+
+    ctx.beginPath();
+    ctx.arc(0,0,raioMapa,0,Math.PI*2);
+    ctx.fillStyle="#fff";
+    ctx.fill();
+
+    ctx.lineWidth=15;
+    ctx.strokeStyle="#222";
+    ctx.stroke();
+
+    const lista = Object.values(estado);
+
+    for(const j of lista){
+        desenharBase(j);
+    }
+
+    for(const j of lista){
+        if(j.id !== meuId){
+            desenharJogador(j);
+        }
+    }
+
+    desenharJogador(eu);
+
+    ctx.restore();
+}
+
+render();
+</script>
+</body>
+</html>
