@@ -24,6 +24,9 @@ function startClient(gameConfig) {
 
     const canvas = document.getElementById("gameCanvas");
     const context = canvas.getContext("2d");
+    const minimapCanvas = document.getElementById("minimap");
+    const minimapCtx = minimapCanvas.getContext("2d");
+    const MINIMAP_SIZE = 150;
     const validInputKeys = new Set(gameConfig.inputKeys);
     const snapshots = [];
 
@@ -261,6 +264,76 @@ function startClient(gameConfig) {
         context.restore();
     }
 
+    function drawMinimap(state) {
+        const mapRadius = gameConfig.world.mapRadius;
+        const scale = (MINIMAP_SIZE / 2) / mapRadius;
+        const cx = MINIMAP_SIZE / 2;
+        const cy = MINIMAP_SIZE / 2;
+
+        minimapCtx.clearRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+
+        minimapCtx.save();
+
+        // Clip ao círculo do minimapa
+        minimapCtx.beginPath();
+        minimapCtx.arc(cx, cy, cx, 0, Math.PI * 2);
+        minimapCtx.clip();
+
+        // Fundo escuro
+        minimapCtx.fillStyle = "rgba(0, 0, 0, 0.55)";
+        minimapCtx.fillRect(0, 0, MINIMAP_SIZE, MINIMAP_SIZE);
+
+        // Área do mapa
+        minimapCtx.beginPath();
+        minimapCtx.arc(cx, cy, mapRadius * scale, 0, Math.PI * 2);
+        minimapCtx.fillStyle = "#d8d8d8";
+        minimapCtx.fill();
+
+        const players = Object.values(state);
+
+        // Bases dos jogadores
+        for (const player of players) {
+            const mx = cx + player.baseX * scale;
+            const my = cy + player.baseY * scale;
+            const baseR = Math.max(3, gameConfig.world.baseRadius * scale);
+
+            minimapCtx.globalAlpha = 0.45;
+            minimapCtx.beginPath();
+            minimapCtx.arc(mx, my, baseR, 0, Math.PI * 2);
+            minimapCtx.fillStyle = player.color;
+            minimapCtx.fill();
+            minimapCtx.globalAlpha = 1;
+        }
+
+        // Pontos dos jogadores
+        for (const player of players) {
+            const mx = cx + player.x * scale;
+            const my = cy + player.y * scale;
+            const isMe = player.id === myId;
+            const dotRadius = isMe ? 5 : 3.5;
+
+            minimapCtx.beginPath();
+            minimapCtx.arc(mx, my, dotRadius, 0, Math.PI * 2);
+            minimapCtx.fillStyle = player.color;
+            minimapCtx.fill();
+
+            if (isMe) {
+                minimapCtx.lineWidth = 1.5;
+                minimapCtx.strokeStyle = "#fff";
+                minimapCtx.stroke();
+            }
+        }
+
+        minimapCtx.restore();
+
+        // Borda circular por cima
+        minimapCtx.beginPath();
+        minimapCtx.arc(cx, cy, cx - 1, 0, Math.PI * 2);
+        minimapCtx.lineWidth = 2;
+        minimapCtx.strokeStyle = "rgba(255, 255, 255, 0.55)";
+        minimapCtx.stroke();
+    }
+
     function drawMap() {
         context.beginPath();
         context.arc(0, 0, gameConfig.world.mapRadius, 0, Math.PI * 2);
@@ -313,6 +386,7 @@ function startClient(gameConfig) {
 
         context.clearRect(0, 0, canvas.width, canvas.height);
         drawWorld(state, currentPlayer);
+        drawMinimap(state);
     }
 
     window.addEventListener("resize", resizeCanvas);
