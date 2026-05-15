@@ -8,7 +8,7 @@
 })();
 
 async function loadGameConfig() {
-    const response = await fetch("/game-config");
+    const response = await fetch("http://localhost:3000/game-config");
 
     if (!response.ok) {
         throw new Error(`Config request failed with status ${response.status}`);
