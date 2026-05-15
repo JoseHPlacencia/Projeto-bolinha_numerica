@@ -289,39 +289,20 @@ function startClient(gameConfig) {
         minimapCtx.fillStyle = "#d8d8d8";
         minimapCtx.fill();
 
-        const players = Object.values(state);
+        const currentPlayer = state[myId];
 
-        // Bases dos jogadores
-        for (const player of players) {
-            const mx = cx + player.baseX * scale;
-            const my = cy + player.baseY * scale;
-            const baseR = Math.max(3, gameConfig.world.baseRadius * scale);
-
-            minimapCtx.globalAlpha = 0.45;
-            minimapCtx.beginPath();
-            minimapCtx.arc(mx, my, baseR, 0, Math.PI * 2);
-            minimapCtx.fillStyle = player.color;
-            minimapCtx.fill();
-            minimapCtx.globalAlpha = 1;
-        }
-
-        // Pontos dos jogadores
-        for (const player of players) {
-            const mx = cx + player.x * scale;
-            const my = cy + player.y * scale;
-            const isMe = player.id === myId;
-            const dotRadius = isMe ? 5 : 3.5;
+        if (currentPlayer) {
+            const mx = cx + currentPlayer.x * scale;
+            const my = cy + currentPlayer.y * scale;
 
             minimapCtx.beginPath();
-            minimapCtx.arc(mx, my, dotRadius, 0, Math.PI * 2);
-            minimapCtx.fillStyle = player.color;
+            minimapCtx.arc(mx, my, 5, 0, Math.PI * 2);
+            minimapCtx.fillStyle = currentPlayer.color;
             minimapCtx.fill();
 
-            if (isMe) {
-                minimapCtx.lineWidth = 1.5;
-                minimapCtx.strokeStyle = "#fff";
-                minimapCtx.stroke();
-            }
+            minimapCtx.lineWidth = 1.5;
+            minimapCtx.strokeStyle = "#fff";
+            minimapCtx.stroke();
         }
 
         minimapCtx.restore();
