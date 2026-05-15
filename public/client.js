@@ -292,6 +292,17 @@ function startClient(gameConfig) {
         const currentPlayer = state[myId];
 
         if (currentPlayer) {
+            const baseX = cx + currentPlayer.baseX * scale;
+            const baseY = cy + currentPlayer.baseY * scale;
+            const baseR = Math.max(3, gameConfig.world.baseRadius * scale);
+
+            minimapCtx.globalAlpha = 0.45;
+            minimapCtx.beginPath();
+            minimapCtx.arc(baseX, baseY, baseR, 0, Math.PI * 2);
+            minimapCtx.fillStyle = currentPlayer.color;
+            minimapCtx.fill();
+            minimapCtx.globalAlpha = 1;
+
             const mx = cx + currentPlayer.x * scale;
             const my = cy + currentPlayer.y * scale;
 
