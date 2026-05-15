@@ -25,19 +25,33 @@ function updatePlayer(player, deltaTime) {
 }
 
 function rotatePlayerToLastInput(player, deltaTime) {
-    if (!player.lastKey || !hasInputAngle(player.lastKey)) {
+    const targetAngle = getPlayerTargetAngle(player);
+
+    if (targetAngle === null) {
         return;
     }
 
     player.angle = lerpAngle(
         player.angle,
-        config.inputAngles[player.lastKey],
+        targetAngle,
         getRotationBlend(deltaTime)
     );
 }
 
-function hasInputAngle(key) {
-    return Object.prototype.hasOwnProperty.call(config.inputAngles, key);
+function getPlayerTargetAngle(player) {
+    if (Number.isFinite(player.directionAngle)) {
+        return player.directionAngle;
+    }
+
+    if (!player.lastAction || !hasInputAngle(player.lastAction)) {
+        return null;
+    }
+
+    return config.inputActionAngles[player.lastAction];
+}
+
+function hasInputAngle(action) {
+    return Object.prototype.hasOwnProperty.call(config.inputActionAngles, action);
 }
 
 function getRotationBlend(deltaTime) {
@@ -132,6 +146,7 @@ function getPlayerPosition(player) {
 
 module.exports = {
     getPlayerMovementVector,
+    getPlayerTargetAngle,
     updatePlayer,
     updatePlayers
 };

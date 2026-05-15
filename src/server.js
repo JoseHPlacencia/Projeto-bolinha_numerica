@@ -13,9 +13,15 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, createSocketOptions());
 const publicPath = path.join(__dirname, "..", "public");
+const sharedMathPath = path.join(__dirname, "utils", "math.js");
 
 app.get("/game-config", (_request, response) => {
     response.json(config.client);
+});
+
+app.get("/shared/math.js", (_request, response) => {
+    response.type("application/javascript");
+    response.sendFile(sharedMathPath);
 });
 
 app.use(express.static(publicPath));

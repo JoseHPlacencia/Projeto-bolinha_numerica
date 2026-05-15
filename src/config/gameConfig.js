@@ -1,17 +1,24 @@
 const socketTransports = Object.freeze(["websocket"]);
 
-const inputAngles = Object.freeze({
-    arrowright: 0,
-    d: 0,
+const inputActionAngles = Object.freeze({
+    "move-right": 0,
+    "move-down": Math.PI / 2,
+    "move-left": Math.PI,
+    "move-up": -Math.PI / 2
+});
 
-    arrowdown: Math.PI / 2,
-    s: Math.PI / 2,
+const inputBindings = Object.freeze({
+    arrowright: "move-right",
+    d: "move-right",
 
-    arrowleft: Math.PI,
-    a: Math.PI,
+    arrowdown: "move-down",
+    s: "move-down",
 
-    arrowup: -Math.PI / 2,
-    w: -Math.PI / 2
+    arrowleft: "move-left",
+    a: "move-left",
+
+    arrowup: "move-up",
+    w: "move-up"
 });
 
 const server = Object.freeze({
@@ -32,7 +39,7 @@ const loop = Object.freeze({
 const world = Object.freeze({
     mapRadius: 1500,
     playerSize: 70,
-    baseRadius: 200
+    initialTerritoryRadius: 200
 });
 
 const movement = Object.freeze({
@@ -42,7 +49,7 @@ const movement = Object.freeze({
 });
 
 const spawn = Object.freeze({
-    minBaseDistance: world.baseRadius * 3,
+    minTerritoryDistance: world.initialTerritoryRadius * 3,
     maxAttempts: 500
 });
 
@@ -78,7 +85,7 @@ const client = Object.freeze({
     world,
     screen,
     network,
-    inputKeys: Object.freeze(Object.keys(inputAngles))
+    inputBindings
 });
 
 module.exports = Object.freeze({
@@ -88,7 +95,8 @@ module.exports = Object.freeze({
     world,
     movement,
     spawn,
-    inputAngles,
+    inputActionAngles,
+    inputBindings,
     security,
     client
 });

@@ -26,28 +26,38 @@ class Player {
         this.y = spawn.y;
         this.angle = getRandomAngle();
         this.color = createRandomColor();
-        this.baseX = spawn.x;
-        this.baseY = spawn.y;
+        this.territoryX = spawn.x;
+        this.territoryY = spawn.y;
         this.isMoving = false;
-        this.keys = new Set();
-        this.lastKey = null;
+        this.pressedActions = new Set();
+        this.lastAction = null;
+        this.directionAngle = null;
     }
 
-    pressKey(key) {
-        if (!this.keys.has(key)) {
-            this.keys.add(key);
-            this.lastKey = key;
+    pressAction(action) {
+        if (!this.pressedActions.has(action)) {
+            this.pressedActions.add(action);
+            this.lastAction = action;
         }
 
         this.isMoving = true;
     }
 
-    releaseKey(key) {
-        this.keys.delete(key);
+    releaseAction(action) {
+        this.pressedActions.delete(action);
 
-        if (this.lastKey === key) {
-            this.lastKey = getLastSetValue(this.keys);
+        if (this.lastAction === action) {
+            this.lastAction = getLastSetValue(this.pressedActions);
         }
+    }
+
+    setDirectionAngle(angle) {
+        this.directionAngle = angle;
+        this.isMoving = true;
+    }
+
+    clearDirectionAngle() {
+        this.directionAngle = null;
     }
 
     serialize() {
@@ -57,8 +67,8 @@ class Player {
             y: this.y,
             angle: this.angle,
             color: this.color,
-            baseX: this.baseX,
-            baseY: this.baseY
+            territoryX: this.territoryX,
+            territoryY: this.territoryY
         };
     }
 }

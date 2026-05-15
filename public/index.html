@@ -2,15 +2,31 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <title>Teoria dos Conjuntos</title>
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 
 <canvas id="gameCanvas"></canvas>
+<div id="hud" class="hud">
+    <div id="debugPanel" class="debug-panel" hidden>
+        <div><span>FPS</span><strong id="debugFps">0</strong></div>
+        <div><span>Frame</span><strong id="debugFrame">0ms</strong></div>
+        <div><span>Buffer</span><strong id="debugBuffer">0ms</strong></div>
+        <div><span>Snapshots</span><strong id="debugSnapshots">0</strong></div>
+        <div><span>DPR</span><strong id="debugPixelRatio">1</strong></div>
+        <div><span>Canvas</span><strong id="debugCanvas">0x0</strong></div>
+    </div>
+</div>
+<div id="touchControls" class="touch-controls" aria-hidden="true">
+    <div id="moveStick" class="move-stick">
+        <div id="moveStickKnob" class="move-stick-knob"></div>
+    </div>
+</div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="/client.js"></script>
+<script src="/shared/math.js"></script>
+<script type="module" src="/client.js"></script>
 </body>
 </html>

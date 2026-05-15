@@ -16,20 +16,36 @@ function registerSocket(io, players) {
 function registerInputEvents(socket, players) {
     const inputGuard = createInputGuard(socket);
 
-    socket.on("inputDown", rawKey => {
+    socket.on("inputDown", rawAction => {
         if (!inputGuard.canHandleInput()) {
             return;
         }
 
-        handleInputDown(players, socket.id, rawKey);
+        handleInputDown(players, socket.id, rawAction);
     });
 
-    socket.on("inputUp", rawKey => {
+    socket.on("inputUp", rawAction => {
         if (!inputGuard.canHandleInput()) {
             return;
         }
 
-        handleInputUp(players, socket.id, rawKey);
+        handleInputUp(players, socket.id, rawAction);
+    });
+
+    socket.on("inputDirection", rawAngle => {
+        if (!inputGuard.canHandleInput()) {
+            return;
+        }
+
+        handleInputDirection(players, socket.id, rawAngle);
+    });
+
+    socket.on("inputDirectionEnd", () => {
+        if (!inputGuard.canHandleInput()) {
+            return;
+        }
+
+        handleInputDirectionEnd(players, socket.id);
     });
 }
 
@@ -56,40 +72,72 @@ function createInputGuard(socket) {
     }
 }
 
-function handleInputDown(players, playerId, rawKey) {
-    const key = normalizeInputKey(rawKey);
+function handleInputDown(players, playerId, rawAction) {
+    const action = normalizeInputAction(rawAction);
 
-    if (!isInputKeyValid(key)) {
+    if (!isInputActionValid(action)) {
         return;
     }
 
     const player = players.get(playerId);
 
     if (player) {
-        player.pressKey(key);
+        player.pressAction(action);
     }
 }
 
-function handleInputUp(players, playerId, rawKey) {
-    const key = normalizeInputKey(rawKey);
+function handleInputUp(players, playerId, rawAction) {
+    const action = normalizeInputAction(rawAction);
 
-    if (!isInputKeyValid(key)) {
+    if (!isInputActionValid(action)) {
         return;
     }
 
     const player = players.get(playerId);
 
     if (player) {
-        player.releaseKey(key);
+        player.releaseAction(action);
     }
 }
 
-function normalizeInputKey(key) {
-    return String(key || "").toLowerCase();
+function handleInputDirection(players, playerId, rawAngle) {
+    const angle = normalizeInputAngle(rawAngle);
+
+    if (angle === null) {
+        return;
+    }
+
+    const player = players.get(playerId);
+
+    if (player) {
+        player.setDirectionAngle(angle);
+    }
 }
 
-function isInputKeyValid(key) {
-    return Object.prototype.hasOwnProperty.call(config.inputAngles, key);
+function handleInputDirectionEnd(players, playerId) {
+    const player = players.get(playerId);
+
+    if (player) {
+        player.clearDirectionAngle();
+    }
+}
+
+function normalizeInputAction(action) {
+    return String(action || "").toLowerCase();
+}
+
+function isInputActionValid(action) {
+    return Object.prototype.hasOwnProperty.call(config.inputActionAngles, action);
+}
+
+function normalizeInputAngle(rawAngle) {
+    const angle = Number(rawAngle);
+
+    if (!Number.isFinite(angle)) {
+        return null;
+    }
+
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 module.exports = registerSocket;
