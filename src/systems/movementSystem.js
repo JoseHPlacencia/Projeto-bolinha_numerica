@@ -102,10 +102,52 @@ function resolveSlidingBoundary(player, movementVector, nextPosition, distanceFr
 
         if (vectorLength(slidingVector) > config.movement.slideAngleThreshold) {
             angle = Math.atan2(slidingVector.y, slidingVector.x);
+        } else {
+            slidingVector = createFallbackBoundarySlide(movementVector, wallNormal);
+            angle = Math.atan2(slidingVector.y, slidingVector.x);
         }
     }
 
     return clampPositionToMap(addVectors(getPlayerPosition(player), slidingVector), angle);
+}
+
+function createFallbackBoundarySlide(movementVector, wallNormal) {
+    const slideDirection = getFallbackSlideDirection(movementVector, wallNormal);
+    const tangent = createBoundaryTangent(wallNormal, slideDirection);
+
+    return scaleVector(tangent, vectorLength(movementVector));
+}
+
+function getFallbackSlideDirection(movementVector, wallNormal) {
+    const movementDirection = getBoundarySlideDirection(wallNormal, movementVector);
+
+    if (movementDirection !== 0) {
+        return movementDirection;
+    }
+
+    return getRandomSlideDirection();
+}
+
+function getRandomSlideDirection() {
+    return Math.random() < 0.5 ? -1 : 1;
+}
+
+function getBoundarySlideDirection(wallNormal, movementVector) {
+    const tangent = createBoundaryTangent(wallNormal, 1);
+    const alignment = dotProduct(movementVector, tangent);
+
+    if (Math.abs(alignment) <= config.movement.slideAngleThreshold) {
+        return 0;
+    }
+
+    return alignment > 0 ? 1 : -1;
+}
+
+function createBoundaryTangent(wallNormal, direction) {
+    return {
+        x: -wallNormal.y * direction,
+        y: wallNormal.x * direction
+    };
 }
 
 function clampPositionToMap(position, angle) {
