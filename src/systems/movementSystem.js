@@ -3,6 +3,7 @@ const {
     addVectors,
     clamp,
     createMovementVector,
+    createVectorFromAngle,
     dotProduct,
     lerpAngle,
     scaleVector,
@@ -24,6 +25,10 @@ function rotatePlayerToLastInput(player, deltaTime) {
     const targetAngle = getPlayerTargetAngle(player);
 
     if (targetAngle === null) {
+        return;
+    }
+
+    if (shouldBlockOutsideBoundaryInput(player, targetAngle, deltaTime)) {
         return;
     }
 
@@ -57,9 +62,21 @@ function getRotationBlend(deltaTime) {
     return clamp(blend, 0, 1);
 }
 
+function shouldBlockOutsideBoundaryInput(player, targetAngle, deltaTime) {
+    const position = getPlayerPosition(player);
+
+    if (!isNearMapBoundary(position, getMovementDistance(deltaTime))) {
+        return false;
+    }
+
+    const targetDirection = createVectorFromAngle(targetAngle, 1);
+
+    return doesVectorPointOutsideMap(position, targetDirection);
+}
+
 function movePlayer(player, deltaTime) {
-    const movementVector = getPlayerMovementVector(player, deltaTime);
-    const nextState = resolveMapBoundary(player, movementVector);
+    const movement = getBoundaryAwareMovement(player, deltaTime);
+    const nextState = resolveMapBoundary(player, movement.vector, movement.angle);
 
     player.x = nextState.x;
     player.y = nextState.y;
@@ -70,7 +87,44 @@ function getPlayerMovementVector(player, deltaTime) {
     return createMovementVector(player.angle, config.movement.speed, deltaTime);
 }
 
-function resolveMapBoundary(player, movementVector) {
+function getBoundaryAwareMovement(player, deltaTime) {
+    const movementVector = getPlayerMovementVector(player, deltaTime);
+    const adjustedVector = blockOutsideBoundaryMovement(player, movementVector);
+
+    if (adjustedVector === movementVector) {
+        return {
+            vector: movementVector,
+            angle: player.angle
+        };
+    }
+
+    return {
+        vector: adjustedVector,
+        angle: Math.atan2(adjustedVector.y, adjustedVector.x)
+    };
+}
+
+function blockOutsideBoundaryMovement(player, movementVector) {
+    const position = getPlayerPosition(player);
+
+    if (!isNearMapBoundary(position, vectorLength(movementVector))) {
+        return movementVector;
+    }
+
+    if (!doesVectorPointOutsideMap(position, movementVector)) {
+        return movementVector;
+    }
+
+    const wallNormal = getBoundaryNormal(position);
+
+    if (!wallNormal) {
+        return movementVector;
+    }
+
+    return createBoundarySlideVector(movementVector, wallNormal);
+}
+
+function resolveMapBoundary(player, movementVector, movementAngle = player.angle) {
     const position = getPlayerPosition(player);
     const nextPosition = addVectors(position, movementVector);
     const distanceFromCenter = vectorLength(nextPosition);
@@ -80,35 +134,40 @@ function resolveMapBoundary(player, movementVector) {
         return {
             x: nextPosition.x,
             y: nextPosition.y,
-            angle: player.angle
+            angle: movementAngle
         };
     }
 
-    return resolveSlidingBoundary(player, movementVector, nextPosition, distanceFromCenter);
+    return resolveSlidingBoundary(player, movementVector, movementAngle, nextPosition, distanceFromCenter);
 }
 
-function resolveSlidingBoundary(player, movementVector, nextPosition, distanceFromCenter) {
+function resolveSlidingBoundary(player, movementVector, movementAngle, nextPosition, distanceFromCenter) {
     const wallNormal = scaleVector(nextPosition, 1 / distanceFromCenter);
     const wallPush = dotProduct(movementVector, wallNormal);
     let slidingVector = movementVector;
-    let angle = player.angle;
+    let angle = movementAngle;
 
     // Remove only the part of the movement that pushes the player through the wall.
     if (wallPush > 0) {
-        slidingVector = {
-            x: movementVector.x - wallPush * wallNormal.x,
-            y: movementVector.y - wallPush * wallNormal.y
-        };
-
-        if (vectorLength(slidingVector) > config.movement.slideAngleThreshold) {
-            angle = Math.atan2(slidingVector.y, slidingVector.x);
-        } else {
-            slidingVector = createFallbackBoundarySlide(movementVector, wallNormal);
-            angle = Math.atan2(slidingVector.y, slidingVector.x);
-        }
+        slidingVector = createBoundarySlideVector(movementVector, wallNormal);
+        angle = Math.atan2(slidingVector.y, slidingVector.x);
     }
 
     return clampPositionToMap(addVectors(getPlayerPosition(player), slidingVector), angle);
+}
+
+function createBoundarySlideVector(movementVector, wallNormal) {
+    const wallPush = dotProduct(movementVector, wallNormal);
+    const slidingVector = {
+        x: movementVector.x - wallPush * wallNormal.x,
+        y: movementVector.y - wallPush * wallNormal.y
+    };
+
+    if (vectorLength(slidingVector) > config.movement.slideAngleThreshold) {
+        return slidingVector;
+    }
+
+    return createFallbackBoundarySlide(movementVector, wallNormal);
 }
 
 function createFallbackBoundarySlide(movementVector, wallNormal) {
@@ -148,6 +207,37 @@ function createBoundaryTangent(wallNormal, direction) {
         x: -wallNormal.y * direction,
         y: wallNormal.x * direction
     };
+}
+
+function doesVectorPointOutsideMap(position, vector) {
+    const wallNormal = getBoundaryNormal(position);
+
+    if (!wallNormal) {
+        return false;
+    }
+
+    return dotProduct(vector, wallNormal) > Number.EPSILON;
+}
+
+function isNearMapBoundary(position, distanceFromBoundary) {
+    const distanceFromCenter = vectorLength(position);
+    const mapLimit = getMapMovementLimit();
+
+    return distanceFromCenter >= mapLimit - distanceFromBoundary - Number.EPSILON;
+}
+
+function getBoundaryNormal(position) {
+    const distanceFromCenter = vectorLength(position);
+
+    if (distanceFromCenter <= Number.EPSILON) {
+        return null;
+    }
+
+    return scaleVector(position, 1 / distanceFromCenter);
+}
+
+function getMovementDistance(deltaTime) {
+    return config.movement.speed * deltaTime;
 }
 
 function clampPositionToMap(position, angle) {
