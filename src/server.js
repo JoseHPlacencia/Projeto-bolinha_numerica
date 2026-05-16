@@ -30,9 +30,13 @@ registerSocket(io, players);
 startGameLoop(players);
 startSnapshotLoop(io, players);
 
-server.listen(config.server.port, () => {
-    console.log(`Server running at http://localhost:${config.server.port}`);
-});
+const host = process.env.HOST;
+
+if (host) {
+    server.listen(config.server.port, host, logServerStart);
+} else {
+    server.listen(config.server.port, logServerStart);
+}
 
 module.exports = {
     app,
@@ -45,4 +49,8 @@ function createSocketOptions() {
         ...config.socket,
         transports: [...config.socket.transports]
     };
+}
+
+function logServerStart() {
+    console.log(`Server running at http://localhost:${config.server.port}`);
 }
