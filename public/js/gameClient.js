@@ -3,7 +3,7 @@ import { createHud } from "./hud.js";
 import { createInputControls } from "./input.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createCanvasRenderer } from "./renderer.js";
-import { drawMinimapLayer } from "./renderers/minimapRenderer.js";
+import { desenharCamadaMinimap } from "./renderers/minimapRenderer.js";
 
 export function startClient(gameConfig) {
     const socket = io({
@@ -49,6 +49,6 @@ export function startClient(gameConfig) {
         }
 
         renderer.renderWorld(state, myId);
-        drawMinimapLayer(minimapCanvas, state, myId, gameConfig.world);
+        desenharCamadaMinimap(minimapCanvas, state, myId, gameConfig.world);
     }
 }
