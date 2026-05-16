@@ -13,6 +13,6 @@ A solução tecnológica empregada no jogo consiste em node.js para o backend, b
 **Para rodar o projeto localmente:**
 - Permita temporáriamente a execução de scripts no powershell usando `Set-ExecutionPolicy Unrestricted` (isso pode ser necessário para a instalação do [npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) embutido no node.js). Após o término dos passos seguintes, basta restringir novamente a política usando `Set-ExecutionPolicy RemoteSigned`.
 - Instale o [node.js](https://nodejs.org/pt-br/download), habilite a caixa de instalação de dependências.
-- Clona o repositório e instale as dependências usando `npm install`.
+- Clone o repositório e instale as dependências usando `npm install`.
 - Rode o servidor node usando `node --watch server.js`.
 - Se desejar, use um serviço de túnel e compartilhe o link/ip para jogar com alguém em outra rede.

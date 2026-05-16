@@ -3,9 +3,9 @@ const { distanceBetween } = require("../utils/math");
 
 function isSpawnPositionValid(players, x, y) {
     for (const player of players.values()) {
-        const distance = distanceBetween(x, y, player.baseX, player.baseY);
+        const distance = distanceBetween(x, y, player.territoryX, player.territoryY);
 
-        if (distance < config.spawn.minBaseDistance) {
+        if (distance < config.spawn.minTerritoryDistance) {
             return false;
         }
     }
@@ -14,7 +14,7 @@ function isSpawnPositionValid(players, x, y) {
 }
 
 function getSpawnRadiusLimit() {
-    return config.world.mapRadius - config.world.baseRadius * 3 - config.world.playerSize / 2;
+    return config.world.mapRadius - config.world.initialTerritoryRadius * 3 - config.world.playerSize / 2;
 }
 
 function createRandomPointInsideCircle(radius) {
