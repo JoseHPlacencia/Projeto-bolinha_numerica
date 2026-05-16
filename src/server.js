@@ -7,11 +7,11 @@ const config = require("./config/gameConfig");
 const registerSocket = require("./core/socketHandler");
 const startGameLoop = require("./core/gameLoop");
 const startSnapshotLoop = require("./core/snapshotLoop");
-const players = require("./state/players");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, createSocketOptions());
+const players = new Map();
 const publicPath = path.join(__dirname, "..", "public");
 const sharedMathPath = path.join(__dirname, "utils", "math.js");
 
