@@ -28,7 +28,6 @@ class Player {
         this.color = createRandomColor();
         this.territoryX = spawn.x;
         this.territoryY = spawn.y;
-        this.isMoving = false;
         this.pressedActions = new Set();
         this.lastAction = null;
         this.directionAngle = null;
@@ -39,8 +38,6 @@ class Player {
             this.pressedActions.add(action);
             this.lastAction = action;
         }
-
-        this.isMoving = true;
     }
 
     releaseAction(action) {
@@ -53,7 +50,6 @@ class Player {
 
     setDirectionAngle(angle) {
         this.directionAngle = angle;
-        this.isMoving = true;
     }
 
     clearDirectionAngle() {

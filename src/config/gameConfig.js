@@ -85,6 +85,7 @@ const client = Object.freeze({
     world,
     screen,
     network,
+    inputActionAngles,
     inputBindings
 });
 

@@ -15,7 +15,7 @@ export function startClient(gameConfig) {
     const frameMonitor = createFrameMonitor();
     let myId = null;
 
-    createInputControls(socket, gameConfig.inputBindings);
+    createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
     window.addEventListener("resize", renderer.resizeCanvas);
 
     socket.on("connect", () => {

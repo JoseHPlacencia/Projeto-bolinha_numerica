@@ -16,10 +16,6 @@ function updatePlayers(players, deltaTime) {
 }
 
 function updatePlayer(player, deltaTime) {
-    if (!player.isMoving) {
-        return;
-    }
-
     rotatePlayerToLastInput(player, deltaTime);
     movePlayer(player, deltaTime);
 }
