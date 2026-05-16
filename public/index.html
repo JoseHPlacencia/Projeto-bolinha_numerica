@@ -1,37 +1,14 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<<<<<<< HEAD
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bolinha - Teoria dos Conjuntos</title>
-    <!-- Carrega o arquivo styles.css que está na pasta public -->
-    <link rel="stylesheet" href="/styles.css">
-=======
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <title>Teoria dos Conjuntos</title>
 <link rel="stylesheet" href="/styles.css">
->>>>>>> 7ad5cc5d730857faa6896dac2caca72e235c7fae
 </head>
 <body>
-    <!-- Canvas principal onde o jogo é desenhado.
-         O client.js procura por este id ("gameCanvas") para desenhar. -->
-    <canvas id="gameCanvas"></canvas>
-
-<<<<<<< HEAD
-    <!-- Canvas separado do minimapa, no canto da tela.
-         width e height fixos em 150px porque o minimapa não redimensiona. -->
-    <canvas id="minimap" width="150" height="150"></canvas>
-
-    <!-- Biblioteca do Socket.io: permite comunicação em tempo real com o servidor.
-         O servidor a serve automaticamente neste caminho (/socket.io/socket.io.js). -->
-    <script src="/socket.io/socket.io.js"></script>
-
-    <!-- Nosso código do cliente: conecta ao servidor, desenha o jogo e o minimapa. -->
-    <script src="/client.js"></script>
-=======
 <canvas id="gameCanvas"></canvas>
+<canvas id="minimap" width="150" height="150"></canvas>
 <div id="hud" class="hud">
     <div id="debugPanel" class="debug-panel" hidden>
         <div><span>FPS</span><strong id="debugFps">0</strong></div>
@@ -51,6 +28,5 @@
 <script src="/socket.io/socket.io.js"></script>
 <script src="/shared/math.js"></script>
 <script type="module" src="/client.js"></script>
->>>>>>> 7ad5cc5d730857faa6896dac2caca72e235c7fae
 </body>
 </html>

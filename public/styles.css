@@ -26,8 +26,6 @@ body {
     transform: translate(-50%, -50%);
 }
 
-<<<<<<< HEAD
-/* Minimapa: fixo no canto superior direito, formato circular */
 #minimap {
     position: fixed;
     top: 16px;
@@ -35,9 +33,10 @@ body {
     border-radius: 50%;
     border: 2px solid rgba(255, 255, 255, 0.5);
     pointer-events: none;
-    /* Fundo escuro garante que o minimapa é visível mesmo antes de conectar */
     background: rgba(0, 0, 0, 0.55);
-=======
+    z-index: 2;
+}
+
 .hud {
     box-sizing: border-box;
     display: flex;
@@ -141,5 +140,4 @@ body {
     .debug-panel div {
         min-width: 64px;
     }
->>>>>>> 7ad5cc5d730857faa6896dac2caca72e235c7fae
 }

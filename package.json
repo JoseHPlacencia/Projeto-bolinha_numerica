@@ -2,8 +2,8 @@
   "name": "teoria-dos-conjuntos-game",
   "private": true,
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
     "test": "node --test"
   },
   "dependencies": {

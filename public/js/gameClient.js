@@ -3,7 +3,7 @@ import { createHud } from "./hud.js";
 import { createInputControls } from "./input.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createCanvasRenderer } from "./renderer.js";
-import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
+import { drawMinimapLayer } from "./renderers/minimapRenderer.js";
 
 export function startClient(gameConfig) {
     const socket = io({
@@ -11,7 +11,7 @@ export function startClient(gameConfig) {
     });
     const canvas = document.getElementById("gameCanvas");
     const renderer = createCanvasRenderer(canvas, gameConfig);
-    const minimap = createMinimapRenderer(document.getElementById("minimap"), gameConfig);
+    const minimapCanvas = document.getElementById("minimap");
     const snapshots = createSnapshotInterpolator(gameConfig.network);
     const hud = createHud({ debugEnabled: isDebugEnabled() });
     const frameMonitor = createFrameMonitor();
@@ -49,6 +49,6 @@ export function startClient(gameConfig) {
         }
 
         renderer.renderWorld(state, myId);
-        minimap.render(state, myId);
+        drawMinimapLayer(minimapCanvas, state, myId, gameConfig.world);
     }
 }
