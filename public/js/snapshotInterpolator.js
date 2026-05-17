@@ -27,7 +27,7 @@ export function createSnapshotInterpolator(networkConfig) {
         }
 
         if (snapshots.length === 1) {
-            return snapshots[0].players;
+            return createRenderState(snapshots[0], snapshots[0].players);
         }
 
         const serverNow = Date.now() - networkState.serverOffset;
@@ -36,7 +36,7 @@ export function createSnapshotInterpolator(networkConfig) {
         const interval = next.time - previous.time || 1;
         const amount = clamp((renderTime - previous.time) / interval, 0, 1);
 
-        return interpolatePlayers(previous, next, amount);
+        return createRenderState(next, interpolatePlayers(previous, next, amount));
     }
 
     function getDebugState() {
@@ -74,7 +74,9 @@ export function createSnapshotInterpolator(networkConfig) {
     function saveSnapshot(snapshot) {
         snapshots.push({
             time: snapshot.time,
-            players: structuredClone(snapshot.players)
+            players: structuredClone(snapshot.players),
+            territories: structuredClone(snapshot.territories || {}),
+            trails: structuredClone(snapshot.trails || {})
         });
 
         while (snapshots.length > networkConfig.maxSnapshots) {
@@ -131,6 +133,14 @@ export function createSnapshotInterpolator(networkConfig) {
         }
 
         return renderedPlayers;
+    }
+
+    function createRenderState(snapshot, players) {
+        return {
+            players,
+            territories: snapshot.territories,
+            trails: snapshot.trails
+        };
     }
 }
 

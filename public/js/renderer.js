@@ -1,6 +1,7 @@
 import { drawMapLayer as drawMap } from "./renderers/mapRenderer.js";
 import { drawPlayerLayer } from "./renderers/playerRenderer.js";
 import { drawTerritoryLayer } from "./renderers/territoryRenderer.js";
+import { drawTrailLayer } from "./renderers/trailRenderer.js";
 
 export function createCanvasRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
@@ -45,7 +46,7 @@ export function createCanvasRenderer(canvas, gameConfig) {
     }
 
     function renderWorld(state, currentPlayerId) {
-        const currentPlayer = state[currentPlayerId];
+        const currentPlayer = state.players[currentPlayerId];
 
         if (!currentPlayer) {
             return;
@@ -63,8 +64,9 @@ export function createCanvasRenderer(canvas, gameConfig) {
         context.translate(-currentPlayer.x, -currentPlayer.y);
 
         drawMap(context, gameConfig.world);
-        drawTerritoryLayer(context, state, gameConfig.world);
-        drawPlayerLayer(context, state, currentPlayer, currentPlayerId);
+        drawTerritoryLayer(context, state, gameConfig);
+        drawTrailLayer(context, state, gameConfig);
+        drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId);
         context.restore();
     }
 

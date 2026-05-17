@@ -1,14 +1,20 @@
 const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
+const {
+    deletePlayerTerritory,
+    initializePlayerTerritory
+} = require("../state/territories");
 const { createRateLimiter } = require("../utils/rateLimiter");
 
-function registerSocket(io, players) {
+function registerSocket(io, players, territories) {
     io.on("connection", socket => {
-        createPlayer(players, socket.id);
+        const player = createPlayer(players, socket.id);
+        initializePlayerTerritory(territories, player);
         registerInputEvents(socket, players);
 
         socket.on("disconnect", () => {
             players.delete(socket.id);
+            deletePlayerTerritory(territories, socket.id);
         });
     });
 }

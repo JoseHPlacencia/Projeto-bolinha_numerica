@@ -31,6 +31,15 @@ class Player {
         this.pressedActions = new Set();
         this.lastAction = null;
         this.directionAngle = null;
+        this.isDrawingTrail = false;
+        this.trailPoints = [];
+        this.trailLeftPoints = [];
+        this.trailRightPoints = [];
+        this.lastSafeTerritoryPoint = {
+            x: spawn.x,
+            y: spawn.y,
+            angle: this.angle
+        };
     }
 
     pressAction(action) {

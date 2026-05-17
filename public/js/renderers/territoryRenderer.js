@@ -1,65 +1,128 @@
-export function drawTerritoryLayer(context, state, worldConfig) {
-    for (const player of Object.values(state)) {
-        drawInitialTerritory(context, player, worldConfig);
-        drawPlayerTerritory(context, player);
+export function drawTerritoryLayer(context, state, gameConfig) {
+    const territories = Object.values(state.territories || {});
+    const orderedPolygons = getOrderedPolygons(territories);
+
+    for (const polygon of orderedPolygons) {
+        drawPolygonFill(context, polygon, gameConfig.territory.fillAlpha);
+    }
+
+    for (const territory of territories) {
+        drawTerritoryBorder(context, territory, gameConfig);
     }
 }
 
-function drawInitialTerritory(context, player, worldConfig) {
-    context.globalAlpha = 0.66;
-    context.fillStyle = player.color;
-
-    context.beginPath();
-    context.arc(
-        player.territoryX,
-        player.territoryY,
-        worldConfig.initialTerritoryRadius,
-        0,
-        Math.PI * 2
-    );
-    context.fill();
-
-    context.globalAlpha = 1;
-    context.lineWidth = 6;
-    context.strokeStyle = player.color;
-
-    context.beginPath();
-    context.arc(
-        player.territoryX,
-        player.territoryY,
-        worldConfig.initialTerritoryRadius,
-        0,
-        Math.PI * 2
-    );
-    context.stroke();
+function getOrderedPolygons(territories) {
+    return territories.flatMap(territory => (
+        getTerritoryPolygons(territory).map((polygon, index) => ({
+            ...polygon,
+            color: territory.color,
+            order: index
+        }))
+    ));
 }
 
-function drawPlayerTerritory(context, player) {
-    if (!Array.isArray(player.territory)) {
-        return;
-    }
+function drawPolygonFill(context, polygon, fillAlpha) {
+    const rings = getPolygonRings(polygon);
 
-    for (const polygon of player.territory) {
-        drawPolygon(context, polygon, player.color);
-    }
-}
-
-function drawPolygon(context, polygon, color) {
-    if (!Array.isArray(polygon) || polygon.length < 3) {
+    if (rings.length === 0 || !polygon.color) {
         return;
     }
 
     context.save();
-    context.globalAlpha = 0.22;
-    context.fillStyle = color;
-    context.beginPath();
-    context.moveTo(polygon[0].x, polygon[0].y);
+    context.globalAlpha = fillAlpha;
+    context.fillStyle = polygon.color;
+    createPolygonPath(context, rings);
+    context.fill("evenodd");
+    context.restore();
+}
 
-    for (let index = 1; index < polygon.length; index++) {
-        context.lineTo(polygon[index].x, polygon[index].y);
+function drawTerritoryBorder(context, territory, gameConfig) {
+    const polygons = getTerritoryPolygons(territory);
+
+    if (polygons.length === 0 || !territory.color) {
+        return;
+    }
+
+    context.save();
+    context.globalAlpha = 1;
+    context.lineWidth = gameConfig.territory.baseBorderWidth;
+    context.strokeStyle = territory.color;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+
+    for (const polygon of polygons) {
+        const rings = getPolygonRings(polygon);
+
+        for (const ring of rings) {
+            strokeRing(context, ring);
+        }
+    }
+
+    context.restore();
+}
+
+function createPolygonPath(context, rings) {
+    context.beginPath();
+
+    for (const ring of rings) {
+        traceRing(context, ring);
+    }
+}
+
+function strokeRing(context, ring) {
+    if (ring.length < 3) {
+        return;
+    }
+
+    context.beginPath();
+    traceRing(context, ring);
+    context.stroke();
+}
+
+function traceRing(context, ring) {
+    const points = getValidPoints(ring);
+
+    if (points.length < 3) {
+        return;
+    }
+
+    context.moveTo(points[0].x, points[0].y);
+
+    for (let index = 1; index < points.length; index++) {
+        context.lineTo(points[index].x, points[index].y);
     }
 
     context.closePath();
-    context.fill();
-    context.restore();
+}
+
+function getTerritoryPolygons(territory) {
+    if (territory.polygon && Array.isArray(territory.polygon.rings)) {
+        return [territory.polygon];
+    }
+
+    if (!Array.isArray(territory.polygons)) {
+        return [];
+    }
+
+    return territory.polygons;
+}
+
+function getPolygonRings(polygon) {
+    if (!Array.isArray(polygon.rings)) {
+        return [];
+    }
+
+    return polygon.rings
+        .map(getValidPoints)
+        .filter(ring => ring.length >= 3);
+}
+
+function getValidPoints(points) {
+    if (!Array.isArray(points)) {
+        return [];
+    }
+
+    return points.filter(point => (
+        Number.isFinite(point.x) && Number.isFinite(point.y)
+    ));
 }

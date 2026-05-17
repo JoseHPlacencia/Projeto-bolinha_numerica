@@ -1,8 +1,9 @@
 const config = require("../config/gameConfig");
 const { updatePlayers } = require("../systems/movementSystem");
+const { updateTrails } = require("../systems/trailSystem");
 const { getHighResolutionTime } = require("../utils/time");
 
-function startGameLoop(players) {
+function startGameLoop(players, territories) {
     const intervalMs = 1000 / config.loop.tickRate;
     let previousTime = getHighResolutionTime();
 
@@ -14,6 +15,7 @@ function startGameLoop(players) {
         previousTime = now;
 
         updatePlayers(players, deltaTime);
+        updateTrails(players, territories);
     }, intervalMs);
 }
 

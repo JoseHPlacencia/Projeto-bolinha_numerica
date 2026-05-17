@@ -42,6 +42,15 @@ const world = Object.freeze({
     initialTerritoryRadius: 200
 });
 
+const territory = Object.freeze({
+    baseBorderWidth: 6,
+    circleSegments: 96,
+    fillAlpha: 0.36,
+    minCaptureArea: 800,
+    minCaptureTrailPoints: 4,
+    trailPointSpacing: 18
+});
+
 const movement = Object.freeze({
     speed: 600,
     rotationStrength: 0.1,
@@ -83,6 +92,7 @@ const client = Object.freeze({
         transports: socketTransports
     }),
     world,
+    territory,
     screen,
     network,
     inputActionAngles,
@@ -94,6 +104,7 @@ module.exports = Object.freeze({
     socket,
     loop,
     world,
+    territory,
     movement,
     spawn,
     inputActionAngles,

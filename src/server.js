@@ -7,11 +7,13 @@ const config = require("./config/gameConfig");
 const registerSocket = require("./core/socketHandler");
 const startGameLoop = require("./core/gameLoop");
 const startSnapshotLoop = require("./core/snapshotLoop");
+const { createTerritories } = require("./state/territories");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, createSocketOptions());
 const players = new Map();
+const territories = createTerritories();
 const publicPath = path.join(__dirname, "..", "public");
 const sharedMathPath = path.join(__dirname, "utils", "math.js");
 
@@ -26,9 +28,9 @@ app.get("/shared/math.js", (_request, response) => {
 
 app.use(express.static(publicPath));
 
-registerSocket(io, players);
-startGameLoop(players);
-startSnapshotLoop(io, players);
+registerSocket(io, players, territories);
+startGameLoop(players, territories);
+startSnapshotLoop(io, players, territories);
 
 const host = process.env.HOST;
 
