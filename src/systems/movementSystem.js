@@ -22,21 +22,39 @@ function updatePlayer(player, deltaTime) {
 }
 
 function rotatePlayerToLastInput(player, deltaTime) {
-    const targetAngle = getPlayerTargetAngle(player);
-    const respectsBoundaryExitInput = shouldRespectBoundaryExitInput(player, targetAngle);
+    const targetInput = getPlayerTargetInput(player);
 
-    if (respectsBoundaryExitInput) {
+    try {
+        rotatePlayerToTargetInput(player, targetInput, deltaTime);
+    } finally {
+        if (typeof player.consumePendingDirectionAngle === "function") {
+            player.consumePendingDirectionAngle();
+        }
+    }
+}
+
+function rotatePlayerToTargetInput(player, targetInput, deltaTime) {
+    const targetAngle = targetInput.angle;
+    const boundarySlideInput = evaluateBoundarySlideInput(player, targetInput, deltaTime);
+
+    player.debugState = createMovementDebugState(player, targetInput, boundarySlideInput);
+
+    if (boundarySlideInput.shouldExitSlide) {
         clearBoundarySlideDirection(player);
+    } else if (boundarySlideInput.shouldMarkInputHandled) {
+        markBoundarySlideInputHandled(player);
     }
 
-    const lockedBoundarySlideAngle = respectsBoundaryExitInput ? null : getLockedBoundarySlideAngle(player);
+    const lockedBoundarySlideAngle = boundarySlideInput.shouldExitSlide
+        ? null
+        : getLockedBoundarySlideAngle(player);
 
     if (lockedBoundarySlideAngle !== null) {
         player.angle = lockedBoundarySlideAngle;
         return;
     }
 
-    const boundarySlideTrigger = respectsBoundaryExitInput
+    const boundarySlideTrigger = boundarySlideInput.shouldExitSlide
         ? null
         : getBoundarySlideTrigger(player, targetAngle);
 
@@ -70,31 +88,182 @@ function rotatePlayerToLastInput(player, deltaTime) {
     );
 }
 
-function shouldRespectBoundaryExitInput(player, targetAngle) {
-    if (!Number.isFinite(targetAngle)) {
-        return false;
-    }
-
-    const position = getPlayerPosition(player);
-    const targetDirection = createVectorFromAngle(targetAngle, 1);
-
-    return doesVectorPointInsideMap(position, targetDirection, getBoundarySlideExitAlignment());
+function getPlayerTargetAngle(player) {
+    return getPlayerTargetInput(player).angle;
 }
 
-function getPlayerTargetAngle(player) {
+function getPlayerTargetInput(player) {
+    if (Number.isFinite(player.pendingDirectionAngle)) {
+        return {
+            angle: player.pendingDirectionAngle,
+            source: "mouse"
+        };
+    }
+
     if (Number.isFinite(player.directionAngle)) {
-        return player.directionAngle;
+        return {
+            angle: player.directionAngle,
+            source: player.directionSource || "direction"
+        };
     }
 
     if (!player.lastAction || !hasInputAngle(player.lastAction)) {
-        return null;
+        return {
+            angle: null,
+            source: null
+        };
     }
 
-    return config.inputActionAngles[player.lastAction];
+    return {
+        angle: config.inputActionAngles[player.lastAction],
+        source: `action:${player.lastAction}`
+    };
 }
 
 function hasInputAngle(action) {
     return Object.prototype.hasOwnProperty.call(config.inputActionAngles, action);
+}
+
+function evaluateBoundarySlideInput(player, targetInput, deltaTime) {
+    const position = getPlayerPosition(player);
+    const targetAngle = targetInput.angle;
+    const relation = getBoundaryInputRelation(position, targetAngle);
+    const isTouchingBoundary = isPlayerHitboxTouchingMapBoundary(position);
+    const isSliding = isBoundarySlideDirection(player.boundarySlideDirection);
+    const hasUnhandledInput = hasUnhandledBoundarySlideInput(player);
+    const evaluation = {
+        boundarySlideDirection: player.boundarySlideDirection,
+        inputAccepted: false,
+        isTouchingBoundary,
+        relation,
+        shouldExitSlide: false,
+        shouldMarkInputHandled: false,
+        slideDecision: "not-sliding"
+    };
+
+    if (!isSliding) {
+        evaluation.inputAccepted = isNormalInputAccepted(player, targetAngle);
+        return evaluation;
+    }
+
+    if (!isTouchingBoundary) {
+        evaluation.slideDecision = "not-touching-boundary";
+        return evaluation;
+    }
+
+    if (!hasUnhandledInput) {
+        evaluation.slideDecision = "ignored-old-input";
+        return evaluation;
+    }
+
+    evaluation.shouldMarkInputHandled = true;
+
+    if (!Number.isFinite(targetAngle)) {
+        evaluation.slideDecision = "ignored-no-input";
+        return evaluation;
+    }
+
+    if (relation === "outside") {
+        evaluation.slideDecision = "ignored-outside";
+        return evaluation;
+    }
+
+    if (relation === "tangent") {
+        evaluation.slideDecision = "ignored-tangent";
+        return evaluation;
+    }
+
+    const exitEvaluation = evaluateBoundarySlideExit(player, targetAngle, deltaTime);
+
+    if (!exitEvaluation.exitsBoundary) {
+        evaluation.slideDecision = "ignored-weak-inside";
+        return evaluation;
+    }
+
+    evaluation.inputAccepted = true;
+    evaluation.shouldExitSlide = true;
+    evaluation.shouldMarkInputHandled = false;
+    evaluation.slideDecision = "accepted-exit";
+
+    return evaluation;
+}
+
+function isNormalInputAccepted(player, targetAngle) {
+    return Number.isFinite(targetAngle)
+        && !shouldBlockOutsideBoundaryInput(player, targetAngle);
+}
+
+function evaluateBoundarySlideExit(player, targetAngle, deltaTime) {
+    const position = getPlayerPosition(player);
+    const wallNormal = getBoundaryNormal(position);
+    const targetDirection = createVectorFromAngle(targetAngle, 1);
+    const inwardAlignment = wallNormal
+        ? clamp(-dotProduct(targetDirection, wallNormal), 0, 1)
+        : 0;
+
+    if (!wallNormal || inwardAlignment < getBoundarySlideExitAlignment()) {
+        return {
+            exitsBoundary: false
+        };
+    }
+
+    const lockedBoundarySlideAngle = getLockedBoundarySlideAngle(player);
+    const baseAngle = lockedBoundarySlideAngle === null ? player.angle : lockedBoundarySlideAngle;
+    const candidateAngle = lerpAngle(baseAngle, targetAngle, getRotationBlend(deltaTime));
+    const candidateMovement = createMovementVector(candidateAngle, config.movement.speed, deltaTime);
+    const candidatePosition = addVectors(position, candidateMovement);
+    const candidateExitDepth = getMapMovementLimit() - vectorLength(candidatePosition);
+
+    return {
+        exitsBoundary: candidateExitDepth >= getBoundarySlideExitDistance()
+    };
+}
+
+function getBoundaryInputRelation(position, targetAngle) {
+    if (!Number.isFinite(targetAngle)) {
+        return "none";
+    }
+
+    const wallNormal = getBoundaryNormal(position);
+
+    if (!wallNormal) {
+        return "none";
+    }
+
+    const targetDirection = createVectorFromAngle(targetAngle, 1);
+    const alignment = dotProduct(targetDirection, wallNormal);
+    const tangentAlignment = getBoundaryInputTangentAlignment();
+
+    if (alignment > tangentAlignment) {
+        return "outside";
+    }
+
+    if (alignment < -tangentAlignment) {
+        return "inside";
+    }
+
+    return "tangent";
+}
+
+function createMovementDebugState(player, targetInput, boundarySlideInput) {
+    const inputAngleDelta = Number.isFinite(targetInput.angle)
+        ? getAngleDelta(player.angle, targetInput.angle)
+        : null;
+
+    return {
+        boundaryInputRelation: boundarySlideInput.relation,
+        boundarySlideDecision: boundarySlideInput.slideDecision,
+        boundarySlideDirection: boundarySlideInput.boundarySlideDirection,
+        directionAngleDeg: toDegrees(targetInput.angle),
+        directionAngleRad: nullableNumber(targetInput.angle),
+        directionSource: targetInput.source,
+        inputAccepted: boundarySlideInput.inputAccepted,
+        inputAngleDeltaDeg: toDegrees(inputAngleDelta),
+        inputAngleDeltaRad: nullableNumber(inputAngleDelta),
+        isTouchingBoundary: boundarySlideInput.isTouchingBoundary,
+        playerAngleDeg: toDegrees(player.angle),
+        playerAngleRad: nullableNumber(player.angle)
+    };
 }
 
 function getRotationBlend(deltaTime) {
@@ -251,7 +420,7 @@ function getLockedBoundarySlideDirection(player, wallNormal, ...directionVectors
 
     const slideDirection = getPreferredBoundarySlideDirection(wallNormal, directionVectors)
         || getRandomSlideDirection();
-    player.boundarySlideDirection = slideDirection;
+    setBoundarySlideDirection(player, slideDirection);
 
     return slideDirection;
 }
@@ -265,7 +434,7 @@ function getBoundarySlideSmoothingDirection(player, wallNormal, ...directionVect
     const slideDirection = preferredDirection
         || getRandomSlideDirection();
 
-    player.boundarySlideDirection = slideDirection;
+    setBoundarySlideDirection(player, slideDirection);
 
     return slideDirection;
 }
@@ -306,6 +475,21 @@ function getPreferredBoundarySlideDirection(wallNormal, directionVectors) {
 
 function clearBoundarySlideDirection(player) {
     player.boundarySlideDirection = null;
+    player.boundarySlideInputVersion = player.inputVersion;
+}
+
+function setBoundarySlideDirection(player, slideDirection) {
+    player.boundarySlideDirection = slideDirection;
+    player.boundarySlideInputVersion = player.inputVersion;
+}
+
+function hasUnhandledBoundarySlideInput(player) {
+    return isBoundarySlideDirection(player.boundarySlideDirection)
+        && player.inputVersion !== player.boundarySlideInputVersion;
+}
+
+function markBoundarySlideInputHandled(player) {
+    player.boundarySlideInputVersion = player.inputVersion;
 }
 
 function clearBoundarySlideDirectionIfAwayFromBoundary(player, position) {
@@ -507,24 +691,32 @@ function doesVectorPointOutsideMap(position, vector) {
     return dotProduct(vector, wallNormal) > Number.EPSILON;
 }
 
-function doesVectorPointInsideMap(position, vector, minAlignment = Number.EPSILON) {
-    const wallNormal = getBoundaryNormal(position);
-
-    if (!wallNormal) {
-        return false;
-    }
-
-    return dotProduct(vector, wallNormal) < -minAlignment;
-}
-
 function getBoundarySlideExitAlignment() {
     const alignment = Number(config.movement.boundarySlideExitAlignment);
 
     return Number.isFinite(alignment) ? clamp(alignment, 0, 1) : 0.9;
 }
 
+function getBoundarySlideExitDistance() {
+    const distance = Number(config.movement.boundarySlideExitDistance);
+
+    return Number.isFinite(distance) ? Math.max(0, distance) : 1;
+}
+
+function getBoundaryInputTangentAlignment() {
+    const alignment = Number(config.movement.slideAngleThreshold);
+
+    return Number.isFinite(alignment) ? clamp(Math.abs(alignment), 0, 1) : 0.1;
+}
+
+function getBoundaryTouchTolerance() {
+    const tolerance = Number(config.movement.boundaryTouchTolerance);
+
+    return Number.isFinite(tolerance) ? Math.max(0, tolerance) : 4;
+}
+
 function isPlayerHitboxTouchingMapBoundary(position) {
-    return vectorLength(position) >= getMapMovementLimit() - Number.EPSILON;
+    return isNearMapBoundary(position, getBoundaryTouchTolerance());
 }
 
 function isNearMapBoundary(position, distanceFromBoundary) {
@@ -574,6 +766,21 @@ function getPlayerPosition(player) {
         x: player.x,
         y: player.y
     };
+}
+
+function getAngleDelta(fromAngle, toAngle) {
+    return Math.atan2(
+        Math.sin(toAngle - fromAngle),
+        Math.cos(toAngle - fromAngle)
+    );
+}
+
+function nullableNumber(value) {
+    return Number.isFinite(value) ? value : null;
+}
+
+function toDegrees(angle) {
+    return Number.isFinite(angle) ? angle * 180 / Math.PI : null;
 }
 
 module.exports = {

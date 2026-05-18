@@ -8,7 +8,7 @@ const { createRateLimiter } = require("../utils/rateLimiter");
 
 function registerSocket(io, players, territories) {
     io.on("connection", socket => {
-        const player = createPlayer(players, socket.id);
+        const player = createPlayer(players, socket.id, territories);
         initializePlayerTerritory(territories, player);
         registerInputEvents(socket, players);
 
@@ -38,12 +38,12 @@ function registerInputEvents(socket, players) {
         handleInputUp(players, socket.id, rawAction);
     });
 
-    socket.on("inputDirection", rawAngle => {
+    socket.on("inputDirection", rawInput => {
         if (!inputGuard.canHandleInput()) {
             return;
         }
 
-        handleInputDirection(players, socket.id, rawAngle);
+        handleInputDirection(players, socket.id, rawInput);
     });
 
     socket.on("inputDirectionEnd", () => {
@@ -106,18 +106,20 @@ function handleInputUp(players, playerId, rawAction) {
     }
 }
 
-function handleInputDirection(players, playerId, rawAngle) {
-    const angle = normalizeInputAngle(rawAngle);
+function handleInputDirection(players, playerId, rawInput) {
+    const input = normalizeInputDirection(rawInput);
 
-    if (angle === null) {
+    if (!input) {
         return;
     }
 
     const player = players.get(playerId);
 
-    if (player) {
-        player.setDirectionAngle(angle);
+    if (!player) {
+        return;
     }
+
+    player.setDirectionAngle(input.angle, input.source);
 }
 
 function handleInputDirectionEnd(players, playerId) {
@@ -136,6 +138,26 @@ function isInputActionValid(action) {
     return Object.prototype.hasOwnProperty.call(config.inputActionAngles, action);
 }
 
+function normalizeInputDirection(rawInput) {
+    const rawAngle = isInputDirectionPayload(rawInput) ? rawInput.angle : rawInput;
+    const angle = normalizeInputAngle(rawAngle);
+
+    if (angle === null) {
+        return null;
+    }
+
+    return {
+        angle,
+        source: isInputDirectionPayload(rawInput)
+            ? normalizeInputSource(rawInput.source)
+            : null
+    };
+}
+
+function isInputDirectionPayload(rawInput) {
+    return rawInput !== null && typeof rawInput === "object";
+}
+
 function normalizeInputAngle(rawAngle) {
     const angle = Number(rawAngle);
 
@@ -144,6 +166,21 @@ function normalizeInputAngle(rawAngle) {
     }
 
     return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function normalizeInputSource(rawSource) {
+    const source = String(rawSource || "").toLowerCase();
+
+    return isInputSourceValid(source) ? source : null;
+}
+
+function isInputSourceValid(source) {
+    return source === "mouse"
+        || source === "pointer"
+        || source === "keyboard"
+        || source === "gamepad-left"
+        || source === "gamepad-right"
+        || source === "gamepad-dpad";
 }
 
 module.exports = registerSocket;

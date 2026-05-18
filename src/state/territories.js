@@ -1,11 +1,14 @@
 const config = require("../config/gameConfig");
 const {
+    calculatePolygonArea,
     createCirclePolygon,
     isPointInPolygon,
     serializePolygon,
     subtractPolygon,
     unionPolygons
 } = require("../utils/geometry");
+
+const territoryChangeAreaEpsilon = 1;
 
 function createTerritories() {
     return new Map();
@@ -51,21 +54,45 @@ function getPlayerTerritoryPolygon(territories, playerId) {
 }
 
 function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
+    const changedPlayerIds = new Set();
     const territory = territories.get(ownerId);
 
     if (!territory) {
-        return;
+        return changedPlayerIds;
     }
 
-    territory.polygon = unionPolygons(territory.polygon, capturedPolygon);
+    const ownerPolygon = unionPolygons(territory.polygon, capturedPolygon);
+
+    if (updateTerritoryPolygon(territory, ownerPolygon)) {
+        changedPlayerIds.add(ownerId);
+    }
 
     for (const [playerId, otherTerritory] of territories.entries()) {
         if (playerId === ownerId) {
             continue;
         }
 
-        otherTerritory.polygon = subtractPolygon(otherTerritory.polygon, capturedPolygon);
+        const nextPolygon = subtractPolygon(otherTerritory.polygon, capturedPolygon);
+
+        if (updateTerritoryPolygon(otherTerritory, nextPolygon)) {
+            changedPlayerIds.add(playerId);
+        }
     }
+
+    return changedPlayerIds;
+}
+
+function updateTerritoryPolygon(territory, nextPolygon) {
+    const previousArea = calculatePolygonArea(territory.polygon);
+    const nextArea = calculatePolygonArea(nextPolygon);
+
+    if (Math.abs(previousArea - nextArea) <= territoryChangeAreaEpsilon) {
+        return false;
+    }
+
+    territory.polygon = nextPolygon;
+
+    return true;
 }
 
 function serializeTerritories(territories, players = new Map()) {

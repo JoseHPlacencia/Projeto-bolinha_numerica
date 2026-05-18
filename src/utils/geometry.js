@@ -74,6 +74,32 @@ function isPointInPolygon(polygon, x, y) {
     return Boolean(outerRing) && isPointInRing(outerRing, x, y);
 }
 
+function isCircleInsidePolygon(polygon, x, y, radius) {
+    if (!isPointInPolygon(polygon, x, y)) {
+        return false;
+    }
+
+    const contact = findClosestPolygonBoundaryContact(polygon, { x, y });
+
+    if (!contact) {
+        return false;
+    }
+
+    const safeRadius = Math.max(0, radius - geometryEpsilon);
+
+    return contact.distanceSquared >= safeRadius * safeRadius;
+}
+
+function getPointPolygonDistance(polygon, point) {
+    if (isPointInPolygon(polygon, point.x, point.y)) {
+        return 0;
+    }
+
+    const contact = findClosestPolygonBoundaryContact(polygon, point);
+
+    return contact ? Math.sqrt(contact.distanceSquared) : Infinity;
+}
+
 function calculatePolygonArea(polygon) {
     if (!polygon[0]) {
         return 0;
@@ -82,9 +108,67 @@ function calculatePolygonArea(polygon) {
     return Math.abs(calculateRingArea(polygon[0]));
 }
 
+function calculatePolygonCentroid(polygon) {
+    const ring = getOpenRing(polygon[0]);
+
+    if (ring.length === 0) {
+        return null;
+    }
+
+    let doubleArea = 0;
+    let centroidX = 0;
+    let centroidY = 0;
+
+    for (let index = 0; index < ring.length; index++) {
+        const current = ring[index];
+        const next = ring[(index + 1) % ring.length];
+        const cross = current[0] * next[1] - next[0] * current[1];
+
+        doubleArea += cross;
+        centroidX += (current[0] + next[0]) * cross;
+        centroidY += (current[1] + next[1]) * cross;
+    }
+
+    if (Math.abs(doubleArea) <= geometryEpsilon) {
+        return calculateAveragePoint(ring);
+    }
+
+    return {
+        x: centroidX / (3 * doubleArea),
+        y: centroidY / (3 * doubleArea)
+    };
+}
+
 function serializePolygon(polygon) {
     return {
         rings: normalizeSimplePolygon(polygon).map(ring => ring.map(([x, y]) => ({ x, y })))
+    };
+}
+
+function getPolygonBounds(polygon) {
+    const ring = getOpenRing(polygon[0]);
+
+    if (ring.length === 0) {
+        return null;
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const point of ring) {
+        minX = Math.min(minX, point[0]);
+        minY = Math.min(minY, point[1]);
+        maxX = Math.max(maxX, point[0]);
+        maxY = Math.max(maxY, point[1]);
+    }
+
+    return {
+        minX,
+        minY,
+        maxX,
+        maxY
     };
 }
 
@@ -325,6 +409,18 @@ function calculateRingArea(ring) {
     return area / 2;
 }
 
+function calculateAveragePoint(ring) {
+    const total = ring.reduce((sum, point) => ({
+        x: sum.x + point[0],
+        y: sum.y + point[1]
+    }), { x: 0, y: 0 });
+
+    return {
+        x: total.x / ring.length,
+        y: total.y / ring.length
+    };
+}
+
 function getSegmentIntersection(firstStart, firstEnd, secondStart, secondEnd) {
     const firstDirection = subtractPoints(firstEnd, firstStart);
     const secondDirection = subtractPoints(secondEnd, secondStart);
@@ -471,10 +567,14 @@ function hasPolygons(multiPolygon) {
 
 module.exports = {
     calculatePolygonArea,
+    calculatePolygonCentroid,
     createCirclePolygon,
     createPolygonFromPoints,
     findClosestPolygonBoundaryContact,
     findSegmentPolygonBoundaryContact,
+    getPolygonBounds,
+    getPointPolygonDistance,
+    isCircleInsidePolygon,
     isPointInPolygon,
     serializePolygon,
     subtractPolygon,

@@ -43,6 +43,7 @@ const world = Object.freeze({
 });
 
 const territory = Object.freeze({
+    baseBorderInset: 3,
     baseBorderWidth: 4,
     circleSegments: 96,
     fillAlpha: 0.36,
@@ -53,7 +54,9 @@ const territory = Object.freeze({
 
 const movement = Object.freeze({
     boundarySlideTriggerAlignmentPower: 0.1,
-    boundarySlideExitAlignment: 0.9,
+    boundarySlideExitAlignment: 0.2,
+    boundarySlideExitDistance: 1,
+    boundaryTouchTolerance: 4,
     boundarySlideTriggerMinOutwardAlignment: 0.25,
     boundarySlideTriggerPerpendicularPlayerSizeRatio: 2.5,
     boundarySlideTriggerRotationCurveSharpness: 10,

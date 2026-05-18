@@ -76,6 +76,10 @@ canvas {
     display: none;
 }
 
+.debug-panel [hidden] {
+    display: none;
+}
+
 .touch-controls {
     height: clamp(96px, 18vmin, 150px);
     left: 50%;

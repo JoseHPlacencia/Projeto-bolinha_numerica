@@ -2,6 +2,7 @@ import { drawMapLayer as drawMap } from "./renderers/mapRenderer.js";
 import { drawPlayerLayer } from "./renderers/playerRenderer.js";
 import { drawTerritoryLayer } from "./renderers/territoryRenderer.js";
 import { drawTrailLayer } from "./renderers/trailRenderer.js";
+import { createViewportBounds } from "./renderers/viewportCulling.js";
 
 export function createCanvasRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
@@ -9,6 +10,7 @@ export function createCanvasRenderer(canvas, gameConfig) {
     let viewportHeight = 0;
     let canvasScale = 1;
     let pixelRatio = 1;
+    let lastViewportBounds = null;
 
     return {
         getDebugState,
@@ -58,16 +60,35 @@ export function createCanvasRenderer(canvas, gameConfig) {
     }
 
     function drawWorld(state, currentPlayer, currentPlayerId) {
+        const viewportBounds = createRenderViewportBounds(currentPlayer);
+
         context.save();
         context.translate(viewportWidth / 2, viewportHeight / 2);
         context.scale(canvasScale, canvasScale);
         context.translate(-currentPlayer.x, -currentPlayer.y);
 
         drawMap(context, gameConfig.world);
-        drawTerritoryLayer(context, state, gameConfig);
-        drawTrailLayer(context, state, gameConfig);
-        drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId, gameConfig);
+        drawTerritoryLayer(context, state, gameConfig, viewportBounds);
+        drawTrailLayer(context, state, gameConfig, viewportBounds);
+        drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId, gameConfig, viewportBounds);
         context.restore();
+    }
+
+    function createRenderViewportBounds(currentPlayer) {
+        const margin = Math.max(
+            gameConfig.world.playerSize * 2,
+            gameConfig.territory.baseBorderWidth * 8
+        );
+
+        lastViewportBounds = createViewportBounds(
+            currentPlayer,
+            viewportWidth,
+            viewportHeight,
+            canvasScale,
+            margin
+        );
+
+        return lastViewportBounds;
     }
 
     function clearCanvas() {
@@ -88,6 +109,7 @@ export function createCanvasRenderer(canvas, gameConfig) {
             canvasHeight: canvas.height,
             canvasWidth: canvas.width,
             pixelRatio,
+            viewportBounds: lastViewportBounds,
             viewportHeight,
             viewportWidth
         };

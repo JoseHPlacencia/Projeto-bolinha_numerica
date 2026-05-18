@@ -9,6 +9,7 @@ const {
     findClosestPolygonBoundaryContact,
     unionPolygons
 } = require("../utils/geometry");
+const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
 
 const geometryEpsilon = 1e-7;
 
@@ -19,7 +20,9 @@ function captureClosedTrail(player, territories, players) {
         return null;
     }
 
-    applyCapturedPolygon(territories, player.id, capturedPolygon, players);
+    const changedPlayerIds = applyCapturedPolygon(territories, player.id, capturedPolygon);
+
+    relocatePlayersAfterTerritoryChange(players, territories, changedPlayerIds);
 
     return capturedPolygon;
 }

@@ -1,7 +1,8 @@
-export function isDebugEnabled() {
+export function getDebugLevel() {
     const params = new URLSearchParams(window.location.search);
+    const debugLevel = Number(params.get("debug"));
 
-    return params.get("debug") === "1";
+    return Number.isFinite(debugLevel) ? Math.max(0, Math.trunc(debugLevel)) : 0;
 }
 
 export function createFrameMonitor() {

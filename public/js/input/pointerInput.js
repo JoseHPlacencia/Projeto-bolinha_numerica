@@ -93,7 +93,9 @@ export function registerPointerDirectionInput(inputState) {
         }
 
         if (distance >= POINTER_DEAD_ZONE) {
-            inputState.setDirection(source, angle);
+            inputState.setDirection(source, angle, {
+                transient: source === "mouse"
+            });
         } else {
             inputState.clearDirection(source);
         }

@@ -1,15 +1,21 @@
+import { isPointNearBounds } from "./viewportCulling.js";
+
 const blinkStates = new Map();
 
-export function drawPlayerLayer(context, state, currentPlayer, currentPlayerId, gameConfig) {
+export function drawPlayerLayer(context, state, currentPlayer, currentPlayerId, gameConfig, viewportBounds) {
     pruneBlinkStates(state, currentPlayerId);
 
     for (const player of Object.values(state)) {
-        if (player.id !== currentPlayerId) {
+        if (player.id !== currentPlayerId && isPlayerVisible(player, gameConfig, viewportBounds)) {
             drawPlayer(context, player, gameConfig);
         }
     }
 
     drawPlayer(context, currentPlayer, gameConfig);
+}
+
+function isPlayerVisible(player, gameConfig, viewportBounds) {
+    return isPointNearBounds(player, viewportBounds, gameConfig.world.playerSize);
 }
 
 function drawPlayer(context, player, gameConfig) {

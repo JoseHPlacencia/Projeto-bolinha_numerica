@@ -1,16 +1,25 @@
-export function drawTrailLayer(context, state, gameConfig) {
+import {
+    boundsOverlap,
+    clipPolylineToBounds,
+    clipRingsToBounds,
+    getPointsBounds,
+    getRingsBounds
+} from "./viewportCulling.js";
+
+export function drawTrailLayer(context, state, gameConfig, viewportBounds) {
     const trails = state.trails || {};
     const players = state.players || {};
 
     for (const trail of Object.values(trails)) {
-        drawTrail(context, trail, players[trail.id], gameConfig);
+        drawTrail(context, trail, players[trail.id], gameConfig, viewportBounds);
     }
 }
 
-function drawTrail(context, trail, player, gameConfig) {
-    const leftSegments = getTrailSegments(trail.leftSegments);
-    const rightSegments = getTrailSegments(trail.rightSegments);
-    const fillPolygon = getTrailFillPolygon(trail.fillPolygon);
+function drawTrail(context, trail, player, gameConfig, viewportBounds) {
+    const lineWidth = gameConfig.territory.baseBorderWidth;
+    const leftSegments = getTrailSegments(trail.leftSegments, viewportBounds, lineWidth);
+    const rightSegments = getTrailSegments(trail.rightSegments, viewportBounds, lineWidth);
+    const fillPolygon = getTrailFillPolygon(trail.fillPolygon, viewportBounds);
     const color = trail.color || (player && player.color);
 
     if (!color || (leftSegments.length === 0 && rightSegments.length === 0 && fillPolygon.rings.length === 0)) {
@@ -22,8 +31,8 @@ function drawTrail(context, trail, player, gameConfig) {
     context.lineJoin = "round";
 
     drawTrailFill(context, fillPolygon, color, gameConfig.territory.fillAlpha);
-    drawTrailEdges(context, leftSegments, color, gameConfig.territory.baseBorderWidth);
-    drawTrailEdges(context, rightSegments, color, gameConfig.territory.baseBorderWidth);
+    drawTrailEdges(context, leftSegments, color, lineWidth);
+    drawTrailEdges(context, rightSegments, color, lineWidth);
 
     context.restore();
 }
@@ -105,14 +114,18 @@ function traceRing(context, ring) {
     context.closePath();
 }
 
-function getTrailSegments(segments) {
+function getTrailSegments(segments, viewportBounds, margin) {
     if (!Array.isArray(segments)) {
         return [];
     }
 
     return segments
         .map(getValidPoints)
-        .filter(segment => segment.length >= 2);
+        .filter(segment => (
+            segment.length >= 2
+            && boundsOverlap(getPointsBounds(segment, margin), viewportBounds)
+        ))
+        .flatMap(segment => clipPolylineToBounds(segment, viewportBounds));
 }
 
 function getValidPoints(points) {
@@ -125,14 +138,19 @@ function getValidPoints(points) {
     ));
 }
 
-function getTrailFillPolygon(polygon) {
-    return getValidPolygon(polygon);
+function getTrailFillPolygon(polygon, viewportBounds) {
+    return getValidPolygon(polygon, viewportBounds);
 }
 
-function getValidPolygon(polygon) {
+function getValidPolygon(polygon, viewportBounds) {
     const rings = polygon && Array.isArray(polygon.rings)
         ? polygon.rings.map(getValidPoints).filter(ring => ring.length >= 3)
         : [];
+    const bounds = getRingsBounds(rings);
 
-    return { rings };
+    return {
+        rings: boundsOverlap(bounds, viewportBounds)
+            ? clipRingsToBounds(rings, viewportBounds)
+            : []
+    };
 }

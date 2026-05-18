@@ -13,6 +13,7 @@ const DIRECTION_SOURCE_PRIORITY = Object.freeze({
 
 export function createInputState(socket) {
     const activeDirections = new Map();
+    const lastTransientDirections = new Map();
     let activeDirectionSource = null;
     let lastDirectionSentAt = 0;
     let lastSentDirection = null;
@@ -28,6 +29,12 @@ export function createInputState(socket) {
         }
 
         const normalizedAngle = normalizeAngle(angle);
+
+        if (options.transient) {
+            setTransientDirection(source, normalizedAngle, options);
+            return;
+        }
+
         activeDirections.set(source, normalizedAngle);
         clearSupersededMouseDirection(source);
 
@@ -37,7 +44,29 @@ export function createInputState(socket) {
 
         const sourceChanged = activeDirectionSource !== source;
         activeDirectionSource = source;
-        sendDirection(normalizedAngle, sourceChanged || options.force);
+        sendDirection(normalizedAngle, source, sourceChanged || options.force);
+    }
+
+    function setTransientDirection(source, angle, options = {}) {
+        clearTransientDirectionState(source);
+
+        if (!canSourceTakePriority(source) || !hasTransientDirectionChanged(source, angle)) {
+            return;
+        }
+
+        if (!sendDirection(angle, source, options.force)) {
+            return;
+        }
+
+        lastTransientDirections.set(source, angle);
+    }
+
+    function clearTransientDirectionState(source) {
+        activeDirections.delete(source);
+
+        if (activeDirectionSource === source) {
+            activeDirectionSource = null;
+        }
     }
 
     function clearDirection(source, options = {}) {
@@ -55,7 +84,7 @@ export function createInputState(socket) {
 
         if (nextDirection) {
             activeDirectionSource = nextDirection.source;
-            sendDirection(nextDirection.angle, true);
+            sendDirection(nextDirection.angle, nextDirection.source, true);
             return;
         }
 
@@ -64,19 +93,21 @@ export function createInputState(socket) {
         socket.emit("inputDirectionEnd");
     }
 
-    function sendDirection(angle, force = false) {
+    function sendDirection(angle, source, force = false) {
         const now = performance.now();
         const changedEnough = lastSentDirection === null
             || Math.abs(getAngleDelta(lastSentDirection, angle)) >= DIRECTION_ANGLE_EPSILON;
         const canSend = now - lastDirectionSentAt >= DIRECTION_SEND_INTERVAL_MS;
 
         if (!force && (!changedEnough || !canSend)) {
-            return;
+            return false;
         }
 
         lastDirectionSentAt = now;
         lastSentDirection = angle;
-        socket.emit("inputDirection", angle);
+        socket.emit("inputDirection", { angle, source });
+
+        return true;
     }
 
     function canSourceTakePriority(source) {
@@ -107,6 +138,13 @@ export function createInputState(socket) {
         }
 
         return highestPriorityDirection;
+    }
+
+    function hasTransientDirectionChanged(source, angle) {
+        const lastDirection = lastTransientDirections.get(source);
+
+        return lastDirection === undefined
+            || Math.abs(getAngleDelta(lastDirection, angle)) >= DIRECTION_ANGLE_EPSILON;
     }
 }
 
