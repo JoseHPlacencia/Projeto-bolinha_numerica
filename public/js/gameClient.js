@@ -5,6 +5,11 @@ import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createCanvasRenderer } from "./renderer.js";
 import { desenharCamadaMinimap } from "./renderers/minimapRenderer.js";
 
+// Importa as funções do sistema de território que criamos em territorioSystem.js
+// criarEstadoTerritorio — cria a grade inicial com a base do jogador marcada
+// atualizarTerritorio   — atualiza rastro e conquista área a cada frame
+import { criarEstadoTerritorio, atualizarTerritorio } from "./territorioSystem.js";
+
 export function startClient(gameConfig) {
     const socket = io({
         transports: gameConfig.socket.transports
@@ -16,6 +21,10 @@ export function startClient(gameConfig) {
     const hud = createHud({ debugEnabled: isDebugEnabled() });
     const frameMonitor = createFrameMonitor();
     let myId = null;
+
+    // Guarda o estado de território do jogador local (grade + rastro + flags).
+    // Começa como null e é criado na primeira vez que recebemos os dados do jogador.
+    let estadoTerritorio = null;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
     window.addEventListener("resize", renderer.resizeCanvas);
@@ -48,7 +57,25 @@ export function startClient(gameConfig) {
             return;
         }
 
-        renderer.renderWorld(state, myId);
-        desenharCamadaMinimap(minimapCanvas, state, myId, gameConfig.world);
+        // Pega os dados mais recentes do jogador local a partir do estado interpolado
+        const jogadorAtual = state[myId];
+
+        // Se ainda não criamos o estado de território e já temos dados do jogador,
+        // criamos agora (só acontece uma vez, no primeiro frame com dados válidos)
+        if (!estadoTerritorio && jogadorAtual) {
+            estadoTerritorio = criarEstadoTerritorio(jogadorAtual, gameConfig.world);
+        }
+
+        // A cada frame, atualiza o território: registra rastro ou executa Flood Fill
+        // Isso mantém a grade sincronizada com a posição atual do jogador
+        if (estadoTerritorio && jogadorAtual) {
+            atualizarTerritorio(estadoTerritorio, jogadorAtual, gameConfig.world);
+        }
+
+        // Passa o estadoTerritorio para o renderer poder desenhar o território no mundo
+        renderer.renderWorld(state, myId, estadoTerritorio);
+
+        // Passa o estadoTerritorio para o minimapa poder desenhar a grade de células
+        desenharCamadaMinimap(minimapCanvas, state, myId, gameConfig.world, estadoTerritorio);
     }
 }

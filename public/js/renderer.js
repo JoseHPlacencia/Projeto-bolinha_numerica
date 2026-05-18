@@ -44,7 +44,9 @@ export function createCanvasRenderer(canvas, gameConfig) {
         );
     }
 
-    function renderWorld(state, currentPlayerId) {
+    // estadoTerritorio — objeto com a matriz de células do jogador local
+    // (criado pelo territorioSystem.js e gerenciado no gameClient.js)
+    function renderWorld(state, currentPlayerId, estadoTerritorio) {
         const currentPlayer = state[currentPlayerId];
 
         if (!currentPlayer) {
@@ -53,17 +55,21 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
         clearCanvas();
         applyViewportTransform();
-        drawWorld(state, currentPlayer, currentPlayerId);
+        drawWorld(state, currentPlayer, currentPlayerId, estadoTerritorio);
     }
 
-    function drawWorld(state, currentPlayer, currentPlayerId) {
+    function drawWorld(state, currentPlayer, currentPlayerId, estadoTerritorio) {
         context.save();
         context.translate(viewportWidth / 2, viewportHeight / 2);
         context.scale(canvasScale, canvasScale);
         context.translate(-currentPlayer.x, -currentPlayer.y);
 
         drawMap(context, gameConfig.world);
-        drawTerritoryLayer(context, state, gameConfig.world);
+
+        // Passa o estadoTerritorio e o ID do jogador local para que o renderer
+        // de território saiba qual jogador deve usar a grade de células (e não o círculo)
+        drawTerritoryLayer(context, state, gameConfig.world, estadoTerritorio, currentPlayerId);
+
         drawPlayerLayer(context, state, currentPlayer, currentPlayerId);
         context.restore();
     }
