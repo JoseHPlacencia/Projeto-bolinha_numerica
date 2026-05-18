@@ -43,18 +43,30 @@ const world = Object.freeze({
 });
 
 const territory = Object.freeze({
-    baseBorderWidth: 6,
+    baseBorderWidth: 4,
     circleSegments: 96,
     fillAlpha: 0.36,
     minCaptureArea: 800,
     minCaptureTrailPoints: 4,
-    trailPointSpacing: 18
+    trailPointSpacing: 10
 });
 
 const movement = Object.freeze({
+    boundarySlideTriggerAlignmentPower: 0.1,
+    boundarySlideExitAlignment: 0.9,
+    boundarySlideTriggerMinOutwardAlignment: 0.25,
+    boundarySlideTriggerPerpendicularPlayerSizeRatio: 2.5,
+    boundarySlideTriggerRotationCurveSharpness: 10,
+    boundarySlideTriggerRotationSharpness: 30,
     speed: 600,
     rotationStrength: 0.1,
     slideAngleThreshold: 0.1
+});
+
+const player = Object.freeze({
+    blinkDurationMs: 250,
+    blinkMaxIntervalMs: 5000,
+    blinkMinIntervalMs: 2500
 });
 
 const spawn = Object.freeze({
@@ -72,10 +84,10 @@ const screen = Object.freeze({
 const network = Object.freeze({
     initialBufferMs: 140,
     minBufferMs: 100,
-    maxBufferMs: 260,
+    maxBufferMs: 250,
     jitterMultiplier: 2,
     maxJitterSamples: 30,
-    maxSnapshots: 60
+    maxSnapshots: 15
 });
 
 const security = Object.freeze({
@@ -93,6 +105,7 @@ const client = Object.freeze({
     }),
     world,
     territory,
+    player,
     screen,
     network,
     inputActionAngles,
@@ -106,6 +119,7 @@ module.exports = Object.freeze({
     world,
     territory,
     movement,
+    player,
     spawn,
     inputActionAngles,
     inputBindings,

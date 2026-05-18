@@ -22,24 +22,47 @@ function getLastSetValue(values) {
 class Player {
     constructor(id, spawn) {
         this.id = id;
+        this.pressedActions = new Set();
+        this.lastAction = null;
+        this.directionAngle = null;
+        this.reconnect(spawn);
+    }
+
+    reconnect(spawn) {
         this.x = spawn.x;
         this.y = spawn.y;
         this.angle = getRandomAngle();
         this.color = createRandomColor();
         this.territoryX = spawn.x;
         this.territoryY = spawn.y;
-        this.pressedActions = new Set();
+        this.clearInput();
+        this.clearTrailState();
+    }
+
+    returnToSpawn() {
+        this.x = this.territoryX;
+        this.y = this.territoryY;
+        this.angle = getRandomAngle();
+        this.boundarySlideDirection = null;
+        this.clearTrailState();
+    }
+
+    clearInput() {
+        this.pressedActions.clear();
         this.lastAction = null;
         this.directionAngle = null;
-        this.isDrawingTrail = false;
-        this.trailPoints = [];
-        this.trailLeftPoints = [];
-        this.trailRightPoints = [];
-        this.lastSafeTerritoryPoint = {
-            x: spawn.x,
-            y: spawn.y,
-            angle: this.angle
-        };
+        this.boundarySlideDirection = null;
+    }
+
+    clearTrailState() {
+        this.trailLeftSegments = [];
+        this.trailRightSegments = [];
+        this.trailLeftFillPath = [];
+        this.trailRightFillPath = [];
+        this.isLeftTrailActive = false;
+        this.isRightTrailActive = false;
+        this.lastLeftTrailPoint = null;
+        this.lastRightTrailPoint = null;
     }
 
     pressAction(action) {
@@ -84,7 +107,27 @@ function createPlayer(players, id) {
     return player;
 }
 
+function reconnectPlayerAsNew(players, player) {
+    player.reconnect(createSpawn(getOtherPlayers(players, player.id)));
+    return player;
+}
+
+function returnPlayerToSpawn(player) {
+    player.returnToSpawn();
+    return player;
+}
+
+function getOtherPlayers(players, excludedPlayerId) {
+    const otherPlayers = new Map(players);
+
+    otherPlayers.delete(excludedPlayerId);
+
+    return otherPlayers;
+}
+
 module.exports = {
     Player,
-    createPlayer
+    createPlayer,
+    reconnectPlayerAsNew,
+    returnPlayerToSpawn
 };

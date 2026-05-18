@@ -7,7 +7,7 @@ function createSnapshot(players, territories) {
         time: getServerTime(),
         players: serializePlayers(players),
         territories: serializeTerritories(territories, players),
-        trails: serializeTrails(players)
+        trails: serializeTrails(players, territories)
     };
 }
 

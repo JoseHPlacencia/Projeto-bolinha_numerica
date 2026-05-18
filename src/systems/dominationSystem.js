@@ -6,57 +6,75 @@ const {
 const {
     calculatePolygonArea,
     createPolygonFromPoints,
-    isPointInPolygon,
+    findClosestPolygonBoundaryContact,
     unionPolygons
 } = require("../utils/geometry");
 
 const geometryEpsilon = 1e-7;
 
-function captureClosedTrail(player, territories) {
+function captureClosedTrail(player, territories, players) {
     const capturedPolygon = createExternalTrailCapturePolygon(player, territories);
 
     if (!capturedPolygon) {
         return null;
     }
 
-    applyCapturedPolygon(territories, player.id, capturedPolygon);
+    applyCapturedPolygon(territories, player.id, capturedPolygon, players);
 
     return capturedPolygon;
 }
 
 function createExternalTrailCapturePolygon(player, territories) {
-    const currentTerritory = getPlayerTerritoryPolygon(territories, player.id);
-    const currentArea = calculatePolygonArea(currentTerritory);
-    const candidates = createTrailCaptureCandidates(player, currentTerritory);
-    let bestCandidate = null;
-
-    for (const candidate of candidates) {
-        const union = unionPolygons(currentTerritory, candidate.polygon);
-        const candidateArea = calculatePolygonArea(candidate.polygon);
-        const addedArea = calculatePolygonArea(union) - currentArea;
-        const overlapArea = Math.max(0, candidateArea - addedArea);
-
-        if (addedArea < config.territory.minCaptureArea) {
-            continue;
-        }
-
-        const rankedCandidate = {
-            ...candidate,
-            addedArea,
-            overlapArea,
-            hasLowOverlap: hasLowTerritoryOverlap(candidateArea, overlapArea)
-        };
-
-        if (!bestCandidate || isBetterCaptureCandidate(rankedCandidate, bestCandidate)) {
-            bestCandidate = rankedCandidate;
-        }
+    if (!hasAnySideTrailSegment(player)) {
+        return null;
     }
+
+    const currentTerritory = getPlayerTerritoryPolygon(territories, player.id);
+    const candidates = createTrailCaptureCandidates(player, currentTerritory);
+    const bestCandidate = selectBestCaptureCandidate(
+        currentTerritory,
+        candidates,
+        config.territory.minCaptureArea
+    );
 
     if (!bestCandidate) {
         return null;
     }
 
     return bestCandidate.polygon;
+}
+
+function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) {
+    const currentArea = calculatePolygonArea(currentTerritory);
+    let bestCandidate = null;
+
+    for (const candidate of candidates) {
+        const rankedCandidate = rankCaptureCandidate(currentTerritory, currentArea, candidate);
+
+        if (rankedCandidate.addedArea < minAddedArea) {
+            continue;
+        }
+
+        if (!bestCandidate || isBetterCaptureCandidate(rankedCandidate, bestCandidate)) {
+            bestCandidate = rankedCandidate;
+        }
+    }
+
+    return bestCandidate;
+}
+
+function rankCaptureCandidate(currentTerritory, currentArea, candidate) {
+    const union = unionPolygons(currentTerritory, candidate.polygon);
+    const candidateArea = calculatePolygonArea(candidate.polygon);
+    const addedArea = calculatePolygonArea(union) - currentArea;
+    const overlapArea = Math.max(0, candidateArea - addedArea);
+
+    return {
+        ...candidate,
+        addedArea,
+        overlapArea,
+        hasLowOverlap: hasLowTerritoryOverlap(candidateArea, overlapArea)
+    };
 }
 
 function hasLowTerritoryOverlap(candidateArea, overlapArea) {
@@ -80,60 +98,86 @@ function isBetterCaptureCandidate(candidate, bestCandidate) {
 }
 
 function createTrailCaptureCandidates(player, territoryPolygon) {
-    const boundaryContacts = findTrailBoundaryContacts(territoryPolygon, player.trailPoints);
-
-    if (!boundaryContacts) {
-        return [];
-    }
-
-    const boundaryPaths = createBoundaryPaths(
-        territoryPolygon[0],
-        boundaryContacts.entry,
-        boundaryContacts.exit
-    );
     const candidates = [];
 
-    for (const sidePoints of [player.trailLeftPoints, player.trailRightPoints]) {
-        for (const boundaryPath of boundaryPaths) {
-            const points = createTrailBoundaryCapturePoints(sidePoints, boundaryContacts, boundaryPath);
-            const candidate = createTrailCandidateFromPoints(points);
-
-            if (candidate) {
-                candidates.push(candidate);
-            }
-        }
+    for (const segment of getTrailSegments(player)) {
+        candidates.push(...createTrailCaptureCandidatesFromSegment(segment, territoryPolygon));
     }
 
     return candidates;
 }
 
-function createTrailBoundaryCapturePoints(sidePoints, boundaryContacts, boundaryPath) {
+function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
+    const candidates = [];
+    const finiteSidePoints = getFinitePoints(segment);
+
+    if (finiteSidePoints.length < 2) {
+        return candidates;
+    }
+
+    const startContact = findClosestPolygonBoundaryContact(territoryPolygon, finiteSidePoints[0]);
+    const endContact = findClosestPolygonBoundaryContact(territoryPolygon, finiteSidePoints[finiteSidePoints.length - 1]);
+
+    if (!startContact || !endContact) {
+        return candidates;
+    }
+
+    const clippedSidePoints = createBorderSnappedSidePoints(
+        finiteSidePoints,
+        startContact.point,
+        endContact.point
+    );
+    const boundaryPaths = createBoundaryPaths(territoryPolygon[0], endContact, startContact);
+    let bestCandidate = null;
+
+    for (const boundaryPath of boundaryPaths) {
+        const points = createTrailBoundaryCapturePoints(clippedSidePoints, boundaryPath);
+        const candidate = createTrailCandidateFromPoints(points);
+
+        if (candidate && isLargerAreaCandidate(candidate, bestCandidate)) {
+            bestCandidate = candidate;
+        }
+    }
+
+    if (bestCandidate) {
+        candidates.push(bestCandidate);
+    }
+
+    return candidates;
+}
+
+function getTrailSegments(player) {
+    return [
+        ...getVisibleSegments(player.trailLeftSegments),
+        ...getVisibleSegments(player.trailRightSegments)
+    ];
+}
+
+function hasAnySideTrailSegment(player) {
+    return getVisibleSegments(player.trailLeftSegments).length > 0
+        || getVisibleSegments(player.trailRightSegments).length > 0;
+}
+
+function getVisibleSegments(segments) {
+    if (!Array.isArray(segments)) {
+        return [];
+    }
+
+    return segments.filter(segment => Array.isArray(segment) && segment.length >= 2);
+}
+
+function createTrailBoundaryCapturePoints(sidePoints, boundaryPath) {
     const finiteSidePoints = getFinitePoints(sidePoints);
 
     if (finiteSidePoints.length < 2 || boundaryPath.length < 2) {
         return [];
     }
 
-    const firstOutsideIndex = Math.min(
-        finiteSidePoints.length - 1,
-        boundaryContacts.exit.centerSegmentIndex + 1
-    );
-    const lastOutsideIndex = Math.min(
-        finiteSidePoints.length - 1,
-        boundaryContacts.entry.centerSegmentIndex
-    );
-
-    if (lastOutsideIndex < firstOutsideIndex) {
-        return [];
-    }
-
-    const externalTrailSide = finiteSidePoints.slice(firstOutsideIndex, lastOutsideIndex + 1);
-    const points = [
-        boundaryContacts.exit.point,
-        ...externalTrailSide,
-        boundaryContacts.entry.point,
-        ...boundaryPath.slice(1)
-    ];
+    const lastSidePoint = finiteSidePoints[finiteSidePoints.length - 1];
+    const boundaryPoints = arePointsEqual(lastSidePoint, boundaryPath[0])
+        ? boundaryPath.slice(1)
+        : boundaryPath;
+    const points = finiteSidePoints.concat(boundaryPoints);
 
     return removeConsecutiveDuplicatePoints(points);
 }
@@ -145,81 +189,13 @@ function createTrailCandidateFromPoints(points) {
 
     const polygon = createPolygonFromPoints(points);
 
-    if (calculatePolygonArea(polygon) <= 0) {
+    const area = calculatePolygonArea(polygon);
+
+    if (area <= 0) {
         return null;
     }
 
-    return { polygon };
-}
-
-function findTrailBoundaryContacts(territoryPolygon, trailPoints) {
-    if (!territoryPolygon[0]) {
-        return null;
-    }
-
-    const centerPoints = getFinitePoints(trailPoints);
-
-    if (centerPoints.length < 2) {
-        return null;
-    }
-
-    const exit = findBoundaryCrossing(territoryPolygon, centerPoints, "exit");
-    const entry = findBoundaryCrossing(territoryPolygon, centerPoints, "entry");
-
-    if (!exit || !entry || entry.centerSegmentIndex <= exit.centerSegmentIndex) {
-        return null;
-    }
-
-    return { exit, entry };
-}
-
-function findBoundaryCrossing(territoryPolygon, points, crossingType) {
-    if (crossingType === "entry") {
-        for (let index = points.length - 2; index >= 0; index--) {
-            if (!isPointInPolygon(territoryPolygon, points[index].x, points[index].y)
-                && isPointInPolygon(territoryPolygon, points[index + 1].x, points[index + 1].y)) {
-                return findSegmentBoundaryContact(territoryPolygon[0], points[index], points[index + 1], index);
-            }
-        }
-
-        return null;
-    }
-
-    for (let index = 0; index < points.length - 1; index++) {
-        if (isPointInPolygon(territoryPolygon, points[index].x, points[index].y)
-            && !isPointInPolygon(territoryPolygon, points[index + 1].x, points[index + 1].y)) {
-            return findSegmentBoundaryContact(territoryPolygon[0], points[index], points[index + 1], index);
-        }
-    }
-
-    return null;
-}
-
-function findSegmentBoundaryContact(ring, start, end, centerSegmentIndex) {
-    const openRing = getOpenRing(ring);
-    const intersections = [];
-
-    for (let segmentIndex = 0; segmentIndex < openRing.length; segmentIndex++) {
-        const boundaryStart = coordinatesToPoint(openRing[segmentIndex]);
-        const boundaryEnd = coordinatesToPoint(openRing[(segmentIndex + 1) % openRing.length]);
-        const intersection = getSegmentIntersection(start, end, boundaryStart, boundaryEnd);
-
-        if (!intersection) {
-            continue;
-        }
-
-        intersections.push({
-            point: intersection.point,
-            pathT: intersection.firstSegmentT,
-            segmentT: intersection.secondSegmentT,
-            segmentIndex,
-            centerSegmentIndex
-        });
-    }
-
-    intersections.sort((first, second) => first.pathT - second.pathT);
-
-    return intersections[0] || null;
+    return { polygon, area };
 }
 
 function createBoundaryPaths(ring, startContact, endContact) {
@@ -264,33 +240,6 @@ function createForwardBoundaryPath(openRing, startContact, endContact) {
     return path;
 }
 
-function getSegmentIntersection(firstStart, firstEnd, secondStart, secondEnd) {
-    const firstDirection = subtractPoints(firstEnd, firstStart);
-    const secondDirection = subtractPoints(secondEnd, secondStart);
-    const denominator = crossProduct(firstDirection, secondDirection);
-
-    if (Math.abs(denominator) <= geometryEpsilon) {
-        return null;
-    }
-
-    const startDelta = subtractPoints(secondStart, firstStart);
-    const firstSegmentT = crossProduct(startDelta, secondDirection) / denominator;
-    const secondSegmentT = crossProduct(startDelta, firstDirection) / denominator;
-
-    if (!isUnitRange(firstSegmentT) || !isUnitRange(secondSegmentT)) {
-        return null;
-    }
-
-    return {
-        point: {
-            x: firstStart.x + firstDirection.x * firstSegmentT,
-            y: firstStart.y + firstDirection.y * firstSegmentT
-        },
-        firstSegmentT,
-        secondSegmentT
-    };
-}
-
 function getOpenRing(ring) {
     if (!Array.isArray(ring)) {
         return [];
@@ -322,26 +271,23 @@ function removeConsecutiveDuplicatePoints(points) {
     ));
 }
 
+function createBorderSnappedSidePoints(sidePoints, startPoint, endPoint) {
+    return removeConsecutiveDuplicatePoints([
+        startPoint,
+        ...sidePoints.slice(1, -1),
+        endPoint
+    ]);
+}
+
+function isLargerAreaCandidate(candidate, bestCandidate) {
+    return !bestCandidate || candidate.area > bestCandidate.area + geometryEpsilon;
+}
+
 function coordinatesToPoint(coordinates) {
     return {
         x: coordinates[0],
         y: coordinates[1]
     };
-}
-
-function subtractPoints(first, second) {
-    return {
-        x: first.x - second.x,
-        y: first.y - second.y
-    };
-}
-
-function crossProduct(first, second) {
-    return first.x * second.y - first.y * second.x;
-}
-
-function isUnitRange(value) {
-    return value >= -geometryEpsilon && value <= 1 + geometryEpsilon;
 }
 
 function arePointsEqual(first, second) {

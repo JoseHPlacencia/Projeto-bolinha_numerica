@@ -8,17 +8,12 @@ export function drawTrailLayer(context, state, gameConfig) {
 }
 
 function drawTrail(context, trail, player, gameConfig) {
-    const points = getTrailPoints(trail);
-    const leftPoints = getSidePoints(trail.leftPoints);
-    const rightPoints = getSidePoints(trail.rightPoints);
-
-    if (points.length < 2) {
-        return;
-    }
-
+    const leftSegments = getTrailSegments(trail.leftSegments);
+    const rightSegments = getTrailSegments(trail.rightSegments);
+    const fillPolygon = getTrailFillPolygon(trail.fillPolygon);
     const color = trail.color || (player && player.color);
 
-    if (!color) {
+    if (!color || (leftSegments.length === 0 && rightSegments.length === 0 && fillPolygon.rings.length === 0)) {
         return;
     }
 
@@ -26,49 +21,42 @@ function drawTrail(context, trail, player, gameConfig) {
     context.lineCap = "round";
     context.lineJoin = "round";
 
-    if (leftPoints.length >= 2 && rightPoints.length >= 2) {
-        drawTrailPolygonFill(context, leftPoints, rightPoints, color, gameConfig.territory.fillAlpha);
-        drawTrailEdge(context, leftPoints, color, gameConfig.territory.baseBorderWidth);
-        drawTrailEdge(context, rightPoints, color, gameConfig.territory.baseBorderWidth);
-    } else {
-        const edgePaths = createTrailEdgePaths(points, gameConfig.world.playerSize / 2);
-
-        drawTrailFill(context, points, color, gameConfig);
-        drawTrailEdge(context, edgePaths.left, color, gameConfig.territory.baseBorderWidth);
-        drawTrailEdge(context, edgePaths.right, color, gameConfig.territory.baseBorderWidth);
-    }
+    drawTrailFill(context, fillPolygon, color, gameConfig.territory.fillAlpha);
+    drawTrailEdges(context, leftSegments, color, gameConfig.territory.baseBorderWidth);
+    drawTrailEdges(context, rightSegments, color, gameConfig.territory.baseBorderWidth);
 
     context.restore();
 }
 
-function drawTrailPolygonFill(context, leftPoints, rightPoints, color, fillAlpha) {
-    const polygonPoints = leftPoints.concat([...rightPoints].reverse());
+function drawTrailFill(context, polygon, color, fillAlpha) {
+    if (polygon.rings.length === 0) {
+        return;
+    }
 
     context.save();
     context.globalAlpha = fillAlpha;
     context.fillStyle = color;
     context.beginPath();
-    context.moveTo(polygonPoints[0].x, polygonPoints[0].y);
 
-    for (let index = 1; index < polygonPoints.length; index++) {
-        context.lineTo(polygonPoints[index].x, polygonPoints[index].y);
+    for (const ring of polygon.rings) {
+        traceRing(context, ring);
     }
 
-    context.closePath();
-    context.fill();
+    context.fill("evenodd");
     context.restore();
 }
 
-function drawTrailFill(context, points, color, gameConfig) {
-    context.save();
-    context.globalAlpha = gameConfig.territory.fillAlpha;
-    context.strokeStyle = color;
-    context.lineWidth = gameConfig.world.playerSize;
-    strokeSmoothPath(context, points);
-    context.restore();
+function drawTrailEdges(context, segments, color, lineWidth) {
+    for (const segment of segments) {
+        drawTrailEdge(context, segment, color, lineWidth);
+    }
 }
 
 function drawTrailEdge(context, points, color, lineWidth) {
+    if (points.length < 2) {
+        return;
+    }
+
     context.save();
     context.globalAlpha = 1;
     context.strokeStyle = color;
@@ -103,55 +91,31 @@ function strokeSmoothPath(context, points) {
     context.stroke();
 }
 
-function createTrailEdgePaths(points, halfWidth) {
-    const left = [];
-    const right = [];
-
-    for (let index = 0; index < points.length; index++) {
-        const normal = getTrailNormal(points, index);
-        const point = points[index];
-
-        left.push({
-            x: point.x + normal.x * halfWidth,
-            y: point.y + normal.y * halfWidth
-        });
-        right.push({
-            x: point.x - normal.x * halfWidth,
-            y: point.y - normal.y * halfWidth
-        });
+function traceRing(context, ring) {
+    if (ring.length < 3) {
+        return;
     }
 
-    return { left, right };
-}
+    context.moveTo(ring[0].x, ring[0].y);
 
-function getTrailNormal(points, index) {
-    const previous = points[Math.max(0, index - 1)];
-    const next = points[Math.min(points.length - 1, index + 1)];
-    const directionX = next.x - previous.x;
-    const directionY = next.y - previous.y;
-    const length = Math.hypot(directionX, directionY);
-
-    if (length <= Number.EPSILON) {
-        return { x: 0, y: -1 };
+    for (let index = 1; index < ring.length; index++) {
+        context.lineTo(ring[index].x, ring[index].y);
     }
 
-    return {
-        x: -directionY / length,
-        y: directionX / length
-    };
+    context.closePath();
 }
 
-function getTrailPoints(trail) {
-    if (!Array.isArray(trail.points)) {
+function getTrailSegments(segments) {
+    if (!Array.isArray(segments)) {
         return [];
     }
 
-    return trail.points.filter(point => (
-        Number.isFinite(point.x) && Number.isFinite(point.y)
-    ));
+    return segments
+        .map(getValidPoints)
+        .filter(segment => segment.length >= 2);
 }
 
-function getSidePoints(points) {
+function getValidPoints(points) {
     if (!Array.isArray(points)) {
         return [];
     }
@@ -159,4 +123,16 @@ function getSidePoints(points) {
     return points.filter(point => (
         Number.isFinite(point.x) && Number.isFinite(point.y)
     ));
+}
+
+function getTrailFillPolygon(polygon) {
+    return getValidPolygon(polygon);
+}
+
+function getValidPolygon(polygon) {
+    const rings = polygon && Array.isArray(polygon.rings)
+        ? polygon.rings.map(getValidPoints).filter(ring => ring.length >= 3)
+        : [];
+
+    return { rings };
 }

@@ -66,7 +66,7 @@ export function createCanvasRenderer(canvas, gameConfig) {
         drawMap(context, gameConfig.world);
         drawTerritoryLayer(context, state, gameConfig);
         drawTrailLayer(context, state, gameConfig);
-        drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId);
+        drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId, gameConfig);
         context.restore();
     }
 
