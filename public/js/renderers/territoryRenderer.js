@@ -1,258 +1,218 @@
-// Importa as constantes de tipo de célula e o tamanho da grade do sistema de território.
-// Esses mesmos valores são usados no minimapRenderer e no territorioSystem.
-import { CELULA_BASE, CELULA_RASTRO, TAMANHO_GRADE } from "../territorioSystem.js";
+import { CELULA_BASE, TAMANHO_GRADE } from "../territorioSystem.js";
 
-// drawTerritoryLayer — desenha o território de todos os jogadores no mundo principal.
+// drawTerritoryLayer — renderiza território de todos os jogadores no canvas principal.
 //
-// === FIX 4: ORDEM DE RENDERIZAÇÃO ===
-// Inimigos são desenhados PRIMEIRO (camada de baixo).
-// O jogador local é desenhado POR ÚLTIMO (camada de cima).
-// Resultado: quando o jogador local conquista área inimiga, sua cor cobre
-// imediatamente a cor do inimigo — sem sobreposição visual.
-//
-// Parâmetros:
-//   estadoTerritorio — objeto { matrizTerritorio, rastro, estaForaDaBase } do jogador local
-//                      Se for null, usa o círculo inicial para todos (modo antigo).
-//   idJogadorLocal   — ID do jogador que está neste cliente (para saber quem usa a matriz)
+// Ordem: inimigos primeiro (ficam abaixo), jogador local por cima.
+// O jogador local usa white-erase antes do fill colorido para apagar
+// qualquer camada inimiga que esteja embaixo, sem acúmulo de alpha.
 export function drawTerritoryLayer(context, state, worldConfig, estadoTerritorio, idJogadorLocal) {
-    // ── Passo 1: Inimigos primeiro (ficam embaixo) ────────────────────────────
-    // Desenha o círculo de território de cada jogador que NÃO é o local.
-    // Como são desenhados antes, serão cobertos pelo território do jogador local.
+    // Inimigos: círculos semi-transparentes
     for (const player of Object.values(state)) {
-        if (player.id === idJogadorLocal) continue; // pula o jogador local neste passo
-
-        // Para inimigos, mantemos o círculo original (a grade deles vive no cliente deles)
-        drawInitialTerritory(context, player, worldConfig);
-
-        // Mantém o suporte a polígonos de território (infraestrutura existente)
-        drawPlayerTerritory(context, player);
+        if (player.id === idJogadorLocal) continue;
+        _drawCircle(context, player, worldConfig);
     }
 
-    // ── Passo 2: Jogador local por cima (cobre o território inimigo) ──────────
-    // Ao ser desenhado por último, o território local aparece sobre qualquer
-    // área inimiga onde o jogador tenha expandido — efeito "instantâneo".
+    // Jogador local: polígono suave da grade (ou círculo de fallback)
     const jogadorLocal = state[idJogadorLocal];
+    if (!jogadorLocal) return;
 
-    if (jogadorLocal) {
-        if (estadoTerritorio) {
-            // Usa a grade de células detalhada (com rastro e base reais)
-            drawMatrizTerritorio(context, jogadorLocal, estadoTerritorio, worldConfig);
-        } else {
-            // Fallback: círculo simples antes da grade ser criada (primeiros frames)
-            drawInitialTerritory(context, jogadorLocal, worldConfig);
-        }
-        drawPlayerTerritory(context, jogadorLocal);
+    if (estadoTerritorio) {
+        _drawLocalTerritory(context, jogadorLocal, estadoTerritorio, worldConfig);
+    } else {
+        _drawCircle(context, jogadorLocal, worldConfig);
     }
+
+    context.globalAlpha = 1.0;
 }
 
-function drawInitialTerritory(context, player, worldConfig) {
-    context.globalAlpha = 0.66;
-    context.fillStyle = player.color;
+// ─── Território Inimigo: Círculo Inicial ─────────────────────────────────────
+function _drawCircle(context, player, worldConfig) {
+    const r = worldConfig.initialTerritoryRadius;
 
+    context.globalAlpha = 0.65;
+    context.fillStyle = player.color;
     context.beginPath();
-    context.arc(
-        player.territoryX,
-        player.territoryY,
-        worldConfig.initialTerritoryRadius,
-        0,
-        Math.PI * 2
-    );
+    context.arc(player.territoryX, player.territoryY, r, 0, Math.PI * 2);
     context.fill();
 
-    context.globalAlpha = 1;
-    context.lineWidth = 6;
+    context.globalAlpha = 1.0;
     context.strokeStyle = player.color;
-
+    context.lineWidth = 5;
+    context.lineJoin = "round";
+    context.lineCap = "round";
     context.beginPath();
-    context.arc(
-        player.territoryX,
-        player.territoryY,
-        worldConfig.initialTerritoryRadius,
-        0,
-        Math.PI * 2
-    );
+    context.arc(player.territoryX, player.territoryY, r, 0, Math.PI * 2);
     context.stroke();
 }
 
-function drawPlayerTerritory(context, player) {
-    if (!Array.isArray(player.territory)) {
-        return;
-    }
-
-    for (const polygon of player.territory) {
-        drawPolygon(context, polygon, player.color);
-    }
-}
-
-// ─── Renderização da Matriz de Território no Mundo Principal ─────────────────
+// ─── Território Local: Polígono Suave + Rastro ────────────────────────────────
 //
-// Percorre a grade de células do jogador e desenha cada uma delas
-// nas coordenadas corretas do MUNDO DO JOGO (não do minimapa).
-//
-// Como funciona a conversão de célula → posição no mundo:
-//   • O mundo vai de -mapRadius até +mapRadius em X e Y
-//   • A grade tem TAMANHO_GRADE células em cada lado
-//   • Tamanho de cada célula = (mapRadius * 2) / TAMANHO_GRADE unidades do mundo
-//   • Posição X da célula (coluna) = coluna * tamanhoCelula - mapRadius
-//   • Posição Y da célula (linha)  = linha  * tamanhoCelula - mapRadius
-//
-// Parâmetros:
-//   context          — contexto 2D do canvas principal (já com a câmera aplicada)
-//   player           — dados do jogador (cor, posição)
-//   estadoTerritorio — objeto com a matrizTerritorio
-//   worldConfig      — configurações do mundo (mapRadius)
-function drawMatrizTerritorio(context, player, estadoTerritorio, worldConfig) {
-    const { matrizTerritorio } = estadoTerritorio;
-
-    // Calcula o tamanho de uma célula em unidades do mundo
-    // Exemplo: mapa com diâmetro 3000 e 50 células → cada célula tem 60 unidades
+// Três passos:
+//   0. White-erase  — preenche o polígono com branco opaco para apagar completamente
+//                     qualquer círculo inimigo abaixo. Sem isso, o alpha do fill colorido
+//                     misturaria com a cor inimiga e criaria sobreposição visual.
+//   1. Fill colorido — semi-transparente com glow (efeito Paper.io)
+//   2. Borda         — opaca, na cor do jogador
+function _drawLocalTerritory(context, player, estadoTerritorio, worldConfig) {
+    const { matrizTerritorio, caminhoAtual } = estadoTerritorio;
     const tamanhoCelula = (worldConfig.mapRadius * 2) / TAMANHO_GRADE;
+    const { mapRadius } = worldConfig;
 
-    // ── Passo 0: Apaga território inimigo subjacente (substituição direta) ───────
-    // Círculos inimigos são desenhados antes com globalAlpha 0.66; se apenas
-    // desenharmos o território local com o mesmo alpha, as cores se mesclam
-    // visualmente em vez de substituir. O retângulo branco sólido "reseta" o
-    // pixel para o fundo branco do mapa, garantindo que a cor local seja a única
-    // a aparecer nas células já conquistadas.
+    const polygons = _buildOutlinePaths(matrizTerritorio, tamanhoCelula, mapRadius);
+
+    if (polygons.length > 0) {
+        // Passo 0: apaga território inimigo subjacente
+        context.globalAlpha = 1.0;
+        context.fillStyle = "#ffffff";
+        for (const poly of polygons) { _drawSmoothedPolygon(context, poly); context.fill(); }
+
+        // Passo 1: fill colorido com glow
+        context.save();
+        context.shadowColor = player.color;
+        context.shadowBlur = 18;
+        context.globalAlpha = 0.60;
+        context.fillStyle = player.color;
+        for (const poly of polygons) { _drawSmoothedPolygon(context, poly); context.fill(); }
+        context.restore();
+
+        // Passo 2: borda
+        context.globalAlpha = 1.0;
+        context.strokeStyle = player.color;
+        context.lineWidth = 5;
+        context.lineJoin = "round";
+        context.lineCap = "round";
+        for (const poly of polygons) { _drawSmoothedPolygon(context, poly); context.stroke(); }
+    }
+
+    // Rastro usando posições reais do jogador (sem zigzag de grade)
+    if (caminhoAtual && caminhoAtual.length >= 2) {
+        _drawTrail(context, caminhoAtual, player, worldConfig);
+    }
+
     context.globalAlpha = 1.0;
-    context.fillStyle = "#ffffff";
-
-    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
-        for (let col = 0; col < TAMANHO_GRADE; col++) {
-            if (matrizTerritorio[lin][col] !== CELULA_BASE) continue;
-            const x = col * tamanhoCelula - worldConfig.mapRadius;
-            const y = lin * tamanhoCelula - worldConfig.mapRadius;
-            context.fillRect(x, y, tamanhoCelula, tamanhoCelula);
-        }
-    }
-
-    // ── Primeira passagem: desenha todas as células de BASE ───────────────────
-    // Usamos a cor do jogador com a mesma opacidade do círculo original (0.66)
-    // para manter consistência visual com o resto do jogo
-    context.globalAlpha = 0.66;
-    context.fillStyle = player.color;
-
-    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
-        for (let col = 0; col < TAMANHO_GRADE; col++) {
-            if (matrizTerritorio[lin][col] !== CELULA_BASE) continue;
-
-            // Calcula a posição do canto superior esquerdo desta célula no mundo
-            const x = col * tamanhoCelula - worldConfig.mapRadius;
-            const y = lin * tamanhoCelula - worldConfig.mapRadius;
-
-            // Desenha o quadrado da célula com o tamanho exato da célula
-            context.fillRect(x, y, tamanhoCelula, tamanhoCelula);
-        }
-    }
-
-    // ── Segunda passagem: desenha as células de RASTRO ───────────────────────
-    //
-    // === FIX 1: COR DO RASTRO ===
-    // Problema anterior: fillStyle = "#ffffff" (branco) sobre mapa branco (#fff)
-    // → o rastro existia na grade mas era INVISÍVEL na tela principal.
-    //
-    // Correção: usa a cor do jogador com opacidade TOTAL (1.0) para o rastro.
-    // • Na tela principal (fundo branco): agora visível como cor sólida do jogador
-    // • Visualmente distinguível da BASE (que usa 0.66 de opacidade)
-    // • Uma borda branca interna destaca cada bloco de rastro como "em andamento"
-    context.globalAlpha = 1.0;
-    context.fillStyle = player.color;
-
-    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
-        for (let col = 0; col < TAMANHO_GRADE; col++) {
-            if (matrizTerritorio[lin][col] !== CELULA_RASTRO) continue;
-
-            const x = col * tamanhoCelula - worldConfig.mapRadius;
-            const y = lin * tamanhoCelula - worldConfig.mapRadius;
-
-            context.fillRect(x, y, tamanhoCelula, tamanhoCelula);
-        }
-    }
-
-    // Borda branca interna nos blocos de rastro — diferencia visualmente de BASE.
-    // A margem de 4px cria um "frame" branco dentro de cada bloco de rastro.
-    context.globalAlpha = 0.55;
-    context.strokeStyle = "#ffffff";
-    context.lineWidth = 3;
-
-    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
-        for (let col = 0; col < TAMANHO_GRADE; col++) {
-            if (matrizTerritorio[lin][col] !== CELULA_RASTRO) continue;
-
-            const x = col * tamanhoCelula - worldConfig.mapRadius;
-            const y = lin * tamanhoCelula - worldConfig.mapRadius;
-            const margem = 4;
-
-            // strokeRect inset de 4px: cria borda branca DENTRO do bloco colorido
-            context.strokeRect(x + margem, y + margem, tamanhoCelula - margem * 2, tamanhoCelula - margem * 2);
-        }
-    }
-
-    // ── Borda do território: contorno na cor do jogador ───────────────────────
-    // Mantemos o mesmo contorno que o círculo original tinha (lineWidth 6, cor do jogador)
-    // para preservar o estilo visual do projeto
-    context.globalAlpha = 1;
-    context.lineWidth = 3;
-    context.strokeStyle = player.color;
-
-    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
-        for (let col = 0; col < TAMANHO_GRADE; col++) {
-            if (matrizTerritorio[lin][col] !== CELULA_BASE) continue;
-
-            // Só desenha borda na célula se ela tiver algum vizinho vazio ou de borda
-            // Isso evita desenhar contornos internos entre células da mesma área
-            if (!_temVizinhoVazio(matrizTerritorio, lin, col)) continue;
-
-            const x = col * tamanhoCelula - worldConfig.mapRadius;
-            const y = lin * tamanhoCelula - worldConfig.mapRadius;
-
-            context.strokeRect(x, y, tamanhoCelula, tamanhoCelula);
-        }
-    }
 }
 
-// Verifica se a célula (lin, col) tem pelo menos um vizinho vazio (ou está na borda da grade).
-// Usado para desenhar a borda do território apenas nas células externas.
-function _temVizinhoVazio(matrizTerritorio, lin, col) {
-    // Verifica os 4 vizinhos: cima, baixo, esquerda, direita
-    const vizinhos = [
-        [lin - 1, col],
-        [lin + 1, col],
-        [lin, col - 1],
-        [lin, col + 1]
-    ];
+// ─── Construção dos Polígonos de Contorno (Half-Edge Walk) ───────────────────
+//
+// Para cada célula BASE emite as arestas de fronteira (BASE↔não-BASE) em sentido
+// horário usando índices de vértice de grade (STRIDE = N+1).
+// Percorre o grafo de adjacência para fechar polígonos contínuos.
+function _buildOutlinePaths(matrizTerritorio, tamanhoCelula, mapRadius) {
+    const N      = TAMANHO_GRADE;
+    const STRIDE = N + 1;
+    const MAX    = STRIDE * STRIDE; // 2601 para N=50
 
-    for (const [vLin, vCol] of vizinhos) {
-        // Célula fora da grade = borda do mapa = conta como vazia para o contorno
-        if (vLin < 0 || vLin >= TAMANHO_GRADE || vCol < 0 || vCol >= TAMANHO_GRADE) {
-            return true;
-        }
+    const adj = new Array(MAX);
 
-        // Vizinho vazio = esta célula está na borda do território
-        if (matrizTerritorio[vLin][vCol] === 0) {
-            return true;
+    function isBase(l, c) {
+        if (l < 0 || l >= N || c < 0 || c >= N) return false;
+        return matrizTerritorio[l][c] === CELULA_BASE;
+    }
+
+    for (let lin = 0; lin < N; lin++) {
+        for (let col = 0; col < N; col++) {
+            if (!isBase(lin, col)) continue;
+            const TL = lin * STRIDE + col;
+            const TR = lin * STRIDE + (col + 1);
+            const BR = (lin + 1) * STRIDE + (col + 1);
+            const BL = (lin + 1) * STRIDE + col;
+            if (!isBase(lin - 1, col)) (adj[TL] || (adj[TL] = [])).push(TR);
+            if (!isBase(lin, col + 1)) (adj[TR] || (adj[TR] = [])).push(BR);
+            if (!isBase(lin + 1, col)) (adj[BR] || (adj[BR] = [])).push(BL);
+            if (!isBase(lin, col - 1)) (adj[BL] || (adj[BL] = [])).push(TL);
         }
     }
 
-    return false;
+    function idxToWorld(idx) {
+        return {
+            x: (idx % STRIDE) * tamanhoCelula - mapRadius,
+            y: Math.floor(idx / STRIDE) * tamanhoCelula - mapRadius
+        };
+    }
+
+    const polygons = [];
+    const visited  = new Set();
+
+    for (let from = 0; from < MAX; from++) {
+        if (!adj[from]) continue;
+        for (const to of adj[from]) {
+            const key = from * MAX + to;
+            if (visited.has(key)) continue;
+
+            visited.add(key);
+            const poly = [idxToWorld(from)];
+            let cur = to;
+
+            while (cur !== from) {
+                poly.push(idxToWorld(cur));
+                const nexts = adj[cur];
+                if (!nexts) break;
+                let moved = false;
+                for (const next of nexts) {
+                    const k = cur * MAX + next;
+                    if (!visited.has(k)) { visited.add(k); cur = next; moved = true; break; }
+                }
+                if (!moved) break;
+            }
+
+            if (poly.length >= 3) polygons.push(poly);
+        }
+    }
+
+    return polygons;
 }
 
-function drawPolygon(context, polygon, color) {
-    if (!Array.isArray(polygon) || polygon.length < 3) {
-        return;
-    }
-
-    context.save();
-    context.globalAlpha = 0.22;
-    context.fillStyle = color;
+// ─── Polígono com Cantos Suavizados (Quadratic Bézier) ───────────────────────
+//
+// Cada vértice da grade (ângulo reto) vira ponto de controle de uma curva
+// quadrática. Os midpoints dos segmentos adjacentes são os pontos de ancoragem.
+// Resultado: cantos arredondados, visual orgânico sem pixelação.
+function _drawSmoothedPolygon(context, polygon) {
+    if (polygon.length < 3) return;
     context.beginPath();
-    context.moveTo(polygon[0].x, polygon[0].y);
-
-    for (let index = 1; index < polygon.length; index++) {
-        context.lineTo(polygon[index].x, polygon[index].y);
+    for (let i = 0; i < polygon.length; i++) {
+        const prev = polygon[(i - 1 + polygon.length) % polygon.length];
+        const curr = polygon[i];
+        const next = polygon[(i + 1) % polygon.length];
+        const mx1  = (prev.x + curr.x) / 2;
+        const my1  = (prev.y + curr.y) / 2;
+        const mx2  = (curr.x + next.x) / 2;
+        const my2  = (curr.y + next.y) / 2;
+        if (i === 0) context.moveTo(mx1, my1);
+        else         context.lineTo(mx1, my1);
+        context.quadraticCurveTo(curr.x, curr.y, mx2, my2);
     }
-
     context.closePath();
-    context.fill();
-    context.restore();
+}
+
+// ─── Rastro com Bézier Contínuo (Posições Reais) ─────────────────────────────
+//
+// Usa caminhoAtual {x,y} (posições reais capturadas com throttle de distância)
+// para traçar uma linha suave. Quadratic bézier entre midpoints = sem zigzag.
+// Largura proporcional ao playerSize. Realce branco interno = "rastro ativo".
+function _drawTrail(context, pts, player, worldConfig) {
+    const largura = (worldConfig.playerSize || 70) * 1.4;
+
+    context.lineCap  = "round";
+    context.lineJoin = "round";
+
+    context.beginPath();
+    context.moveTo(pts[0].x, pts[0].y);
+    for (let i = 1; i < pts.length - 1; i++) {
+        const mx = (pts[i].x + pts[i + 1].x) / 2;
+        const my = (pts[i].y + pts[i + 1].y) / 2;
+        context.quadraticCurveTo(pts[i].x, pts[i].y, mx, my);
+    }
+    if (pts.length > 1) context.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+
+    context.globalAlpha = 1.0;
+    context.strokeStyle = player.color;
+    context.lineWidth   = largura;
+    context.stroke();
+
+    context.strokeStyle = "rgba(255,255,255,0.55)";
+    context.lineWidth   = largura * 0.4;
+    context.stroke();
+
+    context.globalAlpha = 1.0;
 }

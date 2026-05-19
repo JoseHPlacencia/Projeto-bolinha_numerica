@@ -112,7 +112,10 @@ export function criarEstadoTerritorio(jogador, configMundo) {
         estaForaDaBase,
         posicaoAnterior,   // para o algoritmo de Bresenham
         celulasInimigas,   // para interação com território inimigo
-        historicoCelulas   // para o grace period na auto-colisão
+        historicoCelulas,  // para o grace period na auto-colisão
+        rastroOrdenado: [], // sequência ordenada do rastro (para renderização suave)
+        caminhoAtual: [],   // posições reais {x,y} do rastro em andamento
+        regioesCapturadas: [] // caminhos fechados das capturas concluídas
     };
 
     // Preenche o círculo inicial do jogador na grade como CELULA_BASE
@@ -285,6 +288,7 @@ function _marcarCelula(estado, lin, col, inimigos, configMundo) {
         // Marca a célula como rastro na grade
         estado.matrizTerritorio[lin][col] = CELULA_RASTRO;
         estado.rastro.add(chave);
+        estado.rastroOrdenado.push({ lin, col });
 
         // Atualiza o histórico de células recentes para o grace period.
         // Mantém apenas as últimas CELULAS_IGNORADAS células (janela deslizante).
@@ -437,7 +441,14 @@ function _conquistarTerritorio(estadoTerritorio) {
     }
 
     // ── PASSO 4: Limpa o rastro — a conquista foi concluída ──────────────────
+    // Salva o caminho real percorrido como região capturada para renderização suave
+    if (estadoTerritorio.caminhoAtual.length >= 2) {
+        estadoTerritorio.regioesCapturadas.push([...estadoTerritorio.caminhoAtual]);
+    }
+    estadoTerritorio.caminhoAtual = [];
+
     rastro.clear();
+    estadoTerritorio.rastroOrdenado = [];
     estadoTerritorio.estaForaDaBase = false;
 }
 
@@ -485,6 +496,10 @@ export function atualizarTerritorio(estadoTerritorio, jogador, configMundo, stat
 
         // Se ele estava fora e voltou com rastro, executa o Flood Fill
         if (estadoTerritorio.estaForaDaBase && estadoTerritorio.rastro.size > 0) {
+            // Fecha o caminho atual adicionando a posição exata de retorno
+            if (estadoTerritorio.caminhoAtual.length > 0) {
+                estadoTerritorio.caminhoAtual.push({ x: jogador.x, y: jogador.y });
+            }
             // Retornou à base com rastro! Conquista o território cercado!
             _conquistarTerritorio(estadoTerritorio);
 
@@ -515,6 +530,9 @@ export function atualizarTerritorio(estadoTerritorio, jogador, configMundo, stat
         // Liga o flag que mostra que o jogador está no território desconhecido
         estadoTerritorio.estaForaDaBase = true;
 
+        // Registra a posição real do jogador para renderização suave do rastro
+        _atualizarCaminhoAtual(estadoTerritorio, jogador);
+
         // === TERRITÓRIO INIMIGO ===
         // Monta o objeto de inimigos (excluindo o jogador local) para detecção.
         // Se state não for fornecido (retrocompatibilidade), não faz detecção.
@@ -535,7 +553,9 @@ export function atualizarTerritorio(estadoTerritorio, jogador, configMundo, stat
             }
             estadoTerritorio.rastro.clear();
             estadoTerritorio.celulasInimigas.clear();
-            estadoTerritorio.historicoCelulas.length = 0; // limpa o grace period
+            estadoTerritorio.historicoCelulas.length = 0;
+            estadoTerritorio.rastroOrdenado = [];
+            estadoTerritorio.caminhoAtual = [];
             estadoTerritorio.estaForaDaBase = false;
             estadoTerritorio.posicaoAnterior = null;
 
@@ -556,6 +576,23 @@ function _filtrarInimigos(state, myId) {
         }
     }
     return inimigos;
+}
+
+// ─── Rastreamento do Caminho Real ────────────────────────────────────────────
+//
+// Registra a posição real {x,y} do jogador com throttle de distância mínima.
+// Usado para renderizar o rastro e as regiões capturadas sem zigzag de grade.
+const _DIST_MIN_CAMINHO_SQ = 20 * 20;
+
+function _atualizarCaminhoAtual(estado, jogador) {
+    const pts = estado.caminhoAtual;
+    const ultimo = pts[pts.length - 1];
+    if (ultimo) {
+        const dx = jogador.x - ultimo.x;
+        const dy = jogador.y - ultimo.y;
+        if (dx * dx + dy * dy < _DIST_MIN_CAMINHO_SQ) return;
+    }
+    pts.push({ x: jogador.x, y: jogador.y });
 }
 
 // ─── Remoção de Território por Ação Inimiga ───────────────────────────────────
