@@ -1,4 +1,4 @@
-const socketTransports = Object.freeze(["polling", "websocket"]);
+const socketTransports = Object.freeze(["websocket"]);
 
 const inputActionAngles = Object.freeze({
     "move-right": 0,
@@ -114,8 +114,8 @@ const network = Object.freeze({
     coordinatePrecision: 10,
     anglePrecision: 1000,
     forcedFullSyncsEnabled: false,
-    reliableSnapshotAckTimeoutMs: 1200,
-    reliableSnapshotRetryMs: 1500,
+    reliableSnapshotAckTimeoutMs: 3000,
+    reliableSnapshotRetryMs: 4000,
     playerInfoFullSyncIntervalMs: 5000,
     territoryFullSyncIntervalMs: 10000,
     trailFullSyncIntervalMs: 4000,
