@@ -278,7 +278,11 @@ function getVisiblePlayerIds(players, viewerId, interestBounds) {
     const playerIds = [];
 
     for (const player of players.values()) {
-        if (player.id === viewerId || isPointNearBounds(player, interestBounds, config.world.playerSize)) {
+        if (
+            !config.network.cullPlayerPositionsByViewport
+            || player.id === viewerId
+            || isPointNearBounds(player, interestBounds, config.world.playerSize)
+        ) {
             playerIds.push(player.id);
         }
     }

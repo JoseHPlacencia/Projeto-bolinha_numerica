@@ -111,6 +111,7 @@ const network = Object.freeze({
     interestMargin: 800,
     maxViewportWorldWidth: 3200,
     maxViewportWorldHeight: 2200,
+    cullPlayerPositionsByViewport: false,
     coordinatePrecision: 10,
     anglePrecision: 1000,
     forcedFullSyncsEnabled: false,
