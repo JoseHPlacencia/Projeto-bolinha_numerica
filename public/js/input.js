@@ -13,4 +13,11 @@ export function createInputControls(socket, inputBindings, inputActionAngles) {
     registerKeyboardInput(keyToAction, inputActionAngles, inputState, inputOwnership);
     registerPointerDirectionInput(inputState);
     registerGamepadDirectionInput(inputActionAngles, inputState, inputOwnership);
+
+    // Expõe desabilitar/habilitar para que gameClient.js possa bloquear
+    // o movimento do jogador enquanto a tela de morte estiver ativa.
+    return {
+        desabilitar: () => inputState.desabilitar(),
+        habilitar: () => inputState.habilitar()
+    };
 }

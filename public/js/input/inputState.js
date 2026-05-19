@@ -17,12 +17,40 @@ export function createInputState(socket) {
     let lastDirectionSentAt = 0;
     let lastSentDirection = null;
 
+    // === BLOQUEIO DE INPUT DURANTE A MORTE ===
+    // Quando habilitado = false, setDirection não envia nada ao servidor.
+    // O jogador para de se mover no servidor assim que todas as direções ativas
+    // forem limpadas via clearDirection (chamado por desabilitar()).
+    let habilitado = true;
+
     return {
         clearDirection,
-        setDirection
+        setDirection,
+        desabilitar,
+        habilitar
     };
 
+    // Desabilita o envio de input ao servidor e limpa todas as direções ativas.
+    // Chamada quando o jogador morre — garante que o boneco pare imediatamente.
+    function desabilitar() {
+        habilitado = false;
+
+        // Limpa cada fonte ativa para enviar "inputDirectionEnd" ao servidor
+        // e parar o movimento do jogador. Array.from evita mutação durante iteração.
+        for (const source of Array.from(activeDirections.keys())) {
+            clearDirection(source, { force: true });
+        }
+    }
+
+    // Reabilita o envio de input. Chamada quando o jogador reaparece.
+    function habilitar() {
+        habilitado = true;
+    }
+
     function setDirection(source, angle, options = {}) {
+        // Bloqueia novos inputs enquanto o jogador está morto
+        if (!habilitado) return;
+
         if (!Number.isFinite(angle)) {
             return;
         }
@@ -65,6 +93,9 @@ export function createInputState(socket) {
     }
 
     function sendDirection(angle, force = false) {
+        // Também bloqueia o envio enquanto desabilitado (defesa em profundidade)
+        if (!habilitado) return;
+
         const now = performance.now();
         const changedEnough = lastSentDirection === null
             || Math.abs(getAngleDelta(lastSentDirection, angle)) >= DIRECTION_ANGLE_EPSILON;

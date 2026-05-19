@@ -4,23 +4,44 @@ import { CELULA_BASE, CELULA_RASTRO, TAMANHO_GRADE } from "../territorioSystem.j
 
 // drawTerritoryLayer — desenha o território de todos os jogadores no mundo principal.
 //
-// Parâmetros novos (em relação à versão anterior):
+// === FIX 4: ORDEM DE RENDERIZAÇÃO ===
+// Inimigos são desenhados PRIMEIRO (camada de baixo).
+// O jogador local é desenhado POR ÚLTIMO (camada de cima).
+// Resultado: quando o jogador local conquista área inimiga, sua cor cobre
+// imediatamente a cor do inimigo — sem sobreposição visual.
+//
+// Parâmetros:
 //   estadoTerritorio — objeto { matrizTerritorio, rastro, estaForaDaBase } do jogador local
 //                      Se for null, usa o círculo inicial para todos (modo antigo).
 //   idJogadorLocal   — ID do jogador que está neste cliente (para saber quem usa a matriz)
 export function drawTerritoryLayer(context, state, worldConfig, estadoTerritorio, idJogadorLocal) {
+    // ── Passo 1: Inimigos primeiro (ficam embaixo) ────────────────────────────
+    // Desenha o círculo de território de cada jogador que NÃO é o local.
+    // Como são desenhados antes, serão cobertos pelo território do jogador local.
     for (const player of Object.values(state)) {
-        // Se este jogador é o jogador local E a matriz de território já foi criada,
-        // desenhamos as células individuais da grade em vez do círculo genérico
-        if (player.id === idJogadorLocal && estadoTerritorio) {
-            drawMatrizTerritorio(context, player, estadoTerritorio, worldConfig);
-        } else {
-            // Para outros jogadores (ou antes da grade existir), mantemos o círculo original
-            drawInitialTerritory(context, player, worldConfig);
-        }
+        if (player.id === idJogadorLocal) continue; // pula o jogador local neste passo
+
+        // Para inimigos, mantemos o círculo original (a grade deles vive no cliente deles)
+        drawInitialTerritory(context, player, worldConfig);
 
         // Mantém o suporte a polígonos de território (infraestrutura existente)
         drawPlayerTerritory(context, player);
+    }
+
+    // ── Passo 2: Jogador local por cima (cobre o território inimigo) ──────────
+    // Ao ser desenhado por último, o território local aparece sobre qualquer
+    // área inimiga onde o jogador tenha expandido — efeito "instantâneo".
+    const jogadorLocal = state[idJogadorLocal];
+
+    if (jogadorLocal) {
+        if (estadoTerritorio) {
+            // Usa a grade de células detalhada (com rastro e base reais)
+            drawMatrizTerritorio(context, jogadorLocal, estadoTerritorio, worldConfig);
+        } else {
+            // Fallback: círculo simples antes da grade ser criada (primeiros frames)
+            drawInitialTerritory(context, jogadorLocal, worldConfig);
+        }
+        drawPlayerTerritory(context, jogadorLocal);
     }
 }
 
@@ -87,6 +108,24 @@ function drawMatrizTerritorio(context, player, estadoTerritorio, worldConfig) {
     // Exemplo: mapa com diâmetro 3000 e 50 células → cada célula tem 60 unidades
     const tamanhoCelula = (worldConfig.mapRadius * 2) / TAMANHO_GRADE;
 
+    // ── Passo 0: Apaga território inimigo subjacente (substituição direta) ───────
+    // Círculos inimigos são desenhados antes com globalAlpha 0.66; se apenas
+    // desenharmos o território local com o mesmo alpha, as cores se mesclam
+    // visualmente em vez de substituir. O retângulo branco sólido "reseta" o
+    // pixel para o fundo branco do mapa, garantindo que a cor local seja a única
+    // a aparecer nas células já conquistadas.
+    context.globalAlpha = 1.0;
+    context.fillStyle = "#ffffff";
+
+    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
+        for (let col = 0; col < TAMANHO_GRADE; col++) {
+            if (matrizTerritorio[lin][col] !== CELULA_BASE) continue;
+            const x = col * tamanhoCelula - worldConfig.mapRadius;
+            const y = lin * tamanhoCelula - worldConfig.mapRadius;
+            context.fillRect(x, y, tamanhoCelula, tamanhoCelula);
+        }
+    }
+
     // ── Primeira passagem: desenha todas as células de BASE ───────────────────
     // Usamos a cor do jogador com a mesma opacidade do círculo original (0.66)
     // para manter consistência visual com o resto do jogo
@@ -106,10 +145,18 @@ function drawMatrizTerritorio(context, player, estadoTerritorio, worldConfig) {
         }
     }
 
-    // ── Segunda passagem: desenha as células de RASTRO por cima ──────────────
-    // O rastro usa branco com alta opacidade para se destacar sobre a base
-    context.globalAlpha = 0.80;
-    context.fillStyle = "#ffffff";
+    // ── Segunda passagem: desenha as células de RASTRO ───────────────────────
+    //
+    // === FIX 1: COR DO RASTRO ===
+    // Problema anterior: fillStyle = "#ffffff" (branco) sobre mapa branco (#fff)
+    // → o rastro existia na grade mas era INVISÍVEL na tela principal.
+    //
+    // Correção: usa a cor do jogador com opacidade TOTAL (1.0) para o rastro.
+    // • Na tela principal (fundo branco): agora visível como cor sólida do jogador
+    // • Visualmente distinguível da BASE (que usa 0.66 de opacidade)
+    // • Uma borda branca interna destaca cada bloco de rastro como "em andamento"
+    context.globalAlpha = 1.0;
+    context.fillStyle = player.color;
 
     for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
         for (let col = 0; col < TAMANHO_GRADE; col++) {
@@ -119,6 +166,25 @@ function drawMatrizTerritorio(context, player, estadoTerritorio, worldConfig) {
             const y = lin * tamanhoCelula - worldConfig.mapRadius;
 
             context.fillRect(x, y, tamanhoCelula, tamanhoCelula);
+        }
+    }
+
+    // Borda branca interna nos blocos de rastro — diferencia visualmente de BASE.
+    // A margem de 4px cria um "frame" branco dentro de cada bloco de rastro.
+    context.globalAlpha = 0.55;
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 3;
+
+    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
+        for (let col = 0; col < TAMANHO_GRADE; col++) {
+            if (matrizTerritorio[lin][col] !== CELULA_RASTRO) continue;
+
+            const x = col * tamanhoCelula - worldConfig.mapRadius;
+            const y = lin * tamanhoCelula - worldConfig.mapRadius;
+            const margem = 4;
+
+            // strokeRect inset de 4px: cria borda branca DENTRO do bloco colorido
+            context.strokeRect(x + margem, y + margem, tamanhoCelula - margem * 2, tamanhoCelula - margem * 2);
         }
     }
 

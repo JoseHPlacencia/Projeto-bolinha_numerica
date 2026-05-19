@@ -46,7 +46,11 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
     // estadoTerritorio — objeto com a matriz de células do jogador local
     // (criado pelo territorioSystem.js e gerenciado no gameClient.js)
-    function renderWorld(state, currentPlayerId, estadoTerritorio) {
+    //
+    // cameraOverride — {x, y} opcional: quando fornecido, a câmera ignora a posição
+    // interpolada do jogador e centraliza neste ponto. Usado durante a morte para
+    // fixar a câmera instantaneamente no centro da base, sem aguardar o snapshot.
+    function renderWorld(state, currentPlayerId, estadoTerritorio, cameraOverride) {
         const currentPlayer = state[currentPlayerId];
 
         if (!currentPlayer) {
@@ -55,14 +59,15 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
         clearCanvas();
         applyViewportTransform();
-        drawWorld(state, currentPlayer, currentPlayerId, estadoTerritorio);
+        drawWorld(state, currentPlayer, currentPlayerId, estadoTerritorio, cameraOverride);
     }
 
-    function drawWorld(state, currentPlayer, currentPlayerId, estadoTerritorio) {
+    function drawWorld(state, currentPlayer, currentPlayerId, estadoTerritorio, cameraOverride) {
+        const cam = cameraOverride || currentPlayer;
         context.save();
         context.translate(viewportWidth / 2, viewportHeight / 2);
         context.scale(canvasScale, canvasScale);
-        context.translate(-currentPlayer.x, -currentPlayer.y);
+        context.translate(-cam.x, -cam.y);
 
         drawMap(context, gameConfig.world);
 

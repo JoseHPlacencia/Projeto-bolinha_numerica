@@ -16,6 +16,8 @@ function updatePlayers(players, deltaTime) {
 }
 
 function updatePlayer(player, deltaTime) {
+    // Jogador morto: posição congelada no servidor até o cliente liberar o movimento.
+    if (player.isDead) return;
     rotatePlayerToLastInput(player, deltaTime);
     movePlayer(player, deltaTime);
 }

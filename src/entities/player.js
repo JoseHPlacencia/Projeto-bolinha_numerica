@@ -31,6 +31,7 @@ class Player {
         this.pressedActions = new Set();
         this.lastAction = null;
         this.directionAngle = null;
+        this.isDead = false;
     }
 
     pressAction(action) {

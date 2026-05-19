@@ -22,6 +22,13 @@
 // ATENÇÃO: quanto maior esse número, mais detalhes no minimapa, mas mais processamento
 export const TAMANHO_GRADE = 50;
 
+// === FIX 2: GRACE PERIOD NA AUTO-COLISÃO ===
+// Número de células recentes do rastro que são IGNORADAS na detecção de auto-colisão.
+// Sem isso, ao fazer uma curva fechada o jogador morre instantaneamente ao
+// "roçar" a borda do próprio rastro — o grace period evita esse falso positivo.
+// Valor 3 = as últimas 3 células marcadas não causam morte por colisão.
+const CELULAS_IGNORADAS = 3;
+
 // Identificadores numéricos para o estado de cada célula
 // (devem ser números inteiros simples para facilitar a leitura e o debug)
 export const CELULA_VAZIA  = 0; // célula sem dono — cor de fundo do minimapa
@@ -79,11 +86,33 @@ export function criarEstadoTerritorio(jogador, configMundo) {
     // Começa como false (jogador começa dentro da base).
     let estaForaDaBase = false;
 
+    // === RASTRO ===
+    // Última célula da grade onde o jogador esteve enquanto fora da base.
+    // Usada pelo algoritmo de Bresenham para garantir rastro contínuo (sem vãos).
+    // null enquanto o jogador estiver dentro da base ou antes de sair pela primeira vez.
+    const posicaoAnterior = null;
+
+    // === TERRITÓRIO INIMIGO ===
+    // Map que registra, por ID de inimigo, quais células do rastro atual
+    // estão dentro do domínio daquele inimigo.
+    // Estrutura: Map<idInimigo: string, Set<"lin,col": string>>
+    // Limpo quando o jogador retorna à base ou morre.
+    const celulasInimigas = new Map();
+
+    // === FIX 2: GRACE PERIOD ===
+    // Array com as chaves "lin,col" das últimas CELULAS_IGNORADAS células marcadas.
+    // Ao verificar auto-colisão, se a célula estiver neste array, ela é ignorada.
+    // Isso permite que o jogador faça curvas fechadas sem morrer instantaneamente.
+    const historicoCelulas = [];
+
     // Objeto que vai guardar todos os dados de território deste jogador
     const estado = {
         matrizTerritorio,
         rastro,
-        estaForaDaBase
+        estaForaDaBase,
+        posicaoAnterior,   // para o algoritmo de Bresenham
+        celulasInimigas,   // para interação com território inimigo
+        historicoCelulas   // para o grace period na auto-colisão
     };
 
     // Preenche o círculo inicial do jogador na grade como CELULA_BASE
@@ -135,22 +164,205 @@ function _jogadorEstaEmBase(estadoTerritorio, jogador, configMundo) {
     return estadoTerritorio.matrizTerritorio[lin][col] === CELULA_BASE;
 }
 
-// ─── Registro do Rastro ───────────────────────────────────────────────────────
+// ─── Algoritmo de Bresenham ────────────────────────────────────────────────────
+//
+// === RASTRO ===
+// Gera TODAS as células que formam uma linha reta discreta entre dois pontos
+// da grade. Isso garante que o rastro não tenha vãos (gaps) quando o jogador
+// se move rápido ou há lag de rede.
+//
+// Funciona como um "traçado de pixel" em uma tela: dado ponto A e ponto B,
+// quais células precisam ser coloridas para formar uma linha contínua?
+//
+// Exemplo: de (lin=2, col=2) para (lin=5, col=8):
+//   Retorna [(2,2), (2,3), (3,4), (3,5), (4,6), (4,7), (5,8)]
+//   — uma sequência conectada sem gaps.
+function _bresenham(de, ate) {
+    const celulas = [];
+    let { lin: y0, col: x0 } = de;
+    const { lin: y1, col: x1 } = ate;
 
-// Marca a célula onde o jogador está como CELULA_RASTRO, se ela estiver vazia.
-// Chamada a cada frame enquanto o jogador está fora da base.
-function _registrarRastro(estadoTerritorio, jogador, configMundo) {
-    // Descobre em qual célula da grade o jogador está agora
-    const { lin, col } = mundoParaGrade(jogador.x, jogador.y, configMundo);
+    // Diferença absoluta em cada eixo
+    const dx = Math.abs(x1 - x0);
+    const dy = Math.abs(y1 - y0);
 
-    // Só registra rastro em células VAZIAS (não sobrescreve base nem rastro anterior)
-    if (estadoTerritorio.matrizTerritorio[lin][col] === CELULA_VAZIA) {
-        // Marca a célula como rastro na grade
-        estadoTerritorio.matrizTerritorio[lin][col] = CELULA_RASTRO;
+    // Sentido de incremento em cada eixo (+1 ou -1)
+    const sx = x0 < x1 ? 1 : -1;
+    const sy = y0 < y1 ? 1 : -1;
 
-        // Salva a chave "lin,col" no conjunto para usar no Flood Fill depois
-        estadoTerritorio.rastro.add(`${lin},${col}`);
+    // Variável de erro que decide quando avançar no eixo secundário
+    let err = dx - dy;
+
+    // Itera célula por célula até chegar no destino
+    while (true) {
+        celulas.push({ lin: y0, col: x0 });
+
+        // Chegou ao destino — linha completa
+        if (x0 === x1 && y0 === y1) break;
+
+        const e2 = 2 * err;
+
+        // Avança no eixo X se o erro acumulado justificar
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+
+        // Avança no eixo Y se o erro acumulado justificar
+        if (e2 < dx)  { err += dx; y0 += sy; }
     }
+
+    return celulas; // array de {lin, col} formando a linha completa
+}
+
+// ─── Verificação de Célula no Território Inimigo ─────────────────────────────
+//
+// === TERRITÓRIO INIMIGO ===
+// Verifica se a célula (lin, col) está dentro do círculo inicial de um inimigo.
+// Usamos o círculo como aproximação do domínio inimigo, pois a grade real do
+// inimigo existe apenas no cliente dele (arquitetura cliente-a-cliente).
+//
+// Funcionamento:
+//   1. Converte a célula para coordenadas do mundo (centro da célula)
+//   2. Calcula a distância até o centro do território inimigo
+//   3. Compara com o raio inicial do território
+function _celulaEstaNaBaseInimiga(lin, col, inimigo, configMundo) {
+    const tamanhoCelula = (configMundo.mapRadius * 2) / TAMANHO_GRADE;
+
+    // Posição do centro desta célula no mundo (não o canto, o centro)
+    const celulaX = col * tamanhoCelula - configMundo.mapRadius + tamanhoCelula / 2;
+    const celulaY = lin * tamanhoCelula - configMundo.mapRadius + tamanhoCelula / 2;
+
+    // Distância euclidiana entre o centro da célula e o centro do território inimigo
+    const dx = celulaX - inimigo.territoryX;
+    const dy = celulaY - inimigo.territoryY;
+    const distancia = Math.sqrt(dx * dx + dy * dy);
+
+    // true se a célula está dentro ou na borda do círculo inimigo
+    return distancia <= configMundo.initialTerritoryRadius;
+}
+
+// ─── Marcação de Célula Individual ────────────────────────────────────────────
+//
+// === RASTRO + AUTO-COLISÃO + TERRITÓRIO INIMIGO ===
+// Processa uma única célula durante o registro do rastro.
+// Esta função centraliza toda a lógica de o que fazer quando o jogador
+// visita uma célula enquanto está fora da base.
+//
+// Retorna:
+//   "autoColisao" — jogador cruzou o próprio rastro (deve morrer)
+//   "ok"          — célula processada normalmente
+//
+// Parâmetros:
+//   estado      — estado de território do jogador local
+//   lin, col    — índices da célula na grade
+//   inimigos    — objeto {id: dadosJogador} com todos os inimigos (pode ser null)
+//   configMundo — configuração do mundo
+function _marcarCelula(estado, lin, col, inimigos, configMundo) {
+    const tipo = estado.matrizTerritorio[lin][col];
+
+    // Chave da célula no formato "lin,col" — usada nos Sets e no historicoCelulas
+    const chave = `${lin},${col}`;
+
+    // === AUTO-COLISÃO com Grace Period (FIX 2) ===
+    // Se a célula já é rastro, pode ser auto-colisão — mas só se NÃO for
+    // uma das últimas CELULAS_IGNORADAS células marcadas.
+    //
+    // Por que o grace period?
+    //   Ao fazer uma curva fechada, o jogador naturalmente "roza" as células
+    //   imediatamente atrás de si. Sem o grace period, isso causaria morte
+    //   instantânea mesmo em manobras válidas.
+    //
+    // Comportamento:
+    //   • Célula RASTRO recente (em historicoCelulas) → sem colisão, ignora
+    //   • Célula RASTRO antiga (fora do histórico)    → colisão real, morre
+    if (tipo === CELULA_RASTRO) {
+        if (estado.historicoCelulas.includes(chave)) {
+            return "ok"; // grace period — célula recente, não é colisão
+        }
+        return "autoColisao"; // célula antiga — colisão real
+    }
+
+    // Só marca células VAZIAS — não sobrescreve BASE com RASTRO
+    if (tipo === CELULA_VAZIA) {
+        // Marca a célula como rastro na grade
+        estado.matrizTerritorio[lin][col] = CELULA_RASTRO;
+        estado.rastro.add(chave);
+
+        // Atualiza o histórico de células recentes para o grace period.
+        // Mantém apenas as últimas CELULAS_IGNORADAS células (janela deslizante).
+        estado.historicoCelulas.push(chave);
+        if (estado.historicoCelulas.length > CELULAS_IGNORADAS) {
+            estado.historicoCelulas.shift(); // remove a mais antiga
+        }
+
+        // === TERRITÓRIO INIMIGO ===
+        // Verifica se esta célula de rastro está dentro do domínio de algum inimigo.
+        // Se estiver, registra para que ao retornar à base possamos subtrair o território.
+        if (inimigos && configMundo) {
+            for (const [id, dadosInimigo] of Object.entries(inimigos)) {
+                if (_celulaEstaNaBaseInimiga(lin, col, dadosInimigo, configMundo)) {
+                    // Cria o Set para este inimigo se ainda não existir
+                    if (!estado.celulasInimigas.has(id)) {
+                        estado.celulasInimigas.set(id, new Set());
+                    }
+                    // Registra a chave desta célula para subtração posterior
+                    estado.celulasInimigas.get(id).add(chave);
+                }
+            }
+        }
+    }
+
+    return "ok";
+}
+
+// ─── Registro do Rastro ───────────────────────────────────────────────────────
+//
+// === RASTRO (com Bresenham e detecção de colisão) ===
+// Marca as células percorridas pelo jogador como CELULA_RASTRO.
+// Usa o algoritmo de Bresenham para garantir que NENHUMA célula seja pulada
+// entre a posição anterior e a atual — isso elimina os "vãos" no rastro.
+//
+// Chamada a cada frame enquanto o jogador está fora da base.
+//
+// Parâmetros:
+//   estado      — estado de território do jogador local
+//   jogador     — dados do jogador (x, y)
+//   configMundo — configurações do mundo
+//   inimigos    — objeto {id: dados} com inimigos (pode ser null)
+//
+// Retorna: true se houve auto-colisão, false caso contrário
+function _registrarRastro(estado, jogador, configMundo, inimigos) {
+    const posAtual = mundoParaGrade(jogador.x, jogador.y, configMundo);
+
+    // Determina quais células percorrer neste frame:
+    // • Primeiro frame fora da base: só a célula atual
+    // • Frames seguintes: linha de Bresenham da posição anterior até a atual
+    const celulas = estado.posicaoAnterior
+        ? _bresenham(estado.posicaoAnterior, posAtual)
+        : [posAtual];
+
+    // Pula a primeira célula se vinda de Bresenham:
+    // ela é a "posicaoAnterior" e já foi processada no frame anterior.
+    // Sem isso, processaríamos a mesma célula duas vezes.
+    const inicio = estado.posicaoAnterior ? 1 : 0;
+
+    let autoColisao = false;
+
+    for (let i = inicio; i < celulas.length; i++) {
+        const { lin, col } = celulas[i];
+        const resultado = _marcarCelula(estado, lin, col, inimigos, configMundo);
+
+        if (resultado === "autoColisao") {
+            autoColisao = true;
+            break; // para de processar o restante da linha
+        }
+    }
+
+    // Só atualiza posicaoAnterior se não houve colisão —
+    // em caso de colisão, o estado será resetado de qualquer forma.
+    if (!autoColisao) {
+        estado.posicaoAnterior = posAtual;
+    }
+
+    return autoColisao;
 }
 
 // ─── Conquista de Território — Flood Fill ─────────────────────────────────────
@@ -253,30 +465,116 @@ function _enfileirarSeVazia(matrizTerritorio, foiAlcancada, fila, lin, col) {
 // Decide o que fazer com base na posição atual do jogador na grade.
 //
 // Parâmetros:
-//   estadoTerritorio — objeto com matrizTerritorio, rastro, estaForaDaBase
+//   estadoTerritorio — objeto com matrizTerritorio, rastro, estaForaDaBase, etc.
 //   jogador          — dados atuais do jogador (x, y, territoryX, territoryY)
 //   configMundo      — configurações do mundo (mapRadius, initialTerritoryRadius)
-export function atualizarTerritorio(estadoTerritorio, jogador, configMundo) {
+//   state            — NOVO: estado completo de todos os jogadores (para detectar inimigos)
+//   myId             — NOVO: ID do jogador local (para excluí-lo da lista de inimigos)
+//
+// Retorna: { morreu: boolean, celulasSubtraidas: Object|null }
+//   morreu          — true se o jogador cruzou o próprio rastro (deve respawnar)
+//   celulasSubtraidas — mapa {idInimigo: ["lin,col"]} de células a subtrair dos inimigos
+//                       null se não houve interação com território inimigo
+export function atualizarTerritorio(estadoTerritorio, jogador, configMundo, state, myId) {
     // Verifica se o jogador está dentro da sua base neste exato instante
     const emBase = _jogadorEstaEmBase(estadoTerritorio, jogador, configMundo);
 
     if (emBase) {
         // ── JOGADOR ESTÁ NA BASE ──────────────────────────────────────────────
+        let celulasSubtraidas = null;
+
         // Se ele estava fora e voltou com rastro, executa o Flood Fill
         if (estadoTerritorio.estaForaDaBase && estadoTerritorio.rastro.size > 0) {
             // Retornou à base com rastro! Conquista o território cercado!
             _conquistarTerritorio(estadoTerritorio);
+
+            // === TERRITÓRIO INIMIGO ===
+            // Se o rastro passou por território inimigo, preparar dados para subtração.
+            // Fazemos isso ANTES de limpar celulasInimigas.
+            if (estadoTerritorio.celulasInimigas.size > 0) {
+                celulasSubtraidas = {};
+                for (const [id, celulaSet] of estadoTerritorio.celulasInimigas) {
+                    // Converte o Set de strings para um Array para poder enviar via socket
+                    celulasSubtraidas[id] = Array.from(celulaSet);
+                }
+                estadoTerritorio.celulasInimigas.clear();
+            }
         }
 
-        // Desliga o flag de "está fora da base"
+        // Desliga o flag de "está fora da base" e reseta o rastro de posição
         estadoTerritorio.estaForaDaBase = false;
+        // Reseta a posição anterior para que o Bresenham comece do zero na próxima saída
+        estadoTerritorio.posicaoAnterior = null;
+        // Limpa o histórico de grace period para que a próxima saída comece limpa
+        estadoTerritorio.historicoCelulas.length = 0;
+
+        return { morreu: false, celulasSubtraidas };
 
     } else {
         // ── JOGADOR ESTÁ FORA DA BASE ─────────────────────────────────────────
         // Liga o flag que mostra que o jogador está no território desconhecido
         estadoTerritorio.estaForaDaBase = true;
 
-        // Registra o rastro na célula atual (só se ela estiver vazia)
-        _registrarRastro(estadoTerritorio, jogador, configMundo);
+        // === TERRITÓRIO INIMIGO ===
+        // Monta o objeto de inimigos (excluindo o jogador local) para detecção.
+        // Se state não for fornecido (retrocompatibilidade), não faz detecção.
+        const inimigos = (state && myId) ? _filtrarInimigos(state, myId) : null;
+
+        // === RASTRO + AUTO-COLISÃO ===
+        // Registra o rastro com Bresenham (sem gaps) e detecta auto-colisão
+        const autoColisao = _registrarRastro(estadoTerritorio, jogador, configMundo, inimigos);
+
+        if (autoColisao) {
+            // === AUTO-COLISÃO ===
+            // Jogador cruzou o próprio rastro — deve voltar ao spawn.
+            // Limpa as células de rastro da grade antes de limpar o conjunto.
+            // (precisamos limpar o conjunto depois, por isso iteramos primeiro)
+            for (const chave of estadoTerritorio.rastro) {
+                const [l, c] = chave.split(",").map(Number);
+                estadoTerritorio.matrizTerritorio[l][c] = CELULA_VAZIA;
+            }
+            estadoTerritorio.rastro.clear();
+            estadoTerritorio.celulasInimigas.clear();
+            estadoTerritorio.historicoCelulas.length = 0; // limpa o grace period
+            estadoTerritorio.estaForaDaBase = false;
+            estadoTerritorio.posicaoAnterior = null;
+
+            return { morreu: true, celulasSubtraidas: null };
+        }
+
+        return { morreu: false, celulasSubtraidas: null };
+    }
+}
+
+// Filtra o estado geral de jogadores para retornar apenas os inimigos
+// (todos exceto o jogador local), no formato {id: dadosJogador}.
+function _filtrarInimigos(state, myId) {
+    const inimigos = {};
+    for (const [id, dados] of Object.entries(state)) {
+        if (id !== myId) {
+            inimigos[id] = dados;
+        }
+    }
+    return inimigos;
+}
+
+// ─── Remoção de Território por Ação Inimiga ───────────────────────────────────
+//
+// === TERRITÓRIO INIMIGO ===
+// Chamada quando o servidor notifica que outro jogador passou pelo nosso território
+// e retornou à base — aquelas células devem ser removidas do nosso domínio.
+//
+// Parâmetros:
+//   estado  — estado de território do jogador local
+//   celulas — array de strings "lin,col" das células a serem removidas
+export function limparCelulasTerritorio(estado, celulas) {
+    for (const chave of celulas) {
+        const [lin, col] = chave.split(",").map(Number);
+
+        // Só remove células que realmente são BASE — não remove rastro nem vazio.
+        // (garante que não desfazemos o estado de uma célula que já mudou)
+        if (estado.matrizTerritorio[lin][col] === CELULA_BASE) {
+            estado.matrizTerritorio[lin][col] = CELULA_VAZIA;
+        }
     }
 }
