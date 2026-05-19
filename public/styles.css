@@ -1,13 +1,297 @@
+html,
 body {
+    height: 100%;
     margin: 0;
     overflow: hidden;
-    background: #000;
+    overscroll-behavior: none;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
 }
 
-canvas {
+:root {
+    --hud-panel-background: rgba(8, 12, 18, 0.72);
+    --hud-panel-border: rgba(255, 255, 255, 0.14);
+    --hud-panel-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+body {
+    background: #000;
+    color: #f5f7fb;
+    font-family: Arial, Helvetica, sans-serif;
+}
+
+#gameCanvas {
     display: block;
     position: absolute;
     top: 50%;
     left: 50%;
+    touch-action: none;
     transform: translate(-50%, -50%);
 }
+
+.hud {
+    box-sizing: border-box;
+    display: flex;
+    justify-content: flex-start;
+    left: 0;
+    padding: 16px;
+    pointer-events: none;
+    position: fixed;
+    right: 0;
+    top: 0;
+    z-index: 2;
+}
+
+.debug-panel {
+    background: var(--hud-panel-background);
+    border: 1px solid var(--hud-panel-border);
+    border-radius: 8px;
+    box-shadow: var(--hud-panel-shadow);
+}
+
+.debug-panel div {
+    display: grid;
+    gap: 2px;
+    min-width: 80px;
+}
+
+.debug-panel span {
+    color: #b9c2d0;
+    font-size: 11px;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.debug-panel strong {
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.debug-panel {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(72px, 1fr));
+    padding: 10px 12px;
+}
+
+.debug-panel[hidden] {
+    display: none;
+}
+
+.debug-panel [hidden] {
+    display: none;
+}
+
+.minimap {
+    border-radius: 50%;
+    bottom: 16px;
+    box-shadow: var(--hud-panel-shadow);
+    display: block;
+    height: clamp(96px, 28vmin, 300px);
+    pointer-events: none;
+    position: fixed;
+    right: 16px;
+    touch-action: none;
+    width: clamp(96px, 28vmin, 300px);
+    z-index: 2;
+}
+
+.touch-controls {
+    height: clamp(96px, 18vmin, 150px);
+    left: 50%;
+    opacity: 0;
+    pointer-events: none;
+    position: fixed;
+    top: 50%;
+    transform: translate(-50%, -50%) scale(0.94);
+    transition: opacity 120ms ease, transform 120ms ease;
+    visibility: hidden;
+    width: clamp(96px, 18vmin, 150px);
+    z-index: 3;
+}
+
+.touch-controls.is-active {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    visibility: visible;
+}
+
+.move-stick {
+    align-items: center;
+    background: rgba(8, 12, 18, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 50%;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.24);
+    display: flex;
+    height: 100%;
+    justify-content: center;
+    touch-action: none;
+    width: 100%;
+}
+
+.move-stick-knob {
+    background: rgba(245, 247, 251, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.42);
+    border-radius: 50%;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+    height: clamp(40px, 7.5vmin, 58px);
+    transform: translate(0, 0);
+    width: clamp(40px, 7.5vmin, 58px);
+}
+
+@media (max-width: 640px) {
+    .hud {
+        gap: 8px;
+        padding: 10px;
+    }
+
+    .debug-panel div {
+        min-width: 64px;
+    }
+
+    .minimap {
+        bottom: 10px;
+        right: 10px;
+    }
+}
+
+/* ── Conjunto Tema ─────────────────────────────────────────── */
+.tema-panel {
+    align-items: center;
+    background: var(--hud-panel-background);
+    border: 1px solid var(--hud-panel-border);
+    border-radius: 14px;
+    box-shadow: var(--hud-panel-shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    left: 50%;
+    min-width: 160px;
+    padding: 10px 20px 12px;
+    pointer-events: none;
+    position: fixed;
+    top: 16px;
+    transform: translateX(-50%);
+    z-index: 4;
+}
+
+.tema-label {
+    color: #b9c2d0;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.tema-icon {
+    color: #fff;
+    font-size: 30px;
+    font-weight: 900;
+    line-height: 1;
+}
+
+.tema-name {
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.tema-timer-bar-wrap {
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+    height: 4px;
+    margin-top: 4px;
+    overflow: hidden;
+    width: 100%;
+}
+
+.tema-timer-bar {
+    background: linear-gradient(90deg, #4d96ff, #c77dff);
+    border-radius: 4px;
+    height: 100%;
+    transition: width 0.5s linear;
+    width: 100%;
+}
+
+/* ── Score Panel ───────────────────────────────────────────── */
+.score-panel {
+    background: var(--hud-panel-background);
+    border: 1px solid var(--hud-panel-border);
+    border-radius: 10px;
+    box-shadow: var(--hud-panel-shadow);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    left: 16px;
+    padding: 10px 14px;
+    pointer-events: none;
+    position: fixed;
+    top: 16px;
+    z-index: 4;
+}
+
+.score-title {
+    color: #b9c2d0;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.score-line {
+    font-size: 14px;
+}
+
+.score-correct { color: #6bcb77; }
+.score-wrong   { color: #ff6b6b; }
+
+.score-line strong {
+    font-size: 18px;
+    font-weight: 900;
+}
+
+/* ── Notificações de Captura ───────────────────────────────── */
+.capture-notif-container {
+    bottom: 120px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    left: 50%;
+    pointer-events: none;
+    position: fixed;
+    transform: translateX(-50%);
+    z-index: 10;
+}
+
+.capture-notif {
+    animation: notifPop 2.8s ease forwards;
+    border-radius: 10px;
+    font-size: 18px;
+    font-weight: 700;
+    padding: 8px 20px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.capture-notif.correct {
+    background: rgba(107, 203, 119, 0.92);
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+
+.capture-notif.wrong {
+    background: rgba(255, 107, 107, 0.92);
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+
+@keyframes notifPop {
+    0%   { opacity: 0; transform: translateY(12px) scale(0.9); }
+    12%  { opacity: 1; transform: translateY(0)    scale(1.04); }
+    20%  { transform: scale(1); }
+    75%  { opacity: 1; }
+    100% { opacity: 0; transform: translateY(-24px); }
+}
+

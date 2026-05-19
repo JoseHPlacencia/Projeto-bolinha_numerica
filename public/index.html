@@ -2,15 +2,62 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <title>Teoria dos Conjuntos</title>
 <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 
 <canvas id="gameCanvas"></canvas>
+<div id="hud" class="hud">
+    <div id="debugPanel" class="debug-panel" hidden>
+        <div data-debug-level="1"><span>FPS</span><strong id="debugFps">0</strong></div>
+        <div data-debug-level="1"><span>Frame</span><strong id="debugFrame">0ms</strong></div>
+        <div data-debug-level="1"><span>Buffer</span><strong id="debugBuffer">0ms</strong></div>
+        <div data-debug-level="1"><span>Snapshots</span><strong id="debugSnapshots">0</strong></div>
+        <div data-debug-level="1"><span>DPR</span><strong id="debugPixelRatio">1</strong></div>
+        <div data-debug-level="1"><span>Canvas</span><strong id="debugCanvas">0x0</strong></div>
+        <div data-debug-level="2"><span>Dir source</span><strong id="debugDirectionSource">-</strong></div>
+        <div data-debug-level="2"><span>Dir rad</span><strong id="debugDirectionAngleRad">-</strong></div>
+        <div data-debug-level="2"><span>Dir deg</span><strong id="debugDirectionAngleDeg">-</strong></div>
+        <div data-debug-level="2"><span>Angle rad</span><strong id="debugPlayerAngleRad">-</strong></div>
+        <div data-debug-level="2"><span>Angle deg</span><strong id="debugPlayerAngleDeg">-</strong></div>
+        <div data-debug-level="2"><span>Delta rad</span><strong id="debugInputAngleDeltaRad">-</strong></div>
+        <div data-debug-level="2"><span>Delta deg</span><strong id="debugInputAngleDeltaDeg">-</strong></div>
+        <div data-debug-level="2"><span>Boundary</span><strong id="debugBoundaryRelation">-</strong></div>
+        <div data-debug-level="2"><span>Slide dir</span><strong id="debugBoundarySlideDirection">-</strong></div>
+        <div data-debug-level="2"><span>Touching</span><strong id="debugTouchingBoundary">-</strong></div>
+        <div data-debug-level="2"><span>Input</span><strong id="debugInputAccepted">-</strong></div>
+        <div data-debug-level="2"><span>Decision</span><strong id="debugBoundaryDecision">-</strong></div>
+    </div>
+</div>
+
+<!-- Conjunto Tema -->
+<div id="temaPanel" class="tema-panel">
+    <div class="tema-label">Conjunto Tema</div>
+    <div id="temaIcon" class="tema-icon">ℕ</div>
+    <div id="temaName" class="tema-name">Naturais (ℕ)</div>
+    <div class="tema-timer-bar-wrap"><div id="temaTimerBar" class="tema-timer-bar"></div></div>
+</div>
+
+<!-- Placar de capturas do jogador -->
+<div id="scorePanel" class="score-panel">
+    <div class="score-title">⭐ Pontuação</div>
+    <div id="scoreCorrect" class="score-line score-correct">✔ Corretos: <strong id="numCorrect">0</strong></div>
+    <div id="scoreWrong" class="score-line score-wrong">✘ Errados: <strong id="numWrong">0</strong></div>
+</div>
+
+<!-- Notificações de captura -->
+<div id="captureNotif" class="capture-notif-container"></div>
+<canvas id="minimapCanvas" class="minimap" aria-hidden="true"></canvas>
+<div id="touchControls" class="touch-controls" aria-hidden="true">
+    <div id="moveStick" class="move-stick">
+        <div id="moveStickKnob" class="move-stick-knob"></div>
+    </div>
+</div>
 
 <script src="/socket.io/socket.io.js"></script>
-<script src="/client.js"></script>
+<script src="/shared/math.js"></script>
+<script type="module" src="/client.js"></script>
 </body>
 </html>
