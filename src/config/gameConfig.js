@@ -1,17 +1,24 @@
 const socketTransports = Object.freeze(["websocket"]);
 
-const inputAngles = Object.freeze({
-    arrowright: 0,
-    d: 0,
+const inputActionAngles = Object.freeze({
+    "move-right": 0,
+    "move-down": Math.PI / 2,
+    "move-left": Math.PI,
+    "move-up": -Math.PI / 2
+});
 
-    arrowdown: Math.PI / 2,
-    s: Math.PI / 2,
+const inputBindings = Object.freeze({
+    arrowright: "move-right",
+    d: "move-right",
 
-    arrowleft: Math.PI,
-    a: Math.PI,
+    arrowdown: "move-down",
+    s: "move-down",
 
-    arrowup: -Math.PI / 2,
-    w: -Math.PI / 2
+    arrowleft: "move-left",
+    a: "move-left",
+
+    arrowup: "move-up",
+    w: "move-up"
 });
 
 const server = Object.freeze({
@@ -30,19 +37,54 @@ const loop = Object.freeze({
 });
 
 const world = Object.freeze({
-    mapRadius: 1500,
+    mapRadius: 3000,
     playerSize: 70,
-    baseRadius: 200
+    initialTerritoryRadius: 200
+});
+
+const territory = Object.freeze({
+    baseBorderInset: 3,
+    baseBorderWidth: 4,
+    circleSegments: 96,
+    fillAlpha: 0.36,
+    minCaptureArea: 800,
+    minCaptureTrailPoints: 4,
+    trailPointSpacing: 10
 });
 
 const movement = Object.freeze({
+    boundarySlideTriggerAlignmentPower: 0.1,
+    boundarySlideExitAlignment: 0.2,
+    boundarySlideExitDistance: 1,
+    boundaryTouchTolerance: 4,
+    boundarySlideTriggerMinOutwardAlignment: 0.25,
+    boundarySlideTriggerPerpendicularPlayerSizeRatio: 2.5,
+    boundarySlideTriggerRotationCurveSharpness: 10,
+    boundarySlideTriggerRotationSharpness: 30,
     speed: 600,
     rotationStrength: 0.1,
     slideAngleThreshold: 0.1
 });
 
+const player = Object.freeze({
+    blinkDurationMs: 250,
+    blinkMaxIntervalMs: 5000,
+    blinkMinIntervalMs: 2500
+});
+
+const minimap = Object.freeze({
+    mapBorderWidth: 3,
+    minSize: 96,
+    playerIconBorderWidth: 1,
+    playerIconSize: 6,
+    size: 300,
+    territoryBorderWidth: 2,
+    trailBorderWidth: 2,
+    viewportSizeRatio: 0.5
+});
+
 const spawn = Object.freeze({
-    minBaseDistance: world.baseRadius * 3,
+    minTerritoryDistance: world.initialTerritoryRadius * 3,
     maxAttempts: 500
 });
 
@@ -56,10 +98,10 @@ const screen = Object.freeze({
 const network = Object.freeze({
     initialBufferMs: 140,
     minBufferMs: 100,
-    maxBufferMs: 260,
+    maxBufferMs: 250,
     jitterMultiplier: 2,
     maxJitterSamples: 30,
-    maxSnapshots: 60
+    maxSnapshots: 15
 });
 
 const security = Object.freeze({
@@ -76,9 +118,13 @@ const client = Object.freeze({
         transports: socketTransports
     }),
     world,
+    territory,
+    player,
+    minimap,
     screen,
     network,
-    inputKeys: Object.freeze(Object.keys(inputAngles))
+    inputActionAngles,
+    inputBindings
 });
 
 module.exports = Object.freeze({
@@ -86,9 +132,13 @@ module.exports = Object.freeze({
     socket,
     loop,
     world,
+    territory,
     movement,
+    player,
+    minimap,
     spawn,
-    inputAngles,
+    inputActionAngles,
+    inputBindings,
     security,
     client
 });

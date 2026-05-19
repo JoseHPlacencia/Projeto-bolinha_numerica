@@ -1,9 +1,15 @@
 const { getServerTime } = require("../utils/time");
+const { serializeTerritories } = require("../state/territories");
+const { serializeTrails } = require("../systems/trailSystem");
+const numberSystem = require("../systems/numberSystem");
 
-function createSnapshot(players) {
+function createSnapshot(players, territories) {
     return {
         time: getServerTime(),
-        players: serializePlayers(players)
+        players: serializePlayers(players),
+        territories: serializeTerritories(territories, players),
+        trails: serializeTrails(players, territories),
+        numbers: numberSystem.serialize()
     };
 }
 
