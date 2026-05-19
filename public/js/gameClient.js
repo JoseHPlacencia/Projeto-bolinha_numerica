@@ -30,7 +30,13 @@ export function startClient(gameConfig) {
         sendViewportState(true);
     });
 
-    socket.on("gameState", snapshots.processSnapshot);
+    socket.on("gameState", (snapshot, acknowledge) => {
+        snapshots.processSnapshot(snapshot);
+
+        if (typeof acknowledge === "function") {
+            acknowledge();
+        }
+    });
 
     resizeCanvases();
     render();

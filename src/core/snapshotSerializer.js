@@ -13,6 +13,18 @@ function createClientSnapshotState() {
     };
 }
 
+function cloneClientSnapshotState(clientState = createClientSnapshotState()) {
+    return {
+        playerInfo: cloneMap(clientState.playerInfo, cloneVersionedState),
+        territories: cloneMap(clientState.territories, cloneVersionedState),
+        trails: cloneMap(clientState.trails, cloneTrailState),
+        territoryPoints: new Map(clientState.territoryPoints || []),
+        nextTerritoryPointId: Number.isInteger(clientState.nextTerritoryPointId)
+            ? clientState.nextTerritoryPointId
+            : 1
+    };
+}
+
 function createSnapshot(players, territories, viewerId = null, clientState = createClientSnapshotState()) {
     const viewer = viewerId ? players.get(viewerId) : null;
     const now = getServerTime();
@@ -671,6 +683,33 @@ function clamp(value, min, max) {
 }
 
 module.exports = {
+    cloneClientSnapshotState,
     createClientSnapshotState,
     createSnapshot
 };
+
+function cloneMap(map, cloneValue) {
+    const clonedMap = new Map();
+
+    for (const [key, value] of map || []) {
+        clonedMap.set(key, cloneValue(value));
+    }
+
+    return clonedMap;
+}
+
+function cloneVersionedState(state) {
+    return state ? { ...state } : state;
+}
+
+function cloneTrailState(state) {
+    if (!state) {
+        return state;
+    }
+
+    return {
+        ...state,
+        leftSegmentLengths: [...(state.leftSegmentLengths || [])],
+        rightSegmentLengths: [...(state.rightSegmentLengths || [])]
+    };
+}

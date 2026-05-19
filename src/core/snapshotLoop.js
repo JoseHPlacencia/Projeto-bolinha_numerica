@@ -1,5 +1,6 @@
 const config = require("../config/gameConfig");
 const {
+    cloneClientSnapshotState,
     createClientSnapshotState,
     createSnapshot
 } = require("./snapshotSerializer");
@@ -22,11 +23,90 @@ function sendSnapshot(io, players, territories) {
             socket.data.snapshotState = createClientSnapshotState();
         }
 
-        const snapshot = createSnapshot(players, territories, socket.id, socket.data.snapshotState);
-        const emitter = shouldSendReliably(snapshot) ? socket : socket.volatile;
+        if (retryPendingReliableSnapshot(socket)) {
+            continue;
+        }
 
-        emitter.emit("gameState", snapshot);
+        const nextSnapshotState = cloneClientSnapshotState(socket.data.snapshotState);
+        const snapshot = createSnapshot(players, territories, socket.id, nextSnapshotState);
+
+        if (shouldSendReliably(snapshot)) {
+            queueReliableSnapshot(socket, snapshot, nextSnapshotState);
+            continue;
+        }
+
+        socket.data.snapshotState = nextSnapshotState;
+        socket.volatile.emit("gameState", snapshot);
     }
+}
+
+function retryPendingReliableSnapshot(socket) {
+    const pending = socket.data.pendingReliableSnapshot;
+
+    if (!pending) {
+        return false;
+    }
+
+    if (Date.now() >= pending.nextRetryAt) {
+        sendReliableSnapshot(socket, pending);
+    }
+
+    return true;
+}
+
+function queueReliableSnapshot(socket, snapshot, nextSnapshotState) {
+    const pending = {
+        id: getNextReliableSnapshotId(socket),
+        nextRetryAt: 0,
+        snapshot,
+        snapshotState: nextSnapshotState
+    };
+
+    socket.data.pendingReliableSnapshot = pending;
+    sendReliableSnapshot(socket, pending);
+}
+
+function sendReliableSnapshot(socket, pending) {
+    pending.nextRetryAt = Date.now() + getReliableSnapshotRetryMs();
+
+    const emitter = typeof socket.timeout === "function"
+        ? socket.timeout(getReliableSnapshotAckTimeoutMs())
+        : socket;
+
+    emitter.emit("gameState", pending.snapshot, error => {
+        if (error) {
+            return;
+        }
+
+        acknowledgeReliableSnapshot(socket, pending.id);
+    });
+}
+
+function acknowledgeReliableSnapshot(socket, pendingId) {
+    const pending = socket.data.pendingReliableSnapshot;
+
+    if (!pending || pending.id !== pendingId) {
+        return;
+    }
+
+    socket.data.snapshotState = pending.snapshotState;
+    socket.data.pendingReliableSnapshot = null;
+}
+
+function getNextReliableSnapshotId(socket) {
+    const nextId = (socket.data.nextReliableSnapshotId || 0) + 1;
+
+    socket.data.nextReliableSnapshotId = nextId;
+
+    return nextId;
+}
+
+function getReliableSnapshotAckTimeoutMs() {
+    return Math.max(100, config.network.reliableSnapshotAckTimeoutMs || 1000);
+}
+
+function getReliableSnapshotRetryMs() {
+    return Math.max(getReliableSnapshotAckTimeoutMs(), config.network.reliableSnapshotRetryMs || 1500);
 }
 
 function shouldSendReliably(snapshot) {
@@ -44,5 +124,7 @@ function hasFullTrailUpdate(trails) {
 }
 
 module.exports = startSnapshotLoop;
+module.exports.acknowledgeReliableSnapshot = acknowledgeReliableSnapshot;
+module.exports.queueReliableSnapshot = queueReliableSnapshot;
 module.exports.sendSnapshot = sendSnapshot;
 module.exports.shouldSendReliably = shouldSendReliably;
