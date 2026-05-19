@@ -31,8 +31,10 @@ class Player {
         this.pendingDirectionAngle = null;
         this.lastMouseDirectionAngle = null;
         this.inputVersion = 0;
+        this.infoVersion = 0;
         this.boundarySlideInputVersion = 0;
         this.debugState = null;
+        this.viewport = null;
         this.reconnect(spawn);
     }
 
@@ -43,6 +45,7 @@ class Player {
         this.color = createRandomColor();
         this.territoryX = spawn.x;
         this.territoryY = spawn.y;
+        this.markInfoChanged();
         this.clearInput();
         this.clearTrailState();
     }
@@ -58,6 +61,11 @@ class Player {
     setSpawnPoint(point) {
         this.territoryX = point.x;
         this.territoryY = point.y;
+        this.markInfoChanged();
+    }
+
+    setViewport(viewport) {
+        this.viewport = viewport;
     }
 
     clearInput() {
@@ -147,6 +155,10 @@ class Player {
 
     markInputChanged() {
         this.inputVersion++;
+    }
+
+    markInfoChanged() {
+        this.infoVersion++;
     }
 
     serialize() {

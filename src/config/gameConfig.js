@@ -27,12 +27,17 @@ const server = Object.freeze({
 
 const socket = Object.freeze({
     transports: socketTransports,
-    perMessageDeflate: false
+    perMessageDeflate: Object.freeze({
+        threshold: 256,
+        zlibDeflateOptions: Object.freeze({
+            level: 6
+        })
+    })
 });
 
 const loop = Object.freeze({
     tickRate: 60,
-    snapshotRate: 30,
+    snapshotRate: 20,
     maxDeltaTime: 0.1
 });
 
@@ -49,7 +54,7 @@ const territory = Object.freeze({
     fillAlpha: 0.36,
     minCaptureArea: 800,
     minCaptureTrailPoints: 4,
-    trailPointSpacing: 10
+    trailPointSpacing: 14
 });
 
 const movement = Object.freeze({
@@ -96,12 +101,24 @@ const screen = Object.freeze({
 });
 
 const network = Object.freeze({
-    initialBufferMs: 140,
+    initialBufferMs: 180,
     minBufferMs: 100,
-    maxBufferMs: 250,
+    maxBufferMs: 360,
     jitterMultiplier: 2,
     maxJitterSamples: 30,
-    maxSnapshots: 15
+    maxSnapshots: 18,
+    viewportReportIntervalMs: 250,
+    interestMargin: 800,
+    maxViewportWorldWidth: 3200,
+    maxViewportWorldHeight: 2200,
+    coordinatePrecision: 10,
+    anglePrecision: 1000,
+    forcedFullSyncsEnabled: false,
+    playerInfoFullSyncIntervalMs: 5000,
+    territoryFullSyncIntervalMs: 10000,
+    trailFullSyncIntervalMs: 4000,
+    trailPatchFullRatio: 0.85,
+    resyncRequestIntervalMs: 1000
 });
 
 const security = Object.freeze({
@@ -109,6 +126,11 @@ const security = Object.freeze({
         maxEvents: 60,
         intervalMs: 1000,
         maxViolations: 10
+    }),
+    viewportRateLimit: Object.freeze({
+        maxEvents: 12,
+        intervalMs: 1000,
+        maxViolations: 5
     })
 });
 
@@ -136,7 +158,9 @@ module.exports = Object.freeze({
     movement,
     player,
     minimap,
+    network,
     spawn,
+    screen,
     inputActionAngles,
     inputBindings,
     security,

@@ -14,6 +14,7 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
     return {
         getDebugState,
+        getViewportState,
         renderWorld,
         resizeCanvas
     };
@@ -112,6 +113,14 @@ export function createCanvasRenderer(canvas, gameConfig) {
             viewportBounds: lastViewportBounds,
             viewportHeight,
             viewportWidth
+        };
+    }
+
+    function getViewportState() {
+        return {
+            width: viewportWidth,
+            height: viewportHeight,
+            scale: canvasScale
         };
     }
 }

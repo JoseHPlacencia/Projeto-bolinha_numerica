@@ -21,6 +21,7 @@ function registerSocket(io, players, territories) {
 
 function registerInputEvents(socket, players) {
     const inputGuard = createInputGuard(socket);
+    const viewportGuard = createViewportGuard(socket);
 
     socket.on("inputDown", rawAction => {
         if (!inputGuard.canHandleInput()) {
@@ -53,10 +54,34 @@ function registerInputEvents(socket, players) {
 
         handleInputDirectionEnd(players, socket.id);
     });
+
+    socket.on("viewport", rawViewport => {
+        if (!viewportGuard.canHandleInput()) {
+            return;
+        }
+
+        handleViewport(players, socket.id, rawViewport);
+    });
+
+    socket.on("snapshotResync", () => {
+        if (!viewportGuard.canHandleInput()) {
+            return;
+        }
+
+        socket.data.snapshotState = null;
+    });
 }
 
 function createInputGuard(socket) {
-    const rateLimiter = createRateLimiter(config.security.inputRateLimit);
+    return createSocketRateGuard(socket, config.security.inputRateLimit);
+}
+
+function createViewportGuard(socket) {
+    return createSocketRateGuard(socket, config.security.viewportRateLimit);
+}
+
+function createSocketRateGuard(socket, rateLimitConfig) {
+    const rateLimiter = createRateLimiter(rateLimitConfig);
     let violations = 0;
 
     return {
@@ -70,7 +95,7 @@ function createInputGuard(socket) {
 
         violations++;
 
-        if (violations >= config.security.inputRateLimit.maxViolations) {
+        if (violations >= rateLimitConfig.maxViolations) {
             socket.disconnect(true);
         }
 
@@ -130,6 +155,15 @@ function handleInputDirectionEnd(players, playerId) {
     }
 }
 
+function handleViewport(players, playerId, rawViewport) {
+    const viewport = normalizeViewport(rawViewport);
+    const player = players.get(playerId);
+
+    if (player && viewport) {
+        player.setViewport(viewport);
+    }
+}
+
 function normalizeInputAction(action) {
     return String(action || "").toLowerCase();
 }
@@ -181,6 +215,34 @@ function isInputSourceValid(source) {
         || source === "gamepad-left"
         || source === "gamepad-right"
         || source === "gamepad-dpad";
+}
+
+function normalizeViewport(rawViewport) {
+    if (!rawViewport || typeof rawViewport !== "object") {
+        return null;
+    }
+
+    const width = clampNumber(Number(rawViewport.width), 1, config.screen.virtualWidth * 2);
+    const height = clampNumber(Number(rawViewport.height), 1, config.screen.virtualHeight * 2);
+    const scale = clampNumber(Number(rawViewport.scale), 0.05, 4);
+
+    if (width === null || height === null || scale === null) {
+        return null;
+    }
+
+    return {
+        width,
+        height,
+        scale
+    };
+}
+
+function clampNumber(value, min, max) {
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+
+    return Math.min(Math.max(value, min), max);
 }
 
 module.exports = registerSocket;

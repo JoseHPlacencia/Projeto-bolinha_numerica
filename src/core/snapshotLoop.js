@@ -1,5 +1,8 @@
 const config = require("../config/gameConfig");
-const { createSnapshot } = require("./snapshotSerializer");
+const {
+    createClientSnapshotState,
+    createSnapshot
+} = require("./snapshotSerializer");
 
 function startSnapshotLoop(io, players, territories) {
     const intervalMs = 1000 / config.loop.snapshotRate;
@@ -10,7 +13,20 @@ function startSnapshotLoop(io, players, territories) {
 }
 
 function sendSnapshot(io, players, territories) {
-    io.volatile.emit("gameState", createSnapshot(players, territories));
+    for (const socket of io.sockets.sockets.values()) {
+        if (!players.has(socket.id)) {
+            continue;
+        }
+
+        if (!socket.data.snapshotState) {
+            socket.data.snapshotState = createClientSnapshotState();
+        }
+
+        socket.volatile.emit(
+            "gameState",
+            createSnapshot(players, territories, socket.id, socket.data.snapshotState)
+        );
+    }
 }
 
 module.exports = startSnapshotLoop;

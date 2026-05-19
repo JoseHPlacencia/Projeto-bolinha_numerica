@@ -13,17 +13,21 @@ export function startClient(gameConfig) {
     const minimapCanvas = document.getElementById("minimapCanvas");
     const renderer = createCanvasRenderer(canvas, gameConfig);
     const minimap = createMinimapRenderer(minimapCanvas, gameConfig);
-    const snapshots = createSnapshotInterpolator(gameConfig.network);
+    const snapshots = createSnapshotInterpolator(gameConfig.network, {
+        onResyncNeeded: () => socket.emit("snapshotResync")
+    });
     const debugLevel = getDebugLevel();
     const hud = createHud({ debugLevel });
     const frameMonitor = createFrameMonitor();
     let myId = null;
+    let lastViewportSentAt = 0;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
     window.addEventListener("resize", resizeCanvases);
 
     socket.on("connect", () => {
         myId = socket.id;
+        sendViewportState(true);
     });
 
     socket.on("gameState", snapshots.processSnapshot);
@@ -60,5 +64,18 @@ export function startClient(gameConfig) {
     function resizeCanvases() {
         renderer.resizeCanvas();
         minimap.resizeCanvas();
+        sendViewportState(true);
+    }
+
+    function sendViewportState(force = false) {
+        const now = performance.now();
+        const interval = gameConfig.network.viewportReportIntervalMs;
+
+        if (!force && now - lastViewportSentAt < interval) {
+            return;
+        }
+
+        lastViewportSentAt = now;
+        socket.emit("viewport", renderer.getViewportState());
     }
 }

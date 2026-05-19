@@ -15,9 +15,12 @@ function createTerritories() {
 }
 
 function initializePlayerTerritory(territories, player) {
+    const previousTerritory = territories.get(player.id);
+
     territories.set(player.id, {
         id: player.id,
         color: player.color,
+        version: previousTerritory ? (previousTerritory.version || 0) + 1 : 1,
         baseX: player.territoryX,
         baseY: player.territoryY,
         polygon: createCirclePolygon(
@@ -91,6 +94,7 @@ function updateTerritoryPolygon(territory, nextPolygon) {
     }
 
     territory.polygon = nextPolygon;
+    territory.version = (territory.version || 0) + 1;
 
     return true;
 }
