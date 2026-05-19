@@ -1,6 +1,7 @@
 import { createFrameMonitor, getDebugLevel } from "./debug.js";
 import { createHud } from "./hud.js";
 import { createInputControls } from "./input.js";
+import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createCanvasRenderer } from "./renderer.js";
 
@@ -9,7 +10,9 @@ export function startClient(gameConfig) {
         transports: gameConfig.socket.transports
     });
     const canvas = document.getElementById("gameCanvas");
+    const minimapCanvas = document.getElementById("minimapCanvas");
     const renderer = createCanvasRenderer(canvas, gameConfig);
+    const minimap = createMinimapRenderer(minimapCanvas, gameConfig);
     const snapshots = createSnapshotInterpolator(gameConfig.network);
     const debugLevel = getDebugLevel();
     const hud = createHud({ debugLevel });
@@ -17,7 +20,7 @@ export function startClient(gameConfig) {
     let myId = null;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
-    window.addEventListener("resize", renderer.resizeCanvas);
+    window.addEventListener("resize", resizeCanvases);
 
     socket.on("connect", () => {
         myId = socket.id;
@@ -25,7 +28,7 @@ export function startClient(gameConfig) {
 
     socket.on("gameState", snapshots.processSnapshot);
 
-    renderer.resizeCanvas();
+    resizeCanvases();
     render();
 
     function render() {
@@ -46,9 +49,16 @@ export function startClient(gameConfig) {
         });
 
         if (!state || !myId) {
+            minimap.clear();
             return;
         }
 
         renderer.renderWorld(state, myId);
+        minimap.render(state, myId);
+    }
+
+    function resizeCanvases() {
+        renderer.resizeCanvas();
+        minimap.resizeCanvas();
     }
 }

@@ -126,7 +126,7 @@ export function registerGamepadDirectionInput(inputActionAngles, inputState, inp
             return;
         }
 
-        inputState.setDirection("gamepad-dpad", angle, { force: true });
+        inputState.setDirection("gamepad-dpad", angle);
     }
 
     function replacePressedGamepadActions(nextActions) {

@@ -37,7 +37,7 @@ const loop = Object.freeze({
 });
 
 const world = Object.freeze({
-    mapRadius: 1500,
+    mapRadius: 3000,
     playerSize: 70,
     initialTerritoryRadius: 200
 });
@@ -70,6 +70,17 @@ const player = Object.freeze({
     blinkDurationMs: 250,
     blinkMaxIntervalMs: 5000,
     blinkMinIntervalMs: 2500
+});
+
+const minimap = Object.freeze({
+    mapBorderWidth: 3,
+    minSize: 96,
+    playerIconBorderWidth: 1,
+    playerIconSize: 6,
+    size: 300,
+    territoryBorderWidth: 2,
+    trailBorderWidth: 2,
+    viewportSizeRatio: 0.5
 });
 
 const spawn = Object.freeze({
@@ -109,6 +120,7 @@ const client = Object.freeze({
     world,
     territory,
     player,
+    minimap,
     screen,
     network,
     inputActionAngles,
@@ -123,6 +135,7 @@ module.exports = Object.freeze({
     territory,
     movement,
     player,
+    minimap,
     spawn,
     inputActionAngles,
     inputBindings,

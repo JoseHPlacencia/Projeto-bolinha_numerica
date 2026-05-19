@@ -10,13 +10,19 @@ body {
     user-select: none;
 }
 
+:root {
+    --hud-panel-background: rgba(8, 12, 18, 0.72);
+    --hud-panel-border: rgba(255, 255, 255, 0.14);
+    --hud-panel-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
 body {
     background: #000;
     color: #f5f7fb;
     font-family: Arial, Helvetica, sans-serif;
 }
 
-canvas {
+#gameCanvas {
     display: block;
     position: absolute;
     top: 50%;
@@ -39,10 +45,10 @@ canvas {
 }
 
 .debug-panel {
-    background: rgba(8, 12, 18, 0.72);
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: var(--hud-panel-background);
+    border: 1px solid var(--hud-panel-border);
     border-radius: 8px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+    box-shadow: var(--hud-panel-shadow);
 }
 
 .debug-panel div {
@@ -78,6 +84,20 @@ canvas {
 
 .debug-panel [hidden] {
     display: none;
+}
+
+.minimap {
+    border-radius: 50%;
+    bottom: 16px;
+    box-shadow: var(--hud-panel-shadow);
+    display: block;
+    height: clamp(96px, 28vmin, 300px);
+    pointer-events: none;
+    position: fixed;
+    right: 16px;
+    touch-action: none;
+    width: clamp(96px, 28vmin, 300px);
+    z-index: 2;
 }
 
 .touch-controls {
@@ -131,5 +151,10 @@ canvas {
 
     .debug-panel div {
         min-width: 64px;
+    }
+
+    .minimap {
+        bottom: 10px;
+        right: 10px;
     }
 }
