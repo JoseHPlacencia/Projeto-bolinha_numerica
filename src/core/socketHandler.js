@@ -5,6 +5,23 @@ const { createRateLimiter } = require("../utils/rateLimiter");
 function registerSocket(io, players) {
     io.on("connection", socket => {
         createPlayer(players, socket.id);
+        // Allow the client to send player metadata (name, color, difficulty)
+        socket.on("playerMeta", meta => {
+            try {
+                const player = players.get(socket.id);
+                if (!player) return;
+
+                if (meta && typeof meta === "object") {
+                    if (meta.name) player.name = String(meta.name).slice(0, 32);
+                    if (meta.color) player.color = String(meta.color);
+                    if (meta.difficulty) player.difficulty = String(meta.difficulty);
+                }
+
+                console.log(`playerMeta received for ${socket.id}:`, meta);
+            } catch (err) {
+                // ignore invalid meta
+            }
+        });
         registerInputEvents(socket, players);
 
         socket.on("disconnect", () => {

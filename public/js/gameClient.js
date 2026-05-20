@@ -8,6 +8,13 @@ export function startClient(gameConfig) {
     const socket = io({
         transports: gameConfig.socket.transports
     });
+    // Read optional player metadata passed via query string (from tela inicial)
+    const params = new URLSearchParams(window.location.search);
+    const playerMeta = {
+        name: params.get("playerName") || null,
+        color: params.get("playerColor") || null,
+        difficulty: params.get("difficulty") || null
+    };
     const canvas = document.getElementById("gameCanvas");
     const renderer = createCanvasRenderer(canvas, gameConfig);
     const snapshots = createSnapshotInterpolator(gameConfig.network);
@@ -20,6 +27,8 @@ export function startClient(gameConfig) {
 
     socket.on("connect", () => {
         myId = socket.id;
+        // Send player metadata to server once connected
+        socket.emit("playerMeta", playerMeta);
     });
 
     socket.on("gameState", snapshots.processSnapshot);
