@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Set.io - Tela Inicial</title>
+    <style>
+        /* --- ESTILOS GLOBAIS --- */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            /* Fundo simulando a malha do Paper.io */
+            background-color: #1a1a1a;
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 30px 30px;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            color: #fff;
+        }
+
+        /* --- TELA INICIAL --- */
+        .home-container {
+            background: rgba(0, 0, 0, 0.75); /* Div transparente escurecida */
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+            backdrop-filter: blur(4px);
+        }
+
+        .home-container h1 {
+            font-size: 3rem;
+            margin-bottom: 20px;
+            color: #4facfe;
+            text-shadow: 0 0 10px rgba(79, 172, 254, 0.5);
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 0.9rem;
+            color: #ccc;
+        }
+
+        .input-group input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #333;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            font-size: 1.1rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        .input-group input[type="text"]:focus {
+            border-color: #4facfe;
+        }
+
+        .color-picker-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .color-picker-container input[type="color"] {
+            width: 50px;
+            height: 40px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            background: transparent;
+        }
+
+        /* --- BOTÕES --- */
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s, opacity 0.2s, background-color 0.2s;
+            margin-bottom: 10px;
+            text-decoration: none; /* Para o botão que é link <a> */
+            text-align: center;
+        }
+
+        .btn:active {
+            transform: scale(0.98);
+        }
+
+        .btn-play {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: #000;
+            font-size: 1.2rem;
+        }
+
+        .btn-play:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        /* Estilo do Botão do GitHub */
+        .btn-github {
+            background: #24292e;
+            color: #fff;
+            border: 1px solid #444;
+        }
+
+        .btn-github:hover {
+            background: #2f363d;
+        }
+
+        /* --- POPUPS / MODAIS (SOBREPOSIÇÃO) --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.8);
+            display: none; /* Oculto por padrão */
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: rgba(30, 30, 30, 0.95);
+            width: 90%;
+            max-width: 600px;
+            height: 80vh;
+            border-radius: 12px;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-size: 1.5rem;
+            color: #4facfe;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            color: #fff;
+            font-size: 2rem;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        /* Abas do Menu de Ajuda */
+        .tabs {
+            display: flex;
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 15px;
+            background: none;
+            border: none;
+            border-bottom: 3px solid transparent;
+            color: #aaa;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tab-btn.active {
+            color: #4facfe;
+            border-bottom-color: #4facfe;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        /* Conteúdo Interno com Rolagem */
+        .tab-content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .tab-pane {
+            display: none;
+        }
+
+        .tab-pane.active {
+            display: block;
+            animation: fadeIn 0.3s;
+        }
+
+        .tab-content h3 {
+            color: #4facfe;
+            margin-bottom: 12px;
+            margin-top: 15px;
+        }
+
+        .tab-content h3:first-child {
+            margin-top: 0;
+        }
+
+        .tab-content p {
+            line-height: 1.6;
+            margin-bottom: 15px;
+            color: #ddd;
+        }
+
+        .help-image {
+            width: 100%;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #444;
+            background: #fff;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* --- RESPONSIVIDADE MOBILE --- */
+        @media (max-width: 600px) {
+            .modal-content {
+                width: 100%;
+                height: 100%;
+                max-width: none;
+                border-radius: 0;
+                border: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="home-container">
+        <h1>?.io</h1>
+        
+        <div class="input-group">
+            <label for="player-name">Apelido</label>
+            <input type="text" id="player-name" placeholder="Digite seu nome..." maxlength="15" autocomplete="off">
+        </div>
+
+        <div class="input-group color-picker-container">
+            <label for="player-color">Cor do seu Território:</label>
+            <input type="color" id="player-color" value="#4facfe">
+        </div>
+
+        <button class="btn btn-play" onclick="startGame()">Jogar</button>
+        
+        <button class="btn btn-secondary" onclick="toggleModal('helpModal', true)">Como Jogar / Teoria</button>
+        <button class="btn btn-secondary" onclick="toggleModal('aboutModal', true)">Sobre o Jogo</button>
+        
+        <a href="https://github.com/JoseHPlacencia/Projeto-bolinha_numerica" target="_blank" class="btn btn-github">
+            Vistar Repositório no GitHub
+        </a>
+    </div>
+
+    <div class="modal-overlay" id="helpModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Guia do Jogo</h2>
+                <button class="close-btn" onclick="toggleModal('helpModal', false)">&times;</button>
+            </div>
+            
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab(this, 'mechanics')">Mecânicas</button>
+                <button class="tab-btn" onclick="switchTab(this, 'theory')">Teoria dos Conjuntos</button>
+            </div>
+
+            <div class="tab-content">
+                <div id="mechanics" class="tab-pane active">
+                    <h3>O Básico (Conquista de Malha)</h3>
+                    <p>Saia da sua base para desenhar uma linha de fronteira. Retorne ao seu próprio território para fechar o ciclo e conquistar a área delimitada pelo seu rastro.</p>
+                    <img src="https://scrawny-beige-idugighfbd.edgeone.app/Captura%20de%20tela%202026-05-19%20154700.png" alt="Exemplo de Malha" class="help-image">
+                    
+                    <h3>Sobrevivência e Combate</h3>
+                    <p><strong>Ataque:</strong> Se você cruzar o rastro (a linha em desenho) de um oponente antes que ele feche o ciclo, ele é eliminado.</p>
+                    <p><strong>Defesa:</strong> O seu território consolidado é seguro, mas se você estiver desenhando uma nova área e alguém cortar sua linha, fim de jogo para você.</p>
+                    
+                    <h3>Como Jogar</h3>
+                    <p><strong>Controles: </strong>Utilize o mouse para direcionar sua unidade e desenhar seu rastro. Mantenha pressionado o botão esquerdo do mouse para que seu percurso seja feito.</p>
+                </div>
+
+                <div id="theory" class="tab-pane">
+                    <h3>Operações Territoriais</h3>
+                    <p>A arena é um Conjunto Universo, e cada território é um subconjunto. Veja as operações em ação:</p>
+                    
+                    <h4>União (A ∪ B)</h4>
+                    <p>Quando você circula uma área neutra e retorna à sua base, você está unindo a nova área ao seu território original, expandindo seu conjunto.</p>
+                    
+                    
+                    <h4>Diferença e Interseção</h4>
+                    <p>Ao invadir e circular parte do território consolidado de um oponente, você aplica uma <strong>Diferença</strong> (A - B): a área é subtraída dele e anexada a você.</p>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Venn0100.svg" alt="Diagrama de Diferença" class="help-image">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="aboutModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Sobre o Set.io</h2>
+                <button class="close-btn" onclick="toggleModal('aboutModal', false)">&times;</button>
+            </div>
+            
+            <div class="tab-content">
+                <h3>O Projeto</h3>
+                <p><strong>?.io:</strong> O presente projeto consiste em uma extensão universiária dos alunos da turma CC1N de 2026 da UVV, 1° Período de Ciência da Computação, sob a orientação do professor Alessandro Bertolani Oliveira, na matéria Fundamentos de Tecnologia da Computação.
+Sua concepção visa por em prática a ODS 4 - Educação de Qualidade - através da gamificação aplicada à matemática do ensino fundamental e médio, abordando como tema a <strong>Teoria dos Conjuntos</strong>.</p>
+                
+                <h3>Como a Matemática entra no Jogo?</h3>
+                <p>Cada ação tomada no tabuleiro reconstrói propriedades matemáticas organizadas. Áreas conquistadas representam subconjuntos dentro do Espaço Universo da arena. Interseções de rastros definem zonas de perigo iminente e a tomada de território alheio calcula a diferença exata entre conjuntos de coordenadas.</p>
+                
+                <h3>Desenvolvimento</h3>
+                <p>Desenvolvido como uma ferramenta gamificada de aprendizado.<br><strong>Versão:</strong> 1.0.0 (Alpha - Protótipo de Interface)</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Função Genérica para abrir e fechar Popups (Modais) pelo ID
+        function toggleModal(modalId, show) {
+            const modal = document.getElementById(modalId);
+            if (show) {
+                modal.classList.add('active');
+            } else {
+                modal.classList.remove('active');
+            }
+        }
+
+        // Função para alternar entre as abas do Modal de Ajuda
+        function switchTab(clickedBtn, tabId) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+
+            clickedBtn.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        // Fechar qualquer modal ativo ao clicar no overlay escuro (fora do conteúdo)
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    toggleModal(this.id, false);
+                }
+            });
+        });
+
+        // Simulação do botão jogar
+        function startGame() {
+            const name = document.getElementById('player-name').value;
+            const color = document.getElementById('player-color').value;
+            
+            if(!name) {
+                alert("Por favor, escolha um apelido antes de entrar na arena!");
+                return;
+            }
+            
+            console.log(`Conectando... Jogador: ${name}, Cor do Território: ${color}`);
+            alert(`Preparando para entrar na sala como "${name}"!\n(Aguardando estruturação do sistema de salas e WebSockets)`);
+        }
+    </script>
+</body>
+</html>
