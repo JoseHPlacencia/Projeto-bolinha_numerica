@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NOME JOGO.io — Conquista de Território</title>
+
+  <!-- Importação das fontes do Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+
+  <!-- Folha de estilos externa -->
+  <link rel="stylesheet" href="index.css" />
+
+  <!-- Estilo para o fundo roxo opaco -->
+  <style>
+    body {
+      background-color: #6a0dad; /* Roxo opaco */
+      margin: 0;
+      min-height: 100vh;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Container principal da aplicação -->
+<div id="app">
+
+  <!-- LOGO DO JOGO -->
+  <div class="logo-wrap">
+    <div class="logo-tag">NOME JOGO<span class="io">.io</span></div>
+    <div class="logo-sub">Conquista de Território em Arena</div>
+  </div>
+
+  <!-- CARD PRINCIPAL COM FORMULÁRIO DE ENTRADA -->
+  <div class="card">
+
+    <!-- Campo: Nome do Jogador -->
+    <div class="field-group">
+      <label>Nome do Jogador</label>
+      <input type="text" id="player-name" placeholder="Ex: Euler42" maxlength="20" autocomplete="off" />
+    </div>
+
+    <!-- Seletor: Cor da Trilha -->
+    <div class="field-group">
+      <label>Cor da Trilha</label>
+      <div class="color-row" id="color-picker">
+        <div class="color-swatch selected" data-color="#63d2ff" style="background:#63d2ff"></div>
+        <div class="color-swatch" data-color="#a8ff78" style="background:#a8ff78"></div>
+        <div class="color-swatch" data-color="#ff6b6b" style="background:#ff6b6b"></div>
+        <div class="color-swatch" data-color="#ffc850" style="background:#ffc850"></div>
+        <div class="color-swatch" data-color="#d07bff" style="background:#d07bff"></div>
+        <div class="color-swatch" data-color="#ff9f68" style="background:#ff9f68"></div>
+        <div class="color-swatch" data-color="#f9f9f9" style="background:#f9f9f9"></div>
+      </div>
+    </div>
+
+    <!-- Seletor: Dificuldade -->
+    <div class="field-group">
+      <label>Dificuldade</label>
+      <div class="diff-row">
+        <button class="diff-btn" data-diff="easy">Fácil</button>
+        <button class="diff-btn active-medium" data-diff="medium">Médio</button>
+        <button class="diff-btn" data-diff="hard">Difícil</button>
+      </div>
+    </div>
+
+    <!-- Botão: Iniciar Jogo -->
+    <button class="btn-play" id="btn-play">▶ &nbsp; JOGAR</button>
+
+  </div>
+
+  <!-- LINKS INFERIORES: Ajuda, Sobre, GitHub -->
+  <div class="bottom-links">
+    <button class="icon-btn" id="btn-help">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><circle cx="12" cy="17" r=".5" fill="currentColor"/></svg>
+      Ajuda
+    </button>
+    <button class="icon-btn" id="btn-sobre">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Sobre
+    </button>
+    <a class="icon-btn" href="https://github.com/JoseHPlacencia/Projeto-bolinha_numerica" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+  </div>
+
+</div>
+
+<!-- ─── POPUP: AJUDA ──────────────────────────────────── -->
+<div class="overlay" id="overlay-help">
+  <div class="popup">
+    <div class="popup-header">
+      <h2>Central de Ajuda</h2>
+      <button class="popup-close" data-close="overlay-help">✕</button>
+    </div>
+    <div class="popup-body">
+
+      <!-- Navegação por abas -->
+      <div class="tabs-nav">
+        <button class="tab-pill active" data-tab="mecanicas">Mecânicas</button>
+        <button class="tab-pill" data-tab="conjuntos">Conjuntos</button>
+        <button class="tab-pill" data-tab="galeria">Galeria</button>
+      </div>
+
+      <!-- TAB: MECÂNICAS (inspiradas no paper.io) -->
+      <div class="tab-panel active" id="tab-mecanicas">
+        <div class="help-section">
+          <h3>Objetivo</h3>
+          <p>Mova sua bolinha pela arena e <strong style="color:var(--accent)">conquiste território</strong>! Ao deixar sua arena base e traçar um caminho pela área neutra ou inimiga, uma trilha colorida é desenhada atrás de você. Feche o loop voltando à sua área para <strong style="color:var(--accent3)">capturar o território</strong> delimitado pela trilha.</p>
+        </div>
+        <div class="help-section">
+          <h3>Mecânica de Trilha</h3>
+          <ul>
+            <li><strong style="color:var(--accent)">Trilha Ativa</strong> — ao sair do seu território, você deixa uma linha colorida no mapa. Enquanto a trilha estiver aberta, você está vulnerável!</li>
+            <li><strong style="color:var(--accent)">Fechar o Loop</strong> — retorne à sua área colorida para capturar tudo que ficou dentro do caminho traçado.</li>
+            <li><strong style="color:var(--accent)">Eliminar Rivais</strong> — passe por cima da trilha aberta de outro jogador para eliminá-lo e roubar parte do seu território.</li>
+            <li><strong style="color:var(--accent2)">Cuidado!</strong> — se um inimigo cruzar sua trilha antes de você fechar o loop, você é eliminado.</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h3>Controles</h3>
+          <ul>
+            <li><strong style="color:var(--accent)">Mouse / Toque</strong> — mova o cursor para guiar a bolinha pela arena</li>
+            <li><strong style="color:var(--accent)">WASD / Setas</strong> — movimento alternativo por teclado</li>
+            <li><strong style="color:var(--accent)">Espaço</strong> — acelerar (turbo com cooldown de recarga)</li>
+          </ul>
+        </div>
+        <div class="help-section">
+          <h3>Dificuldades</h3>
+          <div class="badge-row">
+            <span class="badge badge-easy">Fácil — Arena menor, IA lenta, mais tempo para fechar loops</span>
+            <span class="badge badge-medium">Médio — Arena padrão, IA moderada, velocidade equilibrada</span>
+            <span class="badge badge-hard">Difícil — Arena dinâmica, IA agressiva, loops devem ser rápidos</span>
+          </div>
+        </div>
+        <div class="help-section">
+          <h3>Pontuação</h3>
+          <ul>
+            <li>+10 pts por célula de território capturada</li>
+            <li>+50 pts ao eliminar um rival cortando sua trilha</li>
+            <li>Bônus de combo ao capturar grandes áreas de uma vez</li>
+            <li>Vence quem dominar mais território ao final da rodada</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- TAB: CONJUNTOS MATEMÁTICOS -->
+      <div class="tab-panel" id="tab-conjuntos">
+        <div class="help-section">
+          <h3>O que é um Conjunto?</h3>
+          <p>Um conjunto é uma coleção bem definida de elementos. No jogo, números espalhados pela arena pertencem a conjuntos matemáticos — capturar território com os números corretos dá bônus de pontuação!</p>
+        </div>
+        <div class="help-section">
+          <h3>Conjuntos Numéricos</h3>
+          <table class="set-table">
+            <thead>
+              <tr><th>Símbolo</th><th>Nome</th><th>Exemplos</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>ℕ</td><td>Naturais</td><td>0, 1, 2, 3, 100…</td></tr>
+              <tr><td>ℤ</td><td>Inteiros</td><td>…−3, −2, −1, 0, 1, 2…</td></tr>
+              <tr><td>ℚ</td><td>Racionais</td><td>1/2, 0.25, −3/4, 7…</td></tr>
+              <tr><td>𝕀</td><td>Irracionais</td><td>π, √2, e, φ…</td></tr>
+              <tr><td>ℝ</td><td>Reais</td><td>Todos os acima</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="help-section">
+          <h3>Bônus por Conjunto</h3>
+          <ul>
+            <li><strong style="color:var(--accent)">União (A ∪ B)</strong> — capture território com elementos de A ou de B para bônus duplo</li>
+            <li><strong style="color:var(--accent)">Interseção (A ∩ B)</strong> — capture somente o que está nos dois conjuntos para bônus triplo</li>
+            <li><strong style="color:var(--accent)">Diferença (A − B)</strong> — capture o que está em A mas não em B para pontos extras</li>
+            <li><strong style="color:var(--accent)">Complemento (Aᶜ)</strong> — capture tudo que NÃO pertence ao conjunto A</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- TAB: GALERIA DE RECURSOS -->
+      <div class="tab-panel" id="tab-galeria">
+        <div class="gallery-grid">
+          <div class="gallery-card">
+            <div class="glyph">🗺️</div>
+            <div class="gc-title">Território</div>
+            <p>O mapa é dividido em células coloridas. Feche loops para conquistar áreas e expandir seu domínio.</p>
+          </div>
+          <div class="gallery-card">
+            <div class="glyph">🔢</div>
+            <div class="gc-title">Números</div>
+            <p>Células do mapa carregam números. Capturar os corretos segundo o conjunto-alvo gera bônus de pontos.</p>
+          </div>
+          <div class="gallery-card">
+            <div class="glyph">⚡</div>
+            <div class="gc-title">Power-ups</div>
+            <p>Turbo, escudo e ímã surgem no mapa. Escudo protege sua trilha de ser cortada por rivais.</p>
+          </div>
+          <div class="gallery-card">
+            <div class="glyph">🏆</div>
+            <div class="gc-title">Placar</div>
+            <p>Ranking em tempo real pelo % de território dominado. Os 3 primeiros recebem coroa.</p>
+          </div>
+          <div class="gallery-card">
+            <div class="glyph">✂️</div>
+            <div class="gc-title">Cortar Trilha</div>
+            <p>Passe pela trilha aberta de um inimigo para eliminá-lo instantaneamente e roubar seu território!</p>
+          </div>
+          <div class="gallery-card">
+            <div class="glyph">📐</div>
+            <div class="gc-title">Desafio</div>
+            <p>O conjunto-alvo muda a cada 30s. Adapte sua estratégia de captura ao novo conjunto anunciado!</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ─── POPUP: SOBRE ──────────────────────────────────── -->
+<div class="overlay" id="overlay-sobre">
+  <div class="popup">
+    <div class="popup-header">
+      <h2>Sobre o Projeto</h2>
+      <button class="popup-close" data-close="overlay-sobre">✕</button>
+    </div>
+    <div class="popup-body">
+      <p class="sobre-desc">
+        <strong style="color:var(--accent)">NOME JOGO.io</strong> é um jogo multijogador online inspirado no <strong style="color:var(--accent3)">paper.io</strong>, desenvolvido como projeto acadêmico. Combina a mecânica de conquista de território com desafios de Teoria dos Conjuntos de forma competitiva e interativa.
+      </p>
+      <div class="help-section">
+        <h3>Equipe de Desenvolvimento</h3>
+      </div>
+      <div class="sobre-grid">
+        <div class="sobre-member">
+          <div class="member-avatar" style="background:rgba(99,210,255,0.15);color:var(--accent)">JH</div>
+          <div class="member-info">
+            <h4>Jose H. Placencia</h4>
+            <span>Líder · Backend · Game Logic</span>
+          </div>
+        </div>
+        <div class="sobre-member">
+          <div class="member-avatar" style="background:rgba(168,255,120,0.15);color:var(--accent3)">UI</div>
+          <div class="member-info">
+            <h4>Equipe Frontend</h4>
+            <span>Interface · Telas · Design</span>
+          </div>
+        </div>
+      </div>
+      <br/>
+      <div class="help-section">
+        <h3>Tecnologias</h3>
+        <div class="badge-row">
+          <span class="badge badge-easy">HTML5</span>
+          <span class="badge badge-medium">CSS3</span>
+          <span class="badge badge-hard">JavaScript</span>
+          <span class="badge" style="background:rgba(99,210,255,0.1);color:var(--accent);border:1px solid rgba(99,210,255,0.3)">Canvas API</span>
+          <span class="badge" style="background:rgba(210,150,255,0.1);color:#d07bff;border:1px solid rgba(210,150,255,0.3)">WebSockets</span>
+        </div>
+      </div>
+      <br/>
+      <a class="icon-btn" href="https://github.com/JoseHPlacencia/Projeto-bolinha_numerica" target="_blank" rel="noopener" style="width:100%;justify-content:center;border-radius:10px;padding:14px;">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"/></svg>
+        Ver Repositório no GitHub
+      </a>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="main.js"></script>
+</body>
+</html>
