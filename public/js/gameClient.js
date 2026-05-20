@@ -1,3 +1,4 @@
+import { createRoomOverlay } from "./ui/roomOverlay.js";
 import { createFrameMonitor, isDebugEnabled } from "./debug.js";
 import { createHud } from "./hud.js";
 import { createInputControls } from "./input.js";
@@ -16,6 +17,7 @@ export function startClient(gameConfig) {
     let myId = null;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
+    createRoomOverlay(socket);
     window.addEventListener("resize", renderer.resizeCanvas);
 
     socket.on("connect", () => {

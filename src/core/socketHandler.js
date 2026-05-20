@@ -2,13 +2,17 @@ const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
 const { createRateLimiter } = require("../utils/rateLimiter");
 
-function registerSocket(io, players) {
+function registerSocket(io, players, roomManager) {
     io.on("connection", socket => {
         createPlayer(players, socket.id);
         registerInputEvents(socket, players);
+        registerRoomEvents(socket, roomManager);
 
         socket.on("disconnect", () => {
             players.delete(socket.id);
+            if (socket.data.roomCode) {
+                roomManager.leaveRoom(socket.data.roomCode, socket.id);
+            }
         });
     });
 }
@@ -138,6 +142,42 @@ function normalizeInputAngle(rawAngle) {
     }
 
     return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+
+function registerRoomEvents(socket, roomManager) {
+    socket.on("createRoom", settings => {
+        const room = roomManager.createRoom({ settings });
+
+        roomManager.joinRoom(room.code, socket.id, settings.password);
+        socket.data.roomCode = room.code;
+        socket.emit("roomCreated", room);
+    });
+
+    socket.on("joinRoom", payload => {
+        const result = roomManager.joinRoom(payload.code, socket.id, payload.password);
+
+        if (!result.ok) {
+            socket.emit("roomError", result.reason);
+            return;
+        }
+
+        socket.data.roomCode = payload.code;
+        socket.emit("roomJoined", result.room);
+    });
+
+    socket.on("joinQuickTestRoom", () => {
+        const result = roomManager.joinRoom("TESTE-0001", socket.id, "debug");
+
+        if (result.ok) {
+            socket.data.roomCode = "TESTE-0001";
+            socket.emit("roomJoined", result.room);
+        }
+    });
+
+    socket.on("requestSpectatorTarget", () => {
+        socket.emit("spectatorTarget", roomManager.getSpectatorTarget());
+    });
 }
 
 module.exports = registerSocket;

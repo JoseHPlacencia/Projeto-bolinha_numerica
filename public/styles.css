@@ -129,3 +129,9 @@ canvas {
         min-width: 64px;
     }
 }
+
+
+.room-overlay { position: fixed; inset: 0; display:flex; align-items:center; justify-content:center; background: rgba(0,0,0,0.72); z-index: 10; }
+.room-overlay__panel { background:#111827; border:1px solid #374151; border-radius:12px; padding:24px; display:flex; flex-direction:column; gap:12px; min-width:320px; }
+.room-overlay__panel input, .room-overlay__panel select, .room-overlay__panel button { padding:10px; border-radius:8px; border:none; }
+.room-overlay__actions { display:flex; gap:12px; }
