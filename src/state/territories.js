@@ -23,6 +23,7 @@ function initializePlayerTerritory(territories, player) {
         version: previousTerritory ? (previousTerritory.version || 0) + 1 : 1,
         baseX: player.territoryX,
         baseY: player.territoryY,
+        captureOperationLog: [],
         polygon: createCirclePolygon(
             player.territoryX,
             player.territoryY,
@@ -66,7 +67,7 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
 
     const ownerPolygon = unionPolygons(territory.polygon, capturedPolygon);
 
-    if (updateTerritoryPolygon(territory, ownerPolygon)) {
+    if (updateTerritoryPolygon(territory, ownerPolygon, { preserveCaptureOperationLog: true })) {
         changedPlayerIds.add(ownerId);
     }
 
@@ -85,12 +86,18 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
     return changedPlayerIds;
 }
 
-function updateTerritoryPolygon(territory, nextPolygon) {
+function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     const previousArea = calculatePolygonArea(territory.polygon);
     const nextArea = calculatePolygonArea(nextPolygon);
 
     if (Math.abs(previousArea - nextArea) <= territoryChangeAreaEpsilon) {
         return false;
+    }
+
+    delete territory.lastCaptureOperation;
+
+    if (!options.preserveCaptureOperationLog) {
+        territory.captureOperationLog = [];
     }
 
     territory.polygon = nextPolygon;

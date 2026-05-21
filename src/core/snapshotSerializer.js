@@ -35,6 +35,11 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
 
     pruneClientState(clientState, players, territories);
 
+    const territoryChanges = serializeChangedTerritoryState(territories, territoryIds, viewerId, clientState, now);
+    const trailUpdates = serializeTrailUpdates(players, trailIds, clientState, now);
+
+    pruneInactiveTrailStates(clientState, players);
+
     const snapshot = {
         schema: 2,
         time: now,
@@ -42,9 +47,10 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         playerInfo: serializeChangedPlayerInfo(players, playerIds, clientState, now),
         territoryIds,
         territoryVersions: serializeTerritoryVersions(territories, territoryIds),
-        territories: serializeChangedTerritories(territories, territoryIds, clientState, now),
+        territories: territoryChanges.territories,
+        territoryOps: territoryChanges.operations,
         trailIds,
-        trails: serializeTrailUpdates(players, trailIds, clientState, now)
+        trails: trailUpdates
     };
 
     if (viewer && viewer.debugState) {
@@ -122,8 +128,9 @@ function serializeTerritoryVersions(territories, territoryIds) {
     return serializedVersions;
 }
 
-function serializeChangedTerritories(territories, territoryIds, clientState, now) {
+function serializeChangedTerritoryState(territories, territoryIds, viewerId, clientState, now) {
     const serializedTerritories = {};
+    const serializedOperations = {};
 
     for (const territoryId of territoryIds) {
         const territory = territories.get(territoryId);
@@ -136,6 +143,17 @@ function serializeChangedTerritories(territories, territoryIds, clientState, now
         const knownTerritory = clientState.territories.get(territoryId);
 
         if (!shouldSendVersionedState(knownTerritory, version, now, config.network.territoryFullSyncIntervalMs)) {
+            continue;
+        }
+
+        const operation = createCaptureTerritoryOperation(territory, knownTerritory, territoryId, viewerId);
+
+        if (operation) {
+            serializedOperations[territoryId] = operation;
+            clientState.territories.set(territoryId, {
+                version,
+                sentAt: now
+            });
             continue;
         }
 
@@ -154,7 +172,83 @@ function serializeChangedTerritories(territories, territoryIds, clientState, now
         });
     }
 
-    return serializedTerritories;
+    return {
+        territories: serializedTerritories,
+        operations: serializedOperations
+    };
+}
+
+function createCaptureTerritoryOperation(territory, knownTerritory, territoryId, viewerId) {
+    const operation = territory.lastCaptureOperation;
+
+    if (!canSendCaptureTerritoryOperation(operation, territory, knownTerritory, territoryId, viewerId)) {
+        return null;
+    }
+
+    const serializedOperation = {
+        type: operation.type,
+        baseVersion: operation.baseVersion,
+        version: operation.version,
+        trailSide: operation.trailSide,
+        trailSegmentIndex: operation.trailSegmentIndex,
+        trailSegmentLength: operation.trailSegmentLength,
+        startContact: packCaptureContact(operation.startContact),
+        endContact: packCaptureContact(operation.endContact),
+        keepAnchor: packPoint(operation.keepAnchor)
+    };
+
+    if (shouldSendCaptureOperationFallbackTrailPoints()) {
+        serializedOperation.trailPoints = packPoints(operation.trailPoints);
+    }
+
+    return serializedOperation;
+}
+
+function canSendCaptureTerritoryOperation(operation, territory, knownTerritory, territoryId, viewerId) {
+    return config.network.captureOperationSyncEnabled !== false
+        && operation
+        && operation.type === "trailCapture"
+        && knownTerritory
+        && canUseKnownTerritoryForCaptureOperation(knownTerritory, operation, territoryId, viewerId)
+        && territory.version === operation.version
+        && Number.isInteger(operation.trailSegmentIndex)
+        && Number.isInteger(operation.trailSegmentLength)
+        && operation.trailSegmentLength >= 2
+        && operation.startContact
+        && operation.endContact
+        && operation.keepAnchor
+        && (
+            !shouldSendCaptureOperationFallbackTrailPoints()
+            || hasFallbackTrailPoints(operation)
+        );
+}
+
+function canUseKnownTerritoryForCaptureOperation(knownTerritory, operation, territoryId, viewerId) {
+    if (knownTerritory.version === operation.baseVersion) {
+        return true;
+    }
+
+    return config.network.optimisticOwnerCaptureOperationSyncEnabled !== false
+        && territoryId === viewerId;
+}
+
+function shouldSendCaptureOperationFallbackTrailPoints() {
+    return config.network.captureOperationFallbackTrailPointsEnabled !== false;
+}
+
+function hasFallbackTrailPoints(operation) {
+    return operation
+        && Array.isArray(operation.trailPoints)
+        && operation.trailPoints.length >= 2;
+}
+
+function packCaptureContact(contact) {
+    return [
+        packCoordinate(contact.point.x),
+        packCoordinate(contact.point.y),
+        contact.segmentIndex,
+        roundToPrecision(contact.segmentT, config.network.anglePrecision)
+    ];
 }
 
 function serializeTrailUpdates(players, trailIds, clientState, now) {
@@ -610,7 +704,10 @@ function shouldSendForcedFullSync() {
 function pruneClientState(clientState, players, territories) {
     pruneMapKeys(clientState.playerInfo, id => players.has(id));
     pruneMapKeys(clientState.territories, id => territories.has(id));
+    pruneMapKeys(clientState.trails, id => players.has(id));
+}
 
+function pruneInactiveTrailStates(clientState, players) {
     pruneMapKeys(clientState.trails, id => {
         const player = players.get(id);
 

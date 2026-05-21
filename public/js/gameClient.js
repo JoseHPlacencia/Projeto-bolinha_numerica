@@ -31,10 +31,15 @@ export function startClient(gameConfig) {
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
-        snapshots.processSnapshot(snapshot);
+        const applyResult = snapshots.processSnapshot(snapshot);
 
         if (typeof acknowledge === "function") {
-            acknowledge();
+            acknowledge(applyResult);
+            return;
+        }
+
+        if (applyResult && !applyResult.applied) {
+            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
         }
     });
 

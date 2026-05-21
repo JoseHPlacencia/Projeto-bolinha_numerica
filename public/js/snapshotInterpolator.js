@@ -1,5 +1,8 @@
 import { clamp, lerp, lerpAngle } from "./sharedMath.js";
 
+const coordinatePrecision = 1000;
+const geometryEpsilon = 1e-7;
+
 export function createSnapshotInterpolator(networkConfig, options = {}) {
     const snapshots = [];
     const entityCache = {
@@ -19,6 +22,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         visibleTerritories: 0,
         visibleTrails: 0
     };
+    const pendingTerritoryOperations = new Map();
+    const suppressedCaptureOperationResyncIds = new Set();
     let lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
 
     return {
@@ -29,11 +34,14 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     function processSnapshot(rawSnapshot) {
         const now = performance.now();
-        const snapshot = expandSnapshot(rawSnapshot);
+        const applyResult = createApplyResult();
+        const snapshot = expandSnapshot(rawSnapshot, applyResult);
 
         updateAdaptiveBuffer(now);
         syncServerClock(snapshot.time);
         saveSnapshot(snapshot);
+
+        return applyResult;
     }
 
     function getRenderState() {
@@ -68,26 +76,61 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         };
     }
 
-    function expandSnapshot(rawSnapshot) {
+    function createApplyResult() {
+        return {
+            applied: true,
+            invalidations: {
+                playerInfo: [],
+                territories: [],
+                trails: []
+            }
+        };
+    }
+
+    function markCacheInvalid(applyResult, type, id) {
+        if (!applyResult || !applyResult.invalidations || !id) {
+            return;
+        }
+
+        const ids = applyResult.invalidations[type];
+
+        if (!ids || ids.includes(id)) {
+            applyResult.applied = false;
+            return;
+        }
+
+        ids.push(id);
+        applyResult.applied = false;
+    }
+
+    function expandSnapshot(rawSnapshot, applyResult) {
         if (rawSnapshot && rawSnapshot.schema === 2) {
-            return expandCompactSnapshot(rawSnapshot);
+            return expandCompactSnapshot(rawSnapshot, applyResult);
         }
 
         return expandLegacySnapshot(rawSnapshot);
     }
 
-    function expandCompactSnapshot(rawSnapshot) {
+    function expandCompactSnapshot(rawSnapshot, applyResult) {
         updatePlayerInfoCache(rawSnapshot.playerInfo);
-        updateTerritoryCache(rawSnapshot.territories);
-        updateTrailCache(rawSnapshot.trails);
+        updateTerritoryCache(rawSnapshot.territories, applyResult);
+        updateTrailCache(rawSnapshot.trails, applyResult);
+        const activeTrailIds = new Set(rawSnapshot.trailIds || []);
+        const failedTerritoryOperationIds = updateTerritoryOperations(rawSnapshot.territoryOps, activeTrailIds, applyResult);
+        const ignoredTerritoryResyncIds = createIgnoredTerritoryResyncIds(failedTerritoryOperationIds);
 
         const players = expandPlayers(rawSnapshot.players, rawSnapshot.debug);
         const territories = selectCachedEntities(entityCache.territories, rawSnapshot.territoryIds);
-        const trails = selectCachedEntities(entityCache.trails, rawSnapshot.trailIds);
+        const trails = rawSnapshot.preserveTrails
+            ? getPreviousSnapshotEntities("trails")
+            : selectCachedEntities(entityCache.trails, rawSnapshot.trailIds);
 
-        requestResyncForMissingCachedEntities(rawSnapshot.territoryIds, territories);
-        requestResyncForStaleCachedVersions(rawSnapshot.territoryVersions, territories);
-        requestResyncForMissingCachedEntities(rawSnapshot.trailIds, trails);
+        requestRecoveryForMissingCachedEntities(rawSnapshot.territoryIds, territories, "territories", applyResult, ignoredTerritoryResyncIds);
+        requestRecoveryForStaleCachedVersions(rawSnapshot.territoryVersions, territories, applyResult, ignoredTerritoryResyncIds);
+
+        if (!rawSnapshot.preserveTrails) {
+            requestRecoveryForMissingCachedEntities(rawSnapshot.trailIds, trails, "trails", applyResult);
+        }
 
         debugState.visiblePlayers = Object.keys(players).length;
         debugState.visibleTerritories = Object.keys(territories).length;
@@ -232,13 +275,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
     }
 
-    function updateTerritoryCache(territories) {
+    function updateTerritoryCache(territories, applyResult) {
         for (const [id, territory] of Object.entries(territories || {})) {
             const base = territory.base || [0, 0];
             const polygon = unpackTerritoryPolygon(territory.polygon);
 
             if (!polygon) {
-                requestResync();
+                markCacheInvalid(applyResult, "territories", id);
                 continue;
             }
 
@@ -250,7 +293,153 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 baseY: base[1],
                 polygon
             };
+            suppressedCaptureOperationResyncIds.delete(id);
         }
+    }
+
+    function updateTerritoryOperations(operations, activeTrailIds, applyResult) {
+        const failedIds = new Set();
+
+        for (const [id, operation] of Object.entries(operations || {})) {
+            if (shouldDeferTerritoryOperation(id, operation, activeTrailIds)) {
+                pendingTerritoryOperations.set(id, operation);
+                continue;
+            }
+
+            if (!applyCaptureTerritoryOperation(id, operation)) {
+                failedIds.add(id);
+                markCacheInvalid(applyResult, "territories", id);
+                handleCaptureOperationFailure(id);
+                continue;
+            }
+
+            pendingTerritoryOperations.delete(id);
+            suppressedCaptureOperationResyncIds.delete(id);
+        }
+
+        applyPendingTerritoryOperations(activeTrailIds, applyResult, failedIds);
+
+        return failedIds;
+    }
+
+    function shouldDeferTerritoryOperation(id, operation, activeTrailIds) {
+        return operation
+            && operation.type === "trailCapture"
+            && activeTrailIds.has(id)
+            && !hasFallbackTrailPoints(operation);
+    }
+
+    function applyPendingTerritoryOperations(activeTrailIds, applyResult, failedIds) {
+        for (const [id, operation] of pendingTerritoryOperations.entries()) {
+            if (activeTrailIds.has(id)) {
+                continue;
+            }
+
+            if (!applyCaptureTerritoryOperation(id, operation)) {
+                failedIds.add(id);
+                markCacheInvalid(applyResult, "territories", id);
+                handleCaptureOperationFailure(id);
+                continue;
+            }
+
+            pendingTerritoryOperations.delete(id);
+            suppressedCaptureOperationResyncIds.delete(id);
+        }
+    }
+
+    function applyCaptureTerritoryOperation(id, operation) {
+        if (!operation || operation.type !== "trailCapture") {
+            return false;
+        }
+
+        const territory = entityCache.territories[id];
+
+        if (!territory || territory.version !== operation.baseVersion) {
+            return false;
+        }
+
+        const trailSegment = getCaptureTrailSegment(id, operation);
+        const startContact = unpackCaptureContact(operation.startContact);
+        const endContact = unpackCaptureContact(operation.endContact);
+        const keepAnchor = unpackPoint(operation.keepAnchor);
+
+        if (!trailSegment || !startContact || !endContact || !keepAnchor) {
+            return false;
+        }
+
+        const ring = territory.polygon && territory.polygon.rings && territory.polygon.rings[0];
+        const localStartContact = findClosestPolygonBoundaryContact(ring, startContact.point);
+        const localEndContact = findClosestPolygonBoundaryContact(ring, endContact.point);
+
+        if (!localStartContact || !localEndContact) {
+            return false;
+        }
+
+        const boundaryPath = selectBoundaryPathByAnchor(
+            createBoundaryPaths(ring, localEndContact, localStartContact),
+            keepAnchor
+        );
+
+        if (!boundaryPath) {
+            return false;
+        }
+
+        const trailPoints = createClippedTrailPoints(
+            trailSegment,
+            operation.trailSegmentLength,
+            localStartContact.point,
+            localEndContact.point
+        );
+        const nextRing = normalizePolygonRing(trailPoints.concat(boundaryPath));
+
+        if (nextRing.length < 4) {
+            return false;
+        }
+
+        entityCache.territories[id] = {
+            ...territory,
+            version: operation.version,
+            polygon: {
+                rings: [nextRing]
+            }
+        };
+
+        return true;
+    }
+
+    function getCaptureTrailSegment(id, operation) {
+        const trail = entityCache.trails[id];
+        const fallbackPoints = unpackPoints(operation.trailPoints);
+
+        const segments = trail && operation.trailSide === "right"
+            ? trail.rightSegments
+            : trail && trail.leftSegments;
+        const segment = segments && segments[operation.trailSegmentIndex];
+
+        if (canUseCachedTrailSegment(segment, operation)) {
+            return segment;
+        }
+
+        return fallbackPoints.length >= 2 ? fallbackPoints : null;
+    }
+
+    function hasFallbackTrailPoints(operation) {
+        return unpackPoints(operation && operation.trailPoints).length >= 2;
+    }
+
+    function canUseCachedTrailSegment(segment, operation) {
+        return Array.isArray(segment)
+            && segment.length >= Math.max(2, operation.trailSegmentLength - 1);
+    }
+
+    function unpackCaptureContact(contact) {
+        if (!Array.isArray(contact) || contact.length < 2) {
+            return null;
+        }
+
+        const point = unpackPoint(contact);
+
+        return point ? { point } : null;
     }
 
     function unpackTerritoryPolygon(polygon) {
@@ -304,7 +493,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
     }
 
-    function updateTrailCache(trails) {
+    function updateTrailCache(trails, applyResult) {
         for (const [id, update] of Object.entries(trails || {})) {
             if (update.full) {
                 entityCache.trails[id] = createFullTrail(id, update);
@@ -315,8 +504,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             const patchedTrail = trail && createPatchedTrail(trail, update);
 
             if (!patchedTrail) {
-                delete entityCache.trails[id];
-                requestResync();
+                markCacheInvalid(applyResult, "trails", id);
                 continue;
             }
 
@@ -360,22 +548,36 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         return selected;
     }
 
-    function requestResyncForMissingCachedEntities(ids, selectedEntities) {
+    function getPreviousSnapshotEntities(key) {
+        if (snapshots.length === 0) {
+            return {};
+        }
+
+        return snapshots[snapshots.length - 1][key] || {};
+    }
+
+    function requestRecoveryForMissingCachedEntities(ids, selectedEntities, type, applyResult, ignoredIds = new Set()) {
         for (const id of ids || []) {
+            if (ignoredIds.has(id)) {
+                continue;
+            }
+
             if (!selectedEntities[id]) {
-                requestResync();
-                return;
+                markCacheInvalid(applyResult, type, id);
             }
         }
     }
 
-    function requestResyncForStaleCachedVersions(versions, selectedEntities) {
+    function requestRecoveryForStaleCachedVersions(versions, selectedEntities, applyResult, ignoredIds = new Set()) {
         for (const [id, version] of Object.entries(versions || {})) {
+            if (ignoredIds.has(id)) {
+                continue;
+            }
+
             const entity = selectedEntities[id];
 
             if (!entity || entity.version !== version) {
-                requestResync();
-                return;
+                markCacheInvalid(applyResult, "territories", id);
             }
         }
     }
@@ -466,6 +668,23 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         lastResyncRequestedAt = now;
         options.onResyncNeeded();
     }
+
+    function createIgnoredTerritoryResyncIds(failedTerritoryOperationIds) {
+        return new Set([
+            ...suppressedCaptureOperationResyncIds,
+            ...pendingTerritoryOperations.keys(),
+            ...failedTerritoryOperationIds
+        ]);
+    }
+
+    function handleCaptureOperationFailure(id) {
+        if (networkConfig.captureOperationResyncEnabled === false) {
+            suppressedCaptureOperationResyncIds.add(id);
+            return;
+        }
+
+        requestResync();
+    }
 }
 
 function unpackPolygon(polygon) {
@@ -536,6 +755,230 @@ function closeRing(ring) {
         x: first.x,
         y: first.y
     });
+}
+
+function createClippedTrailPoints(sidePoints, expectedLength, startPoint, endPoint) {
+    const expectedPointCount = Number.isInteger(expectedLength) && expectedLength > 1
+        ? expectedLength
+        : sidePoints.length;
+    const usablePoints = sidePoints.slice(0, expectedPointCount);
+    const middlePoints = usablePoints.length >= expectedPointCount
+        ? usablePoints.slice(1, -1)
+        : usablePoints.slice(1);
+
+    return removeConsecutiveDuplicatePoints([
+        startPoint,
+        ...middlePoints,
+        endPoint
+    ]);
+}
+
+function createBoundaryPaths(ring, startContact, endContact) {
+    const openRing = getOpenRing(ring);
+
+    if (!startContact || !endContact || openRing.length < 3) {
+        return [];
+    }
+
+    const forwardPath = createForwardBoundaryPath(openRing, startContact, endContact);
+    const reversePath = createForwardBoundaryPath(openRing, endContact, startContact).reverse();
+
+    return [
+        removeConsecutiveDuplicatePoints(forwardPath),
+        removeConsecutiveDuplicatePoints(reversePath)
+    ].filter(path => path.length >= 2);
+}
+
+function createForwardBoundaryPath(openRing, startContact, endContact) {
+    if (startContact.segmentIndex === endContact.segmentIndex
+        && endContact.segmentT >= startContact.segmentT) {
+        return [startContact.point, endContact.point];
+    }
+
+    const path = [startContact.point];
+    let vertexIndex = (startContact.segmentIndex + 1) % openRing.length;
+    let guard = 0;
+
+    while (guard <= openRing.length) {
+        path.push(openRing[vertexIndex]);
+
+        if (vertexIndex === endContact.segmentIndex) {
+            break;
+        }
+
+        vertexIndex = (vertexIndex + 1) % openRing.length;
+        guard++;
+    }
+
+    path.push(endContact.point);
+
+    return path;
+}
+
+function selectBoundaryPathByAnchor(paths, anchor) {
+    let selectedPath = null;
+    let selectedDistance = Infinity;
+
+    for (const path of paths || []) {
+        const distance = getPointPathDistanceSquared(anchor, path);
+
+        if (distance < selectedDistance) {
+            selectedDistance = distance;
+            selectedPath = path;
+        }
+    }
+
+    return selectedPath && Number.isFinite(selectedDistance) ? selectedPath : null;
+}
+
+function getPointPathDistanceSquared(point, path) {
+    let distance = Infinity;
+
+    for (let index = 0; index < path.length - 1; index++) {
+        distance = Math.min(distance, getPointSegmentDistanceSquared(point, path[index], path[index + 1]));
+    }
+
+    return distance;
+}
+
+function findClosestPolygonBoundaryContact(ring, point) {
+    const openRing = getOpenRing(ring);
+    let closestContact = null;
+
+    for (let segmentIndex = 0; segmentIndex < openRing.length; segmentIndex++) {
+        const projection = projectPointOnSegment(
+            point,
+            openRing[segmentIndex],
+            openRing[(segmentIndex + 1) % openRing.length]
+        );
+
+        if (!closestContact || projection.distanceSquared < closestContact.distanceSquared) {
+            closestContact = {
+                point: projection.point,
+                segmentIndex,
+                segmentT: projection.segmentT,
+                distanceSquared: projection.distanceSquared
+            };
+        }
+    }
+
+    return closestContact;
+}
+
+function projectPointOnSegment(point, segmentStart, segmentEnd) {
+    const direction = subtractPoints(segmentEnd, segmentStart);
+    const lengthSquared = direction.x * direction.x + direction.y * direction.y;
+    const segmentT = lengthSquared <= geometryEpsilon
+        ? 0
+        : clamp((dotProduct(subtractPoints(point, segmentStart), direction) / lengthSquared), 0, 1);
+    const projectedPoint = {
+        x: segmentStart.x + direction.x * segmentT,
+        y: segmentStart.y + direction.y * segmentT
+    };
+
+    return {
+        point: projectedPoint,
+        segmentT,
+        distanceSquared: getDistanceSquared(point, projectedPoint)
+    };
+}
+
+function getPointSegmentDistanceSquared(point, segmentStart, segmentEnd) {
+    return projectPointOnSegment(point, segmentStart, segmentEnd).distanceSquared;
+}
+
+function normalizePolygonRing(points) {
+    const ring = points
+        .filter(point => point && Number.isFinite(point.x) && Number.isFinite(point.y))
+        .map(point => ({
+            x: roundCoordinate(point.x),
+            y: roundCoordinate(point.y)
+        }));
+
+    removeClosingDuplicatePoint(ring);
+    const dedupedRing = removeConsecutiveDuplicatePoints(ring);
+
+    removeCollinearPoints(dedupedRing);
+
+    return closeRing(dedupedRing);
+}
+
+function getOpenRing(ring) {
+    if (!Array.isArray(ring)) {
+        return [];
+    }
+
+    if (ring.length > 1 && arePointsEqual(ring[0], ring[ring.length - 1])) {
+        return ring.slice(0, -1);
+    }
+
+    return ring.slice();
+}
+
+function removeConsecutiveDuplicatePoints(points) {
+    return points.filter((point, index) => (
+        index === 0 || !arePointsEqual(point, points[index - 1])
+    ));
+}
+
+function removeClosingDuplicatePoint(ring) {
+    if (ring.length > 1 && arePointsEqual(ring[0], ring[ring.length - 1])) {
+        ring.pop();
+    }
+}
+
+function removeCollinearPoints(ring) {
+    let index = 0;
+
+    while (ring.length >= 3 && index < ring.length) {
+        const previous = ring[(index - 1 + ring.length) % ring.length];
+        const current = ring[index];
+        const next = ring[(index + 1) % ring.length];
+
+        if (isCollinear(previous, current, next)) {
+            ring.splice(index, 1);
+            index = Math.max(0, index - 1);
+            continue;
+        }
+
+        index++;
+    }
+}
+
+function isCollinear(first, second, third) {
+    return Math.abs(crossCoordinates(first, second, third)) <= geometryEpsilon;
+}
+
+function crossCoordinates(first, second, third) {
+    return (second.x - first.x) * (third.y - first.y)
+        - (second.y - first.y) * (third.x - first.x);
+}
+
+function arePointsEqual(first, second) {
+    return Math.abs(first.x - second.x) <= geometryEpsilon
+        && Math.abs(first.y - second.y) <= geometryEpsilon;
+}
+
+function subtractPoints(first, second) {
+    return {
+        x: first.x - second.x,
+        y: first.y - second.y
+    };
+}
+
+function dotProduct(first, second) {
+    return first.x * second.x + first.y * second.y;
+}
+
+function getDistanceSquared(first, second) {
+    const x = first.x - second.x;
+    const y = first.y - second.y;
+
+    return x * x + y * y;
+}
+
+function roundCoordinate(value) {
+    return Math.round(value * coordinatePrecision) / coordinatePrecision;
 }
 
 function calculateAverage(values) {

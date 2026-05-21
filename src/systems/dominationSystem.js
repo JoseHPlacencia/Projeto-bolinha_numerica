@@ -14,20 +14,30 @@ const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSyste
 const geometryEpsilon = 1e-7;
 
 function captureClosedTrail(player, territories, players) {
-    const capturedPolygon = createExternalTrailCapturePolygon(player, territories);
+    const capture = createExternalTrailCapture(player, territories);
 
-    if (!capturedPolygon) {
+    if (!capture) {
         return null;
     }
 
-    const changedPlayerIds = applyCapturedPolygon(territories, player.id, capturedPolygon);
+    const territory = territories.get(player.id);
+    const baseVersion = territory ? territory.version || 0 : 0;
+    const changedPlayerIds = applyCapturedPolygon(territories, player.id, capture.polygon);
+
+    storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
 
     relocatePlayersAfterTerritoryChange(players, territories, changedPlayerIds);
 
-    return capturedPolygon;
+    return capture.polygon;
 }
 
 function createExternalTrailCapturePolygon(player, territories) {
+    const capture = createExternalTrailCapture(player, territories);
+
+    return capture ? capture.polygon : null;
+}
+
+function createExternalTrailCapture(player, territories) {
     if (!hasAnySideTrailSegment(player)) {
         return null;
     }
@@ -44,7 +54,7 @@ function createExternalTrailCapturePolygon(player, territories) {
         return null;
     }
 
-    return bestCandidate.polygon;
+    return bestCandidate;
 }
 
 function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) {
@@ -103,16 +113,16 @@ function isBetterCaptureCandidate(candidate, bestCandidate) {
 function createTrailCaptureCandidates(player, territoryPolygon) {
     const candidates = [];
 
-    for (const segment of getTrailSegments(player)) {
-        candidates.push(...createTrailCaptureCandidatesFromSegment(segment, territoryPolygon));
+    for (const trail of getTrailSegments(player)) {
+        candidates.push(...createTrailCaptureCandidatesFromSegment(trail, territoryPolygon));
     }
 
     return candidates;
 }
 
-function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
+function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
     const candidates = [];
-    const finiteSidePoints = getFinitePoints(segment);
+    const finiteSidePoints = getFinitePoints(trail.points);
 
     if (finiteSidePoints.length < 2) {
         return candidates;
@@ -133,12 +143,23 @@ function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
     const boundaryPaths = createBoundaryPaths(territoryPolygon[0], endContact, startContact);
     let bestCandidate = null;
 
-    for (const boundaryPath of boundaryPaths) {
+    for (let boundaryPathIndex = 0; boundaryPathIndex < boundaryPaths.length; boundaryPathIndex++) {
+        const boundaryPath = boundaryPaths[boundaryPathIndex];
         const points = createTrailBoundaryCapturePoints(clippedSidePoints, boundaryPath);
         const candidate = createTrailCandidateFromPoints(points);
 
         if (candidate && isLargerAreaCandidate(candidate, bestCandidate)) {
-            bestCandidate = candidate;
+            bestCandidate = {
+                ...candidate,
+                operation: createCaptureOperation(
+                    trail,
+                    clippedSidePoints,
+                    startContact,
+                    endContact,
+                    boundaryPaths,
+                    boundaryPathIndex
+                )
+            };
         }
     }
 
@@ -151,8 +172,16 @@ function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
 
 function getTrailSegments(player) {
     return [
-        ...getVisibleSegments(player.trailLeftSegments),
-        ...getVisibleSegments(player.trailRightSegments)
+        ...getVisibleSegments(player.trailLeftSegments).map((points, index) => ({
+            side: "left",
+            index,
+            points
+        })),
+        ...getVisibleSegments(player.trailRightSegments).map((points, index) => ({
+            side: "right",
+            index,
+            points
+        }))
     ];
 }
 
@@ -199,6 +228,89 @@ function createTrailCandidateFromPoints(points) {
     }
 
     return { polygon, area };
+}
+
+function createCaptureOperation(trail, clippedSidePoints, startContact, endContact, boundaryPaths, capturedBoundaryPathIndex) {
+    const keepBoundaryPath = boundaryPaths[capturedBoundaryPathIndex];
+
+    if (!keepBoundaryPath || keepBoundaryPath.length < 2) {
+        return null;
+    }
+
+    return {
+        type: "trailCapture",
+        trailSide: trail.side,
+        trailSegmentIndex: trail.index,
+        trailSegmentLength: trail.points.length,
+        trailPoints: clippedSidePoints.map(clonePoint),
+        startContact: cloneContact(startContact),
+        endContact: cloneContact(endContact),
+        keepAnchor: createBoundaryPathAnchor(keepBoundaryPath),
+        previewPolygon: createPolygonFromPoints(removeConsecutiveDuplicatePoints(
+            clippedSidePoints.concat(keepBoundaryPath)
+        ))
+    };
+}
+
+function storeCaptureOperation(territories, playerId, capture, baseVersion, changedPlayerIds) {
+    if (!changedPlayerIds.has(playerId) || !capture.operation) {
+        return;
+    }
+
+    const territory = territories.get(playerId);
+
+    if (!territory) {
+        return;
+    }
+
+    const nextVersion = territory.version || 0;
+
+    if (capture.operation.previewPolygon.length === 0) {
+        return;
+    }
+
+    if (!arePolygonAreasClose(capture.operation.previewPolygon, territory.polygon)) {
+        return;
+    }
+
+    territory.lastCaptureOperation = {
+        type: "trailCapture",
+        baseVersion,
+        version: nextVersion,
+        trailSide: capture.operation.trailSide,
+        trailSegmentIndex: capture.operation.trailSegmentIndex,
+        trailSegmentLength: capture.operation.trailSegmentLength,
+        trailPoints: capture.operation.trailPoints,
+        startContact: capture.operation.startContact,
+        endContact: capture.operation.endContact,
+        keepAnchor: capture.operation.keepAnchor
+    };
+}
+
+function createBoundaryPathAnchor(path) {
+    if (path.length > 2) {
+        return clonePoint(path[1]);
+    }
+
+    return {
+        x: (path[0].x + path[path.length - 1].x) / 2,
+        y: (path[0].y + path[path.length - 1].y) / 2
+    };
+}
+
+function cloneContact(contact) {
+    return {
+        point: clonePoint(contact.point),
+        segmentIndex: contact.segmentIndex,
+        segmentT: contact.segmentT
+    };
+}
+
+function arePolygonAreasClose(first, second) {
+    const firstArea = calculatePolygonArea(first);
+    const secondArea = calculatePolygonArea(second);
+
+    return Math.abs(firstArea - secondArea) <= Math.max(1, secondArea * 0.001);
 }
 
 function createBoundaryPaths(ring, startContact, endContact) {
@@ -290,6 +402,13 @@ function coordinatesToPoint(coordinates) {
     return {
         x: coordinates[0],
         y: coordinates[1]
+    };
+}
+
+function clonePoint(point) {
+    return {
+        x: point.x,
+        y: point.y
     };
 }
 

@@ -4,6 +4,7 @@ const {
     deletePlayerTerritory,
     initializePlayerTerritory
 } = require("../state/territories");
+const { invalidateSnapshotCache } = require("./snapshotLoop");
 const { createRateLimiter } = require("../utils/rateLimiter");
 
 function registerSocket(io, players, territories) {
@@ -69,6 +70,14 @@ function registerInputEvents(socket, players) {
         }
 
         socket.data.snapshotState = null;
+    });
+
+    socket.on("snapshotCacheInvalid", rawInvalidations => {
+        if (!viewportGuard.canHandleInput()) {
+            return;
+        }
+
+        invalidateSnapshotCache(socket, rawInvalidations);
     });
 }
 
