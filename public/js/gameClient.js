@@ -33,8 +33,10 @@ export function startClient(gameConfig) {
     socket.on("gameState", (snapshot, acknowledge) => {
         const applyResult = snapshots.processSnapshot(snapshot);
 
+        recordSnapshotDiagnostics(snapshot, applyResult);
+
         if (typeof acknowledge === "function") {
-            acknowledge(applyResult);
+            acknowledge(createSnapshotAcknowledgement(applyResult));
             return;
         }
 
@@ -88,5 +90,72 @@ export function startClient(gameConfig) {
 
         lastViewportSentAt = now;
         socket.emit("viewport", renderer.getViewportState());
+    }
+
+    function createSnapshotAcknowledgement(applyResult) {
+        return {
+            applied: !applyResult || applyResult.applied !== false,
+            invalidations: applyResult && applyResult.invalidations
+                ? applyResult.invalidations
+                : {
+                    playerInfo: [],
+                    territories: [],
+                    trails: []
+                }
+        };
+    }
+
+    function recordSnapshotDiagnostics(snapshot, applyResult) {
+        if (typeof window === "undefined") {
+            return;
+        }
+
+        const diagnostics = {
+            at: new Date().toISOString(),
+            time: snapshot && snapshot.time,
+            applied: !applyResult || applyResult.applied !== false,
+            fullTerritoryIds: Object.keys((snapshot && snapshot.territories) || {}),
+            territoryOperationIds: Object.keys((snapshot && snapshot.territoryOps) || {}),
+            territoryOperations: summarizeTerritoryOperations(snapshot && snapshot.territoryOps),
+            trailUpdateIds: Object.keys((snapshot && snapshot.trails) || {}),
+            invalidations: applyResult && applyResult.invalidations,
+            territoryOperationFailures: applyResult && applyResult.territoryOperationFailures || [],
+            syncDebug: snapshot && snapshot.syncDebug
+        };
+        const log = Array.isArray(window.__snapshotDiagnosticsLog)
+            ? window.__snapshotDiagnosticsLog
+            : [];
+
+        log.push(diagnostics);
+
+        while (log.length > 200) {
+            log.shift();
+        }
+
+        window.__lastSnapshotDiagnostics = diagnostics;
+        window.__snapshotDiagnosticsLog = log;
+
+        if (window.snapshotApplyDebug && diagnostics.territoryOperationFailures.length > 0) {
+            console.warn("[snapshot] falha ao aplicar operação de território", diagnostics);
+        }
+    }
+
+    function summarizeTerritoryOperations(operations) {
+        const summaries = {};
+
+        for (const [id, operation] of Object.entries(operations || {})) {
+            summaries[id] = {
+                baseVersion: operation.baseVersion,
+                version: operation.version,
+                trailSide: operation.trailSide,
+                trailSegmentIndex: operation.trailSegmentIndex,
+                trailSegmentLength: operation.trailSegmentLength,
+                trailTailStart: Number.isInteger(operation.trailTailStart) ? operation.trailTailStart : null,
+                trailTailPointCount: Array.isArray(operation.trailTailPoints) ? operation.trailTailPoints.length : 0,
+                fallbackTrailPointCount: Array.isArray(operation.trailPoints) ? operation.trailPoints.length : 0
+            };
+        }
+
+        return summaries;
     }
 }

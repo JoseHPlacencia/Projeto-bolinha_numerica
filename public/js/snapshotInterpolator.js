@@ -79,6 +79,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createApplyResult() {
         return {
             applied: true,
+            territoryOperationFailures: [],
             invalidations: {
                 playerInfo: [],
                 territories: [],
@@ -306,8 +307,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 continue;
             }
 
-            if (!applyCaptureTerritoryOperation(id, operation)) {
+            const operationResult = applyCaptureTerritoryOperation(id, operation);
+
+            if (!operationResult.applied) {
                 failedIds.add(id);
+                recordTerritoryOperationFailure(applyResult, id, operation, operationResult, activeTrailIds, "snapshot");
                 markCacheInvalid(applyResult, "territories", id);
                 handleCaptureOperationFailure(id);
                 continue;
@@ -335,8 +339,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 continue;
             }
 
-            if (!applyCaptureTerritoryOperation(id, operation)) {
+            const operationResult = applyCaptureTerritoryOperation(id, operation);
+
+            if (!operationResult.applied) {
                 failedIds.add(id);
+                recordTerritoryOperationFailure(applyResult, id, operation, operationResult, activeTrailIds, "pending");
                 markCacheInvalid(applyResult, "territories", id);
                 handleCaptureOperationFailure(id);
                 continue;
@@ -349,39 +356,74 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     function applyCaptureTerritoryOperation(id, operation) {
         if (!operation || operation.type !== "trailCapture") {
-            return false;
+            return createCaptureOperationFailure("invalid_operation", {
+                operationType: operation && operation.type
+            });
         }
 
         const territory = entityCache.territories[id];
 
-        if (!territory || territory.version !== operation.baseVersion) {
-            return false;
+        if (!territory) {
+            return createCaptureOperationFailure("missing_cached_territory", {
+                expectedBaseVersion: operation.baseVersion,
+                operationVersion: operation.version
+            });
         }
 
-        const trailSegment = getCaptureTrailSegment(id, operation);
+        if (territory.version !== operation.baseVersion) {
+            return createCaptureOperationFailure("territory_version_mismatch", {
+                localTerritoryVersion: territory.version,
+                expectedBaseVersion: operation.baseVersion,
+                operationVersion: operation.version
+            });
+        }
+
+        const trailSegmentState = getCaptureTrailSegmentState(id, operation);
+        const trailSegment = trailSegmentState.points;
         const startContact = unpackCaptureContact(operation.startContact);
         const endContact = unpackCaptureContact(operation.endContact);
         const keepAnchor = unpackPoint(operation.keepAnchor);
 
-        if (!trailSegment || !startContact || !endContact || !keepAnchor) {
-            return false;
+        if (!trailSegment) {
+            return createCaptureOperationFailure("missing_or_incomplete_trail_segment", trailSegmentState.debug);
+        }
+
+        if (!startContact || !endContact || !keepAnchor) {
+            return createCaptureOperationFailure("invalid_capture_geometry_reference", {
+                hasStartContact: Boolean(startContact),
+                hasEndContact: Boolean(endContact),
+                hasKeepAnchor: Boolean(keepAnchor)
+            });
         }
 
         const ring = territory.polygon && territory.polygon.rings && territory.polygon.rings[0];
+
+        if (!Array.isArray(ring) || ring.length < 3) {
+            return createCaptureOperationFailure("invalid_cached_territory_ring", {
+                localTerritoryVersion: territory.version,
+                ringLength: Array.isArray(ring) ? ring.length : 0
+            });
+        }
+
         const localStartContact = findClosestPolygonBoundaryContact(ring, startContact.point);
         const localEndContact = findClosestPolygonBoundaryContact(ring, endContact.point);
 
         if (!localStartContact || !localEndContact) {
-            return false;
+            return createCaptureOperationFailure("boundary_contact_not_found", {
+                ringLength: ring.length,
+                hasLocalStartContact: Boolean(localStartContact),
+                hasLocalEndContact: Boolean(localEndContact)
+            });
         }
 
-        const boundaryPath = selectBoundaryPathByAnchor(
-            createBoundaryPaths(ring, localEndContact, localStartContact),
-            keepAnchor
-        );
+        const boundaryPaths = createBoundaryPaths(ring, localEndContact, localStartContact);
+        const boundaryPath = selectBoundaryPathByAnchor(boundaryPaths, keepAnchor);
 
         if (!boundaryPath) {
-            return false;
+            return createCaptureOperationFailure("boundary_path_not_found", {
+                boundaryPathCount: boundaryPaths.length,
+                ringLength: ring.length
+            });
         }
 
         const trailPoints = createClippedTrailPoints(
@@ -393,7 +435,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const nextRing = normalizePolygonRing(trailPoints.concat(boundaryPath));
 
         if (nextRing.length < 4) {
-            return false;
+            return createCaptureOperationFailure("resulting_ring_too_short", {
+                trailPointCount: trailPoints.length,
+                boundaryPathPointCount: boundaryPath.length,
+                nextRingLength: nextRing.length
+            });
         }
 
         entityCache.territories[id] = {
@@ -404,23 +450,134 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             }
         };
 
-        return true;
+        return { applied: true };
     }
 
     function getCaptureTrailSegment(id, operation) {
+        return getCaptureTrailSegmentState(id, operation).points;
+    }
+
+    function getCaptureTrailSegmentState(id, operation) {
         const trail = entityCache.trails[id];
         const fallbackPoints = unpackPoints(operation.trailPoints);
+        const trailTailPoints = unpackPoints(operation.trailTailPoints);
+        const trailTailStart = Number.isInteger(operation.trailTailStart)
+            ? operation.trailTailStart
+            : null;
 
         const segments = trail && operation.trailSide === "right"
             ? trail.rightSegments
             : trail && trail.leftSegments;
         const segment = segments && segments[operation.trailSegmentIndex];
+        const mergedSegment = createMergedTrailSegment(segment, trailTailStart, trailTailPoints);
+        const debug = {
+            hasCachedTrail: Boolean(trail),
+            trailSide: operation.trailSide,
+            cachedSideSegmentCount: Array.isArray(segments) ? segments.length : 0,
+            trailSegmentIndex: operation.trailSegmentIndex,
+            cachedSegmentLength: Array.isArray(segment) ? segment.length : 0,
+            requiredSegmentLength: operation.trailSegmentLength,
+            fallbackTrailPointCount: fallbackPoints.length,
+            trailTailStart,
+            trailTailPointCount: trailTailPoints.length,
+            mergedSegmentLength: Array.isArray(mergedSegment) ? mergedSegment.length : 0
+        };
 
         if (canUseCachedTrailSegment(segment, operation)) {
-            return segment;
+            return {
+                points: segment,
+                debug: {
+                    ...debug,
+                    trailPointSource: "cache"
+                }
+            };
         }
 
-        return fallbackPoints.length >= 2 ? fallbackPoints : null;
+        if (canUseCachedTrailSegment(mergedSegment, operation)) {
+            return {
+                points: mergedSegment,
+                debug: {
+                    ...debug,
+                    trailPointSource: "cache_tail"
+                }
+            };
+        }
+
+        if (fallbackPoints.length >= 2) {
+            return {
+                points: fallbackPoints,
+                debug: {
+                    ...debug,
+                    trailPointSource: "fallback"
+                }
+            };
+        }
+
+        return {
+            points: null,
+            debug: {
+                ...debug,
+                trailPointSource: "none"
+            }
+        };
+    }
+
+    function createMergedTrailSegment(segment, trailTailStart, trailTailPoints) {
+        if (!Array.isArray(trailTailPoints)
+            || trailTailPoints.length === 0
+            || !Number.isInteger(trailTailStart)
+            || trailTailStart < 0) {
+            return null;
+        }
+
+        const cachedPrefix = Array.isArray(segment) ? segment.slice(0, trailTailStart) : [];
+
+        if (cachedPrefix.length !== trailTailStart) {
+            return null;
+        }
+
+        return cachedPrefix.concat(trailTailPoints);
+    }
+
+    function createCaptureOperationFailure(reason, details = {}) {
+        return {
+            applied: false,
+            reason,
+            details
+        };
+    }
+
+    function recordTerritoryOperationFailure(applyResult, id, operation, operationResult, activeTrailIds, source) {
+        if (!applyResult || !Array.isArray(applyResult.territoryOperationFailures)) {
+            return;
+        }
+
+        applyResult.territoryOperationFailures.push({
+            id,
+            source,
+            reason: operationResult.reason || "unknown",
+            activeTrail: Boolean(activeTrailIds && activeTrailIds.has(id)),
+            operation: summarizeCaptureOperation(operation),
+            details: operationResult.details || {}
+        });
+    }
+
+    function summarizeCaptureOperation(operation) {
+        if (!operation) {
+            return null;
+        }
+
+        return {
+            type: operation.type,
+            baseVersion: operation.baseVersion,
+            version: operation.version,
+            trailSide: operation.trailSide,
+            trailSegmentIndex: operation.trailSegmentIndex,
+            trailSegmentLength: operation.trailSegmentLength,
+            fallbackTrailPointCount: unpackPoints(operation.trailPoints).length,
+            trailTailStart: Number.isInteger(operation.trailTailStart) ? operation.trailTailStart : null,
+            trailTailPointCount: unpackPoints(operation.trailTailPoints).length
+        };
     }
 
     function hasFallbackTrailPoints(operation) {

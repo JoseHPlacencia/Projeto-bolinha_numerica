@@ -53,6 +53,12 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         trails: trailUpdates
     };
 
+    if (config.network.snapshotDiagnosticsEnabled) {
+        snapshot.syncDebug = {
+            territories: territoryChanges.debug
+        };
+    }
+
     if (viewer && viewer.debugState) {
         snapshot.debug = {
             [viewer.id]: viewer.debugState
@@ -131,6 +137,7 @@ function serializeTerritoryVersions(territories, territoryIds) {
 function serializeChangedTerritoryState(territories, territoryIds, viewerId, clientState, now) {
     const serializedTerritories = {};
     const serializedOperations = {};
+    const syncDebug = config.network.snapshotDiagnosticsEnabled ? {} : null;
 
     for (const territoryId of territoryIds) {
         const territory = territories.get(territoryId);
@@ -146,10 +153,20 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
             continue;
         }
 
-        const operation = createCaptureTerritoryOperation(territory, knownTerritory, territoryId, viewerId);
+        const knownTrail = clientState.trails.get(territoryId);
+        const operation = createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, territoryId, viewerId);
 
         if (operation) {
             serializedOperations[territoryId] = operation;
+            recordTerritorySyncDebug(
+                syncDebug,
+                territoryId,
+                "operation",
+                "capture_operation",
+                territory,
+                knownTerritory,
+                territory.lastCaptureOperation
+            );
             clientState.territories.set(territoryId, {
                 version,
                 sentAt: now
@@ -166,6 +183,15 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
             ],
             polygon: packReferencedPolygon(territory.polygon, clientState)
         };
+        recordTerritorySyncDebug(
+            syncDebug,
+            territoryId,
+            "full",
+            getCaptureOperationBlockReason(territory.lastCaptureOperation, territory, knownTerritory, territoryId, viewerId),
+            territory,
+            knownTerritory,
+            territory.lastCaptureOperation
+        );
         clientState.territories.set(territoryId, {
             version,
             sentAt: now
@@ -174,11 +200,12 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
 
     return {
         territories: serializedTerritories,
-        operations: serializedOperations
+        operations: serializedOperations,
+        debug: syncDebug || undefined
     };
 }
 
-function createCaptureTerritoryOperation(territory, knownTerritory, territoryId, viewerId) {
+function createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, territoryId, viewerId) {
     const operation = territory.lastCaptureOperation;
 
     if (!canSendCaptureTerritoryOperation(operation, territory, knownTerritory, territoryId, viewerId)) {
@@ -199,6 +226,13 @@ function createCaptureTerritoryOperation(territory, knownTerritory, territoryId,
 
     if (shouldSendCaptureOperationFallbackTrailPoints()) {
         serializedOperation.trailPoints = packPoints(operation.trailPoints);
+    } else {
+        const neededTrailPoints = createNeededCaptureTrailPoints(operation, knownTrail);
+
+        if (neededTrailPoints) {
+            serializedOperation.trailTailStart = neededTrailPoints.start;
+            serializedOperation.trailTailPoints = packPoints(neededTrailPoints.points);
+        }
     }
 
     return serializedOperation;
@@ -232,8 +266,114 @@ function canUseKnownTerritoryForCaptureOperation(knownTerritory, operation, terr
         && territoryId === viewerId;
 }
 
+function getCaptureOperationBlockReason(operation, territory, knownTerritory, territoryId, viewerId) {
+    if (!knownTerritory) {
+        return "missing_known_territory";
+    }
+
+    if (config.network.captureOperationSyncEnabled === false) {
+        return "capture_operation_sync_disabled";
+    }
+
+    if (!operation) {
+        return "no_capture_operation";
+    }
+
+    if (operation.type !== "trailCapture") {
+        return "invalid_operation_type";
+    }
+
+    if (!canUseKnownTerritoryForCaptureOperation(knownTerritory, operation, territoryId, viewerId)) {
+        return "known_territory_version_not_at_operation_base";
+    }
+
+    if (territory.version !== operation.version) {
+        return "operation_not_current_territory_version";
+    }
+
+    if (!Number.isInteger(operation.trailSegmentIndex)) {
+        return "invalid_trail_segment_index";
+    }
+
+    if (!Number.isInteger(operation.trailSegmentLength) || operation.trailSegmentLength < 2) {
+        return "invalid_trail_segment_length";
+    }
+
+    if (!operation.startContact) {
+        return "missing_start_contact";
+    }
+
+    if (!operation.endContact) {
+        return "missing_end_contact";
+    }
+
+    if (!operation.keepAnchor) {
+        return "missing_keep_anchor";
+    }
+
+    if (shouldSendCaptureOperationFallbackTrailPoints() && !hasFallbackTrailPoints(operation)) {
+        return "missing_fallback_trail_points";
+    }
+
+    return "unknown";
+}
+
+function recordTerritorySyncDebug(syncDebug, territoryId, mode, reason, territory, knownTerritory, operation) {
+    if (!syncDebug) {
+        return;
+    }
+
+    syncDebug[territoryId] = {
+        mode,
+        reason,
+        knownVersion: knownTerritory && knownTerritory.version,
+        serverVersion: territory && territory.version,
+        operationBaseVersion: operation && operation.baseVersion,
+        operationVersion: operation && operation.version
+    };
+}
+
 function shouldSendCaptureOperationFallbackTrailPoints() {
     return config.network.captureOperationFallbackTrailPointsEnabled !== false;
+}
+
+function createNeededCaptureTrailPoints(operation, knownTrail) {
+    if (config.network.captureOperationNeededTrailPointsEnabled === false) {
+        return null;
+    }
+
+    if (!operation || !Array.isArray(operation.trailPoints) || operation.trailPoints.length < 2) {
+        return null;
+    }
+
+    const knownLength = getKnownCaptureTrailSegmentLength(knownTrail, operation);
+    const requiredClientLength = Math.min(
+        operation.trailPoints.length,
+        Math.max(2, operation.trailSegmentLength - 1)
+    );
+    const tailStart = clamp(knownLength, 0, requiredClientLength);
+
+    if (tailStart >= requiredClientLength) {
+        return null;
+    }
+
+    return {
+        start: tailStart,
+        points: operation.trailPoints.slice(tailStart, requiredClientLength)
+    };
+}
+
+function getKnownCaptureTrailSegmentLength(knownTrail, operation) {
+    if (!knownTrail || !operation) {
+        return 0;
+    }
+
+    const lengths = operation.trailSide === "right"
+        ? knownTrail.rightSegmentLengths
+        : knownTrail.leftSegmentLengths;
+    const length = Array.isArray(lengths) ? lengths[operation.trailSegmentIndex] : 0;
+
+    return Number.isInteger(length) && length > 0 ? length : 0;
 }
 
 function hasFallbackTrailPoints(operation) {

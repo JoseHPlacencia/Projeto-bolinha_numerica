@@ -114,6 +114,7 @@ const network = Object.freeze({
     cullPlayerPositionsByViewport: false,
     captureOperationSyncEnabled: true,
     captureOperationFallbackTrailPointsEnabled: false,
+    captureOperationNeededTrailPointsEnabled: true,
     captureOperationBatchTrailPointsEnabled: true,
     captureOperationHistoryLimit: 128,
     optimisticOwnerCaptureOperationSyncEnabled: true,
@@ -129,7 +130,8 @@ const network = Object.freeze({
     territoryFullSyncIntervalMs: 10000,
     trailFullSyncIntervalMs: 4000,
     trailPatchFullRatio: 0.85,
-    resyncRequestIntervalMs: 1000
+    resyncRequestIntervalMs: 1000,
+    snapshotDiagnosticsEnabled: false
 });
 
 const security = Object.freeze({
