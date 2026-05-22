@@ -31,9 +31,22 @@ export function startClient(gameConfig) {
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
+        const receivedAt = Date.now();
+        const receivedPerfAt = performance.now();
+        const debugBefore = snapshots.getDebugState();
         const applyResult = snapshots.processSnapshot(snapshot);
+        const processedPerfAt = performance.now();
+        const debugAfter = snapshots.getDebugState();
+        const receiveTiming = {
+            receivedAt,
+            receivedPerfAt,
+            processedPerfAt,
+            processMs: processedPerfAt - receivedPerfAt,
+            debugBefore,
+            debugAfter
+        };
 
-        recordSnapshotDiagnostics(snapshot, applyResult);
+        recordSnapshotDiagnostics(snapshot, applyResult, receiveTiming);
 
         if (typeof acknowledge === "function") {
             acknowledge(createSnapshotAcknowledgement(applyResult));
@@ -105,11 +118,12 @@ export function startClient(gameConfig) {
         };
     }
 
-    function recordSnapshotDiagnostics(snapshot, applyResult) {
+    function recordSnapshotDiagnostics(snapshot, applyResult, receiveTiming) {
         if (typeof window === "undefined") {
             return;
         }
 
+        const timing = createSnapshotTimingDiagnostics(snapshot, applyResult, receiveTiming);
         const diagnostics = {
             at: new Date().toISOString(),
             time: snapshot && snapshot.time,
@@ -119,7 +133,9 @@ export function startClient(gameConfig) {
             territoryOperations: summarizeTerritoryOperations(snapshot && snapshot.territoryOps),
             trailUpdateIds: Object.keys((snapshot && snapshot.trails) || {}),
             invalidations: applyResult && applyResult.invalidations,
+            territoryOperationApplications: applyResult && applyResult.territoryOperationApplications || [],
             territoryOperationFailures: applyResult && applyResult.territoryOperationFailures || [],
+            timing,
             syncDebug: snapshot && snapshot.syncDebug
         };
         const log = Array.isArray(window.__snapshotDiagnosticsLog)
@@ -134,10 +150,276 @@ export function startClient(gameConfig) {
 
         window.__lastSnapshotDiagnostics = diagnostics;
         window.__snapshotDiagnosticsLog = log;
+        recordTerritoryCaptureTimingDiagnostics(snapshot, applyResult, timing);
+        installCaptureTimingPrinter();
 
         if (window.snapshotApplyDebug && diagnostics.territoryOperationFailures.length > 0) {
             console.warn("[snapshot] falha ao aplicar operação de território", diagnostics);
         }
+    }
+
+    function createSnapshotTimingDiagnostics(snapshot, applyResult, receiveTiming) {
+        const before = receiveTiming && receiveTiming.debugBefore || {};
+        const after = receiveTiming && receiveTiming.debugAfter || {};
+        const clientTiming = applyResult && applyResult.clientTiming || {};
+        const serverTiming = snapshot && snapshot.timing || null;
+        const serverOffsetMs = Number.isFinite(after.serverOffsetMs)
+            ? after.serverOffsetMs
+            : clientTiming.serverOffsetMs;
+
+        return {
+            clientReceivedAt: receiveTiming && receiveTiming.receivedAt,
+            clientProcessMs: roundTimingMs(receiveTiming && receiveTiming.processMs),
+            clientExpandMs: roundTimingMs(clientTiming.expandMs),
+            interpolatorProcessMs: roundTimingMs(clientTiming.processMs),
+            bufferBeforeMs: roundTimingMs(before.bufferMs),
+            bufferAfterMs: roundTimingMs(after.bufferMs),
+            bufferDeltaMs: roundTimingMs(after.bufferMs - before.bufferMs),
+            snapshotInterArrivalMs: roundTimingMs(after.snapshotInterArrivalMs),
+            averageSnapshotDeltaMs: roundTimingMs(after.averageSnapshotDeltaMs),
+            jitterMs: roundTimingMs(after.jitterMs),
+            snapshotCountBefore: before.snapshotCount,
+            snapshotCountAfter: after.snapshotCount,
+            serverOffsetMs: roundTimingMs(serverOffsetMs),
+            estimatedNetworkMs: estimateNetworkMs(serverTiming, receiveTiming, serverOffsetMs),
+            server: serverTiming
+        };
+    }
+
+    function recordTerritoryCaptureTimingDiagnostics(snapshot, applyResult, timing) {
+        const entries = createTerritoryCaptureTimingEntries(snapshot, applyResult, timing);
+
+        if (entries.length === 0) {
+            return;
+        }
+
+        const log = Array.isArray(window.__territoryCaptureTimingLog)
+            ? window.__territoryCaptureTimingLog
+            : [];
+
+        for (const entry of entries) {
+            log.push(entry);
+        }
+
+        while (log.length > 200) {
+            log.shift();
+        }
+
+        window.__lastTerritoryCaptureTiming = log[log.length - 1];
+        window.__territoryCaptureTimingLog = log;
+    }
+
+    function createTerritoryCaptureTimingEntries(snapshot, applyResult, timing) {
+        const entries = [];
+        const operations = snapshot && snapshot.territoryOps || {};
+        const applications = applyResult && applyResult.territoryOperationApplications || [];
+        const failures = applyResult && applyResult.territoryOperationFailures || [];
+        const consumedOperationIds = new Set();
+
+        for (const application of applications) {
+            consumedOperationIds.add(application.id);
+            entries.push(createOperationTimingEntry("applied", application, timing));
+        }
+
+        for (const failure of failures) {
+            consumedOperationIds.add(failure.id);
+            entries.push(createOperationTimingEntry("failed", failure, timing));
+        }
+
+        for (const [id, operation] of Object.entries(operations)) {
+            if (consumedOperationIds.has(id)) {
+                continue;
+            }
+
+            entries.push(createOperationTimingEntry("received", {
+                id,
+                operation: {
+                    ...summarizeTerritoryOperation(operation),
+                    trace: operation.trace || null
+                },
+                details: {}
+            }, timing));
+        }
+
+        for (const id of Object.keys((snapshot && snapshot.territories) || {})) {
+            entries.push(createFullTerritoryTimingEntry(id, snapshot, timing));
+        }
+
+        return entries;
+    }
+
+    function createOperationTimingEntry(result, application, timing) {
+        const operation = application.operation || {};
+        const trace = operation.trace || null;
+        const details = application.details || {};
+        const server = timing && timing.server || {};
+
+        return {
+            at: new Date().toISOString(),
+            mode: "operation",
+            result,
+            territoryId: application.id,
+            captureId: trace && trace.id,
+            version: operation.version,
+            delivery: server && server.delivery,
+            reliableAttempt: server && server.reliableAttempt,
+            packetBytes: server && server.payloadBytes,
+            serverCaptureTotalMs: trace && trace.totalMs,
+            serverCaptureCalculationMs: trace && trace.calculationMs,
+            serverCaptureApplyMs: trace && trace.serverApplyMs,
+            serverSnapshotSerializeMs: server && server.serverSerializeMs,
+            serverReadyToEmitMs: server && server.serverReadyToEmitMs,
+            estimatedNetworkMs: timing && timing.estimatedNetworkMs,
+            clientProcessMs: timing && timing.clientProcessMs,
+            clientExpandMs: timing && timing.clientExpandMs,
+            clientOperationApplyMs: details.applyMs,
+            bufferBeforeMs: timing && timing.bufferBeforeMs,
+            bufferAfterMs: timing && timing.bufferAfterMs,
+            bufferDeltaMs: timing && timing.bufferDeltaMs,
+            snapshotInterArrivalMs: timing && timing.snapshotInterArrivalMs,
+            jitterMs: timing && timing.jitterMs,
+            ringLength: details.ringLength,
+            boundaryPathPointCount: details.boundaryPathPointCount,
+            nextRingLength: details.nextRingLength,
+            boundaryPathSource: details.boundaryPathSource,
+            failureReason: application.reason || null,
+            trace
+        };
+    }
+
+    function createFullTerritoryTimingEntry(id, snapshot, timing) {
+        const territory = snapshot && snapshot.territories && snapshot.territories[id];
+        const server = timing && timing.server || {};
+
+        return {
+            at: new Date().toISOString(),
+            mode: "full",
+            result: "received",
+            territoryId: id,
+            version: territory && territory.version,
+            delivery: server && server.delivery,
+            reliableAttempt: server && server.reliableAttempt,
+            packetBytes: server && server.payloadBytes,
+            serverSnapshotSerializeMs: server && server.serverSerializeMs,
+            serverReadyToEmitMs: server && server.serverReadyToEmitMs,
+            estimatedNetworkMs: timing && timing.estimatedNetworkMs,
+            clientProcessMs: timing && timing.clientProcessMs,
+            clientExpandMs: timing && timing.clientExpandMs,
+            bufferBeforeMs: timing && timing.bufferBeforeMs,
+            bufferAfterMs: timing && timing.bufferAfterMs,
+            bufferDeltaMs: timing && timing.bufferDeltaMs,
+            snapshotInterArrivalMs: timing && timing.snapshotInterArrivalMs,
+            jitterMs: timing && timing.jitterMs,
+            fullPointCount: countPackedTerritoryPoints(territory && territory.polygon)
+        };
+    }
+
+    function summarizeTerritoryOperation(operation) {
+        return {
+            type: operation.type,
+            baseVersion: operation.baseVersion,
+            version: operation.version,
+            trailSide: operation.trailSide,
+            trailSegmentIndex: operation.trailSegmentIndex,
+            trailSegmentLength: operation.trailSegmentLength,
+            boundaryPathIndex: operation.boundaryPathIndex,
+            trailTailStart: Number.isInteger(operation.trailTailStart) ? operation.trailTailStart : null,
+            trailTailPointCount: Array.isArray(operation.trailTailPoints) ? operation.trailTailPoints.length : 0,
+            fallbackTrailPointCount: Array.isArray(operation.trailPoints) ? operation.trailPoints.length : 0
+        };
+    }
+
+    function installCaptureTimingPrinter() {
+        window.__printCaptureTiming = function printCaptureTiming(limit = 20) {
+            const rows = getCaptureTimingEntriesForCalculationTable(limit)
+                .map(createCaptureCalculationSummaryRow);
+
+            console.table(rows);
+
+            return rows;
+        };
+
+        window.__printCaptureCalcTiming = function printCaptureCalcTiming(captureIdOrLimit = 1) {
+            const entries = getCaptureTimingEntriesForCalculationTable(captureIdOrLimit);
+            const rows = entries
+                .flatMap(createCaptureCalculationRows)
+                .sort((first, second) => second.totalMs - first.totalMs);
+
+            console.table(rows);
+
+            return rows;
+        };
+    }
+
+    function getCaptureTimingEntriesForCalculationTable(captureIdOrLimit) {
+        const operationEntries = (window.__territoryCaptureTimingLog || [])
+            .filter(entry => entry && entry.mode === "operation" && entry.trace);
+
+        if (typeof captureIdOrLimit === "string" && captureIdOrLimit.length > 0) {
+            return operationEntries.filter(entry => entry.captureId === captureIdOrLimit);
+        }
+
+        const limit = Number.isFinite(captureIdOrLimit)
+            ? Math.max(1, Math.trunc(captureIdOrLimit))
+            : 1;
+
+        return operationEntries.slice(-limit);
+    }
+
+    function createCaptureCalculationRows(entry) {
+        const breakdown = entry.trace && entry.trace.calculationBreakdown || {};
+
+        return Object.entries(breakdown).map(([name, step]) => ({
+            captureId: entry.captureId,
+            step: name,
+            totalMs: step.totalMs
+        }));
+    }
+
+    function createCaptureCalculationSummaryRow(entry) {
+        const breakdown = entry.trace && entry.trace.calculationBreakdown || {};
+        const row = {
+            captureId: entry.captureId,
+            totalMs: entry.serverCaptureCalculationMs
+        };
+
+        for (const [name, step] of Object.entries(breakdown || {})) {
+            row[`${name}Ms`] = step.totalMs;
+        }
+
+        return row;
+    }
+
+    function estimateNetworkMs(serverTiming, receiveTiming, serverOffsetMs) {
+        if (!serverTiming
+            || !Number.isFinite(serverTiming.serverEmitAt)
+            || !receiveTiming
+            || !Number.isFinite(receiveTiming.receivedAt)
+            || !Number.isFinite(serverOffsetMs)) {
+            return null;
+        }
+
+        return roundTimingMs(receiveTiming.receivedAt - (serverTiming.serverEmitAt + serverOffsetMs));
+    }
+
+    function countPackedTerritoryPoints(polygon) {
+        if (!polygon) {
+            return 0;
+        }
+
+        if (Array.isArray(polygon)) {
+            return polygon.reduce((sum, ring) => sum + (Array.isArray(ring) ? ring.length : 0), 0);
+        }
+
+        if (Array.isArray(polygon.rings)) {
+            return polygon.rings.reduce((sum, ring) => sum + (Array.isArray(ring) ? ring.length : 0), 0);
+        }
+
+        return 0;
+    }
+
+    function roundTimingMs(value) {
+        return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null;
     }
 
     function summarizeTerritoryOperations(operations) {
@@ -150,6 +432,8 @@ export function startClient(gameConfig) {
                 trailSide: operation.trailSide,
                 trailSegmentIndex: operation.trailSegmentIndex,
                 trailSegmentLength: operation.trailSegmentLength,
+                boundaryPathIndex: operation.boundaryPathIndex,
+                trace: operation.trace || null,
                 trailTailStart: Number.isInteger(operation.trailTailStart) ? operation.trailTailStart : null,
                 trailTailPointCount: Array.isArray(operation.trailTailPoints) ? operation.trailTailPoints.length : 0,
                 fallbackTrailPointCount: Array.isArray(operation.trailPoints) ? operation.trailPoints.length : 0

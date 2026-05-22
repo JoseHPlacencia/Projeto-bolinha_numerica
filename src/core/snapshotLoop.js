@@ -4,6 +4,7 @@ const {
     createClientSnapshotState,
     createSnapshot
 } = require("./snapshotSerializer");
+const { getHighResolutionTime, getServerTime } = require("../utils/time");
 
 function startSnapshotLoop(io, players, territories) {
     const intervalMs = 1000 / config.loop.snapshotRate;
@@ -29,7 +30,7 @@ function sendSnapshot(io, players, territories) {
         }
 
         const nextSnapshotState = cloneClientSnapshotState(socket.data.snapshotState);
-        const snapshot = createSnapshot(players, territories, socket.id, nextSnapshotState);
+        const snapshot = createTimedSnapshot(players, territories, socket.id, nextSnapshotState);
 
         if (shouldSendReliably(snapshot)) {
             queueReliableSnapshot(socket, snapshot, nextSnapshotState);
@@ -37,6 +38,7 @@ function sendSnapshot(io, players, territories) {
         }
 
         socket.data.snapshotState = nextSnapshotState;
+        prepareSnapshotTimingForEmit(snapshot, "volatile");
         socket.volatile.emit("gameState", snapshot);
     }
 }
@@ -62,9 +64,10 @@ function sendVolatileSnapshotWhileReliablePending(socket, players, territories) 
 
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
-    const snapshot = createSnapshot(players, territories, socket.id, temporaryState);
+    const snapshot = createTimedSnapshot(players, territories, socket.id, temporaryState);
     const volatileSnapshot = createVolatileSnapshotForPendingReliableState(snapshot, clientState);
 
+    prepareSnapshotTimingForEmit(volatileSnapshot, "volatile-pending");
     socket.volatile.emit("gameState", volatileSnapshot);
 }
 
@@ -78,6 +81,7 @@ function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
         territoryOps: {},
         trailIds: filterKnownIds(snapshot.trailIds, clientState.trails),
         trails: {},
+        timing: undefined,
         preserveTrails: true
     };
 }
@@ -89,6 +93,8 @@ function filterKnownIds(ids, knownStates) {
 function queueReliableSnapshot(socket, snapshot, nextSnapshotState) {
     const pending = {
         id: getNextReliableSnapshotId(socket),
+        attempts: 0,
+        queuedAt: getServerTime(),
         nextRetryAt: 0,
         snapshot,
         snapshotState: nextSnapshotState
@@ -99,7 +105,9 @@ function queueReliableSnapshot(socket, snapshot, nextSnapshotState) {
 }
 
 function sendReliableSnapshot(socket, pending) {
+    pending.attempts++;
     pending.nextRetryAt = Date.now() + getReliableSnapshotRetryMs();
+    prepareSnapshotTimingForEmit(pending.snapshot, "reliable", pending);
 
     const emitter = typeof socket.timeout === "function"
         ? socket.timeout(getReliableSnapshotAckTimeoutMs())
@@ -198,6 +206,76 @@ function invalidateMapEntries(map, ids) {
             map.delete(id);
         }
     }
+}
+
+function createTimedSnapshot(players, territories, viewerId, nextSnapshotState) {
+    const startedAt = getHighResolutionTime();
+    const serverSnapshotStartedAt = getServerTime();
+    const snapshot = createSnapshot(players, territories, viewerId, nextSnapshotState);
+    const serverSnapshotReadyAt = getServerTime();
+
+    attachSnapshotTiming(snapshot, {
+        serverSnapshotStartedAt,
+        serverSnapshotReadyAt,
+        serverSerializeMs: getHighResolutionTime() - startedAt
+    });
+
+    return snapshot;
+}
+
+function attachSnapshotTiming(snapshot, timing) {
+    if (!shouldAttachSnapshotTiming(snapshot)) {
+        return;
+    }
+
+    snapshot.timing = {
+        serverSnapshotStartedAt: timing.serverSnapshotStartedAt,
+        serverSnapshotReadyAt: timing.serverSnapshotReadyAt,
+        serverSerializeMs: roundTimingMs(timing.serverSerializeMs)
+    };
+}
+
+function prepareSnapshotTimingForEmit(snapshot, delivery, pending = null) {
+    if (!snapshot || !snapshot.timing) {
+        return;
+    }
+
+    const serverEmitAt = getServerTime();
+
+    snapshot.timing.serverEmitAt = serverEmitAt;
+    snapshot.timing.delivery = delivery;
+    snapshot.timing.serverReadyToEmitMs = roundTimingMs(serverEmitAt - snapshot.timing.serverSnapshotReadyAt);
+    snapshot.timing.serverSnapshotToEmitMs = roundTimingMs(serverEmitAt - snapshot.timing.serverSnapshotStartedAt);
+
+    if (pending) {
+        snapshot.timing.reliableId = pending.id;
+        snapshot.timing.reliableAttempt = pending.attempts;
+        snapshot.timing.reliableQueuedAt = pending.queuedAt;
+        snapshot.timing.reliableQueueMs = roundTimingMs(serverEmitAt - pending.queuedAt);
+    }
+
+    snapshot.timing.payloadBytes = estimateSnapshotBytes(snapshot);
+}
+
+function shouldAttachSnapshotTiming(snapshot) {
+    return config.network.captureTimingDiagnosticsEnabled !== false
+        && snapshot
+        && (
+            hasEntries(snapshot.territoryOps)
+            || hasEntries(snapshot.territories)
+        );
+}
+
+function estimateSnapshotBytes(snapshot) {
+    try {
+        return Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+    } catch (_error) {
+        return null;
+    }
+}
+
+function roundTimingMs(value) {
+    return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null;
 }
 
 function getNextReliableSnapshotId(socket) {

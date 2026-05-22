@@ -33,6 +33,20 @@ function createPolygonFromPoints(points) {
     return normalizeSimplePolygon([ring]);
 }
 
+function createKnownSimplePolygonFromPoints(points) {
+    const ring = points
+        .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+        .map(point => [point.x, point.y]);
+
+    if (ring.length < 3) {
+        return [];
+    }
+
+    closeRing(ring);
+
+    return normalizeKnownSimplePolygon([ring]);
+}
+
 function unionPolygons(...polygons) {
     const validMultiPolygons = polygons
         .map(polygonToMultiPolygon)
@@ -46,6 +60,22 @@ function unionPolygons(...polygons) {
         return getLargestSimplePolygon(polygonClipping.union(...validMultiPolygons));
     } catch (_error) {
         return normalizeSimplePolygon(polygons[0]);
+    }
+}
+
+function unionKnownSimplePolygons(...polygons) {
+    const validMultiPolygons = polygons
+        .map(polygonToKnownSimpleMultiPolygon)
+        .filter(hasPolygons);
+
+    if (validMultiPolygons.length === 0) {
+        return [];
+    }
+
+    try {
+        return getLargestKnownSimplePolygon(polygonClipping.union(...validMultiPolygons));
+    } catch (_error) {
+        return unionPolygons(...polygons);
     }
 }
 
@@ -226,6 +256,12 @@ function polygonToMultiPolygon(polygon) {
     return normalizedPolygon.length > 0 ? [normalizedPolygon] : [];
 }
 
+function polygonToKnownSimpleMultiPolygon(polygon) {
+    const normalizedPolygon = normalizeKnownSimplePolygon(polygon);
+
+    return normalizedPolygon.length > 0 ? [normalizedPolygon] : [];
+}
+
 function getLargestSimplePolygon(multiPolygon) {
     let largestPolygon = [];
     let largestArea = 0;
@@ -243,6 +279,22 @@ function getLargestSimplePolygon(multiPolygon) {
     return largestPolygon;
 }
 
+function getLargestKnownSimplePolygon(multiPolygon) {
+    let largestPolygon = [];
+    let largestArea = 0;
+
+    for (const polygon of normalizeKnownSimpleMultiPolygon(multiPolygon)) {
+        const area = calculatePolygonArea(polygon);
+
+        if (area > largestArea) {
+            largestArea = area;
+            largestPolygon = polygon;
+        }
+    }
+
+    return largestPolygon;
+}
+
 function normalizeMultiPolygon(multiPolygon) {
     if (!Array.isArray(multiPolygon)) {
         return [];
@@ -250,6 +302,16 @@ function normalizeMultiPolygon(multiPolygon) {
 
     return multiPolygon
         .map(normalizeSimplePolygon)
+        .filter(hasPolygon);
+}
+
+function normalizeKnownSimpleMultiPolygon(multiPolygon) {
+    if (!Array.isArray(multiPolygon)) {
+        return [];
+    }
+
+    return multiPolygon
+        .map(normalizeKnownSimplePolygon)
         .filter(hasPolygon);
 }
 
@@ -267,7 +329,27 @@ function normalizeSimplePolygon(polygon) {
     return [ring];
 }
 
+function normalizeKnownSimplePolygon(polygon) {
+    if (!Array.isArray(polygon)) {
+        return [];
+    }
+
+    const ring = normalizeKnownSimpleRing(polygon[0]);
+
+    if (ring.length < 4) {
+        return [];
+    }
+
+    return [ring];
+}
+
 function normalizeRing(ring) {
+    const normalizedRing = normalizeKnownSimpleRing(ring);
+
+    return hasSelfIntersections(normalizedRing) ? [] : normalizedRing;
+}
+
+function normalizeKnownSimpleRing(ring) {
     if (!Array.isArray(ring)) {
         return [];
     }
@@ -291,7 +373,7 @@ function normalizeRing(ring) {
         closeRing(normalizedRing);
     }
 
-    return hasSelfIntersections(normalizedRing) ? [] : normalizedRing;
+    return normalizedRing;
 }
 
 function removeConsecutiveDuplicatePoints(ring) {
@@ -569,6 +651,7 @@ module.exports = {
     calculatePolygonArea,
     calculatePolygonCentroid,
     createCirclePolygon,
+    createKnownSimplePolygonFromPoints,
     createPolygonFromPoints,
     findClosestPolygonBoundaryContact,
     findSegmentPolygonBoundaryContact,
@@ -578,5 +661,6 @@ module.exports = {
     isPointInPolygon,
     serializePolygon,
     subtractPolygon,
+    unionKnownSimplePolygons,
     unionPolygons
 };

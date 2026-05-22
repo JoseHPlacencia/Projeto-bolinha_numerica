@@ -1,6 +1,7 @@
 export function createMinimapRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
     const settings = getMinimapSettings(gameConfig);
+    let territoryPathCache = new WeakMap();
     let displaySize = settings.size;
     let pixelRatio = 1;
 
@@ -17,6 +18,7 @@ export function createMinimapRenderer(canvas, gameConfig) {
         canvas.height = Math.round(displaySize * pixelRatio);
         canvas.style.width = `${displaySize}px`;
         canvas.style.height = `${displaySize}px`;
+        territoryPathCache = new WeakMap();
     }
 
     function render(state, currentPlayerId) {
@@ -91,22 +93,16 @@ export function createMinimapRenderer(canvas, gameConfig) {
     }
 
     function drawTerritory(territory) {
-        const rings = getPolygonRings(territory);
+        const path = getTerritoryPath(territory);
 
-        if (rings.length === 0 || !territory.color) {
+        if (!path || !territory.color) {
             return;
         }
 
         context.save();
-        context.beginPath();
-
-        for (const ring of rings) {
-            traceRing(ring);
-        }
-
         context.fillStyle = territory.color;
         context.globalAlpha = gameConfig.territory.fillAlpha;
-        context.fill("evenodd");
+        context.fill(path, "evenodd");
         context.restore();
 
         context.save();
@@ -114,12 +110,39 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.lineCap = "round";
         context.lineJoin = "round";
         context.lineWidth = settings.territoryBorderWidth;
+        context.stroke(path);
+        context.restore();
+    }
 
-        for (const ring of rings) {
-            strokeRing(ring);
+    function getTerritoryPath(territory) {
+        const cached = territoryPathCache.get(territory);
+
+        if (cached && cached.displaySize === displaySize) {
+            return cached.path;
         }
 
-        context.restore();
+        const path = createMinimapPolygonPath(getPolygonRings(territory));
+
+        territoryPathCache.set(territory, {
+            displaySize,
+            path
+        });
+
+        return path;
+    }
+
+    function createMinimapPolygonPath(rings) {
+        if (typeof Path2D !== "function") {
+            return null;
+        }
+
+        const path = new Path2D();
+
+        for (const ring of rings) {
+            traceRingPath(path, ring);
+        }
+
+        return path;
     }
 
     function drawTrail(trail, player) {
@@ -211,22 +234,20 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.closePath();
     }
 
-    function strokeRing(ring) {
+    function traceRingPath(path, ring) {
         const points = ring.map(worldToMinimap).filter(isValidPoint);
 
         if (points.length < 3) {
             return;
         }
 
-        context.beginPath();
-        context.moveTo(points[0].x, points[0].y);
+        path.moveTo(points[0].x, points[0].y);
 
         for (let index = 1; index < points.length; index++) {
-            context.lineTo(points[index].x, points[index].y);
+            path.lineTo(points[index].x, points[index].y);
         }
 
-        context.closePath();
-        context.stroke();
+        path.closePath();
     }
 
     function strokeTrailSegment(segment) {

@@ -57,7 +57,7 @@ function getPlayerTerritoryPolygon(territories, playerId) {
     return territory.polygon;
 }
 
-function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
+function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {}) {
     const changedPlayerIds = new Set();
     const territory = territories.get(ownerId);
 
@@ -65,7 +65,7 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
         return changedPlayerIds;
     }
 
-    const ownerPolygon = unionPolygons(territory.polygon, capturedPolygon);
+    const ownerPolygon = getOwnerCapturedPolygon(territory.polygon, capturedPolygon, options.ownerPolygon);
 
     if (updateTerritoryPolygon(territory, ownerPolygon, { preserveCaptureOperationLog: true })) {
         changedPlayerIds.add(ownerId);
@@ -84,6 +84,12 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
     }
 
     return changedPlayerIds;
+}
+
+function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolygon) {
+    return calculatePolygonArea(operationPolygon) > 0
+        ? operationPolygon
+        : unionPolygons(currentPolygon, capturedPolygon);
 }
 
 function updateTerritoryPolygon(territory, nextPolygon, options = {}) {

@@ -1,81 +1,128 @@
 import {
     boundsOverlap,
-    clipClosedRingStrokeToBounds,
-    clipRingsToBounds,
     getRingsBounds
 } from "./viewportCulling.js";
 
+const territoryRenderCache = new WeakMap();
+const maxTerritoryRenderLogEntries = 120;
+
 export function drawTerritoryLayer(context, state, gameConfig, viewportBounds) {
+    const startedAt = performance.now();
     const territories = Object.values(state.territories || {});
     const borderInset = getTerritoryBorderInset(gameConfig);
-    const visiblePolygons = getVisiblePolygons(
+    const visibleShapes = getVisibleShapes(
         territories,
         viewportBounds,
         gameConfig.territory.baseBorderWidth + borderInset,
         borderInset
     );
 
-    for (const polygon of visiblePolygons) {
-        drawPolygonFill(context, polygon, gameConfig.territory.fillAlpha);
+    for (const shape of visibleShapes) {
+        drawPolygonFill(context, shape, gameConfig.territory.fillAlpha);
     }
 
-    for (const polygon of visiblePolygons) {
-        drawTerritoryBorder(context, polygon, gameConfig);
+    for (const shape of visibleShapes) {
+        drawTerritoryBorder(context, shape, gameConfig);
     }
+
+    recordTerritoryRenderDiagnostics({
+        renderMs: performance.now() - startedAt,
+        visibleShapes: visibleShapes.length,
+        visiblePointCount: visibleShapes.reduce((sum, shape) => sum + shape.pointCount, 0)
+    });
 }
 
-function getVisiblePolygons(territories, viewportBounds, margin, borderInset) {
-    const polygons = [];
+function getVisibleShapes(territories, viewportBounds, margin, borderInset) {
+    const shapes = [];
 
     for (const territory of territories) {
         if (!territory.color) {
             continue;
         }
 
-        for (const polygon of getTerritoryPolygons(territory)) {
-            const rings = getPolygonRings(polygon);
-            const bounds = getRingsBounds(rings, margin);
+        const preparedTerritory = prepareTerritoryRenderData(territory, borderInset);
 
-            if (rings.length === 0 || !boundsOverlap(bounds, viewportBounds)) {
+        for (const shape of preparedTerritory.shapes) {
+            if (!boundsOverlap(expandBounds(shape.bounds, margin), viewportBounds)) {
                 continue;
             }
 
-            const fillRings = clipRingsToBounds(rings, viewportBounds);
-            const borderRings = createInsetRings(rings, borderInset);
-            const borderSegments = borderRings.flatMap(ring => clipClosedRingStrokeToBounds(ring, viewportBounds));
-
-            if (fillRings.length === 0 && borderSegments.length === 0) {
-                continue;
-            }
-
-            polygons.push({
-                borderSegments,
-                fillRings,
+            shapes.push({
+                ...shape,
                 color: territory.color
             });
         }
     }
 
-    return polygons;
+    return shapes;
+}
+
+function prepareTerritoryRenderData(territory, borderInset) {
+    const cached = territoryRenderCache.get(territory);
+
+    if (cached && cached.borderInset === borderInset) {
+        return cached;
+    }
+
+    const shapes = [];
+
+    for (const polygon of getTerritoryPolygons(territory)) {
+        const rings = getPolygonRings(polygon);
+        const bounds = getRingsBounds(rings);
+
+        if (rings.length === 0 || !bounds) {
+            continue;
+        }
+
+        const borderRings = createInsetRings(rings, borderInset);
+
+        shapes.push({
+            bounds,
+            borderPath: createPath(borderRings),
+            fillPath: createPath(rings),
+            pointCount: getRingsPointCount(rings) + getRingsPointCount(borderRings)
+        });
+    }
+
+    const prepared = {
+        borderInset,
+        shapes
+    };
+
+    territoryRenderCache.set(territory, prepared);
+
+    return prepared;
+}
+
+function expandBounds(bounds, margin) {
+    const safeMargin = Number.isFinite(margin) ? Math.max(0, margin) : 0;
+
+    if (!bounds) {
+        return null;
+    }
+
+    return {
+        minX: bounds.minX - safeMargin,
+        minY: bounds.minY - safeMargin,
+        maxX: bounds.maxX + safeMargin,
+        maxY: bounds.maxY + safeMargin
+    };
 }
 
 function drawPolygonFill(context, polygon, fillAlpha) {
-    const rings = polygon.fillRings;
-
-    if (rings.length === 0 || !polygon.color) {
+    if (!polygon.fillPath || !polygon.color) {
         return;
     }
 
     context.save();
     context.globalAlpha = fillAlpha;
     context.fillStyle = polygon.color;
-    createPolygonPath(context, rings);
-    context.fill("evenodd");
+    context.fill(polygon.fillPath, "evenodd");
     context.restore();
 }
 
 function drawTerritoryBorder(context, polygon, gameConfig) {
-    if (polygon.borderSegments.length === 0 || !polygon.color) {
+    if (!polygon.borderPath || !polygon.color) {
         return;
     }
 
@@ -85,27 +132,8 @@ function drawTerritoryBorder(context, polygon, gameConfig) {
     context.strokeStyle = polygon.color;
     context.lineJoin = "round";
     context.lineCap = "round";
-
-    for (const segment of polygon.borderSegments) {
-        strokeSegment(context, segment);
-    }
-
+    context.stroke(polygon.borderPath);
     context.restore();
-}
-
-function strokeSegment(context, points) {
-    if (points.length < 2) {
-        return;
-    }
-
-    context.beginPath();
-    context.moveTo(points[0].x, points[0].y);
-
-    for (let index = 1; index < points.length; index++) {
-        context.lineTo(points[index].x, points[index].y);
-    }
-
-    context.stroke();
 }
 
 function createInsetRings(rings, inset) {
@@ -191,28 +219,38 @@ function getPointsCenter(points) {
     };
 }
 
-function createPolygonPath(context, rings) {
-    context.beginPath();
+function createPath(rings) {
+    if (typeof Path2D !== "function") {
+        return null;
+    }
+
+    const path = new Path2D();
 
     for (const ring of rings) {
-        traceRing(context, ring);
+        traceRing(path, ring);
     }
+
+    return path;
 }
 
-function traceRing(context, ring) {
+function traceRing(path, ring) {
     const points = getValidPoints(ring);
 
     if (points.length < 3) {
         return;
     }
 
-    context.moveTo(points[0].x, points[0].y);
+    path.moveTo(points[0].x, points[0].y);
 
     for (let index = 1; index < points.length; index++) {
-        context.lineTo(points[index].x, points[index].y);
+        path.lineTo(points[index].x, points[index].y);
     }
 
-    context.closePath();
+    path.closePath();
+}
+
+function getRingsPointCount(rings) {
+    return (rings || []).reduce((sum, ring) => sum + ring.length, 0);
 }
 
 function getOpenRing(ring) {
@@ -267,4 +305,27 @@ function getValidPoints(points) {
     return points.filter(point => (
         Number.isFinite(point.x) && Number.isFinite(point.y)
     ));
+}
+
+function recordTerritoryRenderDiagnostics(stats) {
+    if (typeof window === "undefined") {
+        return;
+    }
+
+    const entry = {
+        at: performance.now(),
+        ...stats
+    };
+    const log = Array.isArray(window.__territoryRenderDiagnosticsLog)
+        ? window.__territoryRenderDiagnosticsLog
+        : [];
+
+    log.push(entry);
+
+    while (log.length > maxTerritoryRenderLogEntries) {
+        log.shift();
+    }
+
+    window.__lastTerritoryRenderDiagnostics = entry;
+    window.__territoryRenderDiagnosticsLog = log;
 }

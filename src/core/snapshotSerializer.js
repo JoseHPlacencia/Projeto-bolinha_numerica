@@ -219,6 +219,7 @@ function createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, 
         trailSide: operation.trailSide,
         trailSegmentIndex: operation.trailSegmentIndex,
         trailSegmentLength: operation.trailSegmentLength,
+        boundaryPathIndex: operation.boundaryPathIndex,
         startContact: packCaptureContact(operation.startContact),
         endContact: packCaptureContact(operation.endContact),
         keepAnchor: packPoint(operation.keepAnchor)
@@ -235,7 +236,51 @@ function createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, 
         }
     }
 
+    if (config.network.captureTimingDiagnosticsEnabled !== false && operation.captureTrace) {
+        serializedOperation.trace = packCaptureTrace(operation.captureTrace);
+    }
+
     return serializedOperation;
+}
+
+function packCaptureTrace(trace) {
+    return {
+        id: trace.id,
+        playerId: trace.playerId,
+        detectedAt: trace.detectedAt,
+        completedAt: trace.completedAt,
+        totalMs: packTimingMs(trace.totalMs),
+        calculationMs: packTimingMs(trace.calculationMs),
+        serverApplyMs: packTimingMs(trace.serverApplyMs),
+        storeMs: packTimingMs(trace.storeMs),
+        relocationMs: packTimingMs(trace.relocationMs),
+        baseTerritoryPointCount: trace.baseTerritoryPointCount || 0,
+        previewTerritoryPointCount: trace.previewTerritoryPointCount || 0,
+        finalCapturedPointCount: trace.finalCapturedPointCount || 0,
+        operationTrailPointCount: trace.operationTrailPointCount || 0,
+        operationBoundaryPathPointCount: trace.operationBoundaryPathPointCount || 0,
+        candidateCount: trace.candidateCount || 0,
+        changedPlayerCount: trace.changedPlayerCount || 0,
+        captureArea: packTimingMs(trace.captureArea),
+        addedArea: packTimingMs(trace.addedArea),
+        calculationBreakdown: packCaptureCalculationBreakdown(trace.calculationBreakdown)
+    };
+}
+
+function packCaptureCalculationBreakdown(breakdown) {
+    const packed = {};
+
+    for (const [name, step] of Object.entries(breakdown || {})) {
+        packed[name] = {
+            count: step.count || 0,
+            totalMs: packTimingMs(step.totalMs),
+            avgMs: step.count > 0 ? packTimingMs(step.totalMs / step.count) : null,
+            maxMs: packTimingMs(step.maxMs),
+            maxDetails: step.maxDetails || null
+        };
+    }
+
+    return packed;
 }
 
 function canSendCaptureTerritoryOperation(operation, territory, knownTerritory, territoryId, viewerId) {
@@ -248,6 +293,7 @@ function canSendCaptureTerritoryOperation(operation, territory, knownTerritory, 
         && Number.isInteger(operation.trailSegmentIndex)
         && Number.isInteger(operation.trailSegmentLength)
         && operation.trailSegmentLength >= 2
+        && Number.isInteger(operation.boundaryPathIndex)
         && operation.startContact
         && operation.endContact
         && operation.keepAnchor
@@ -297,6 +343,10 @@ function getCaptureOperationBlockReason(operation, territory, knownTerritory, te
 
     if (!Number.isInteger(operation.trailSegmentLength) || operation.trailSegmentLength < 2) {
         return "invalid_trail_segment_length";
+    }
+
+    if (!Number.isInteger(operation.boundaryPathIndex)) {
+        return "invalid_boundary_path_index";
     }
 
     if (!operation.startContact) {
@@ -820,6 +870,10 @@ function packCoordinate(value) {
 
 function packAngle(value) {
     return roundToPrecision(value, config.network.anglePrecision);
+}
+
+function packTimingMs(value) {
+    return Number.isFinite(value) ? roundToPrecision(value, 1000) : null;
 }
 
 function roundToPrecision(value, precision) {

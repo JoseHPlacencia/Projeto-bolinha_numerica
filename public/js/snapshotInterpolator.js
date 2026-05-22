@@ -2,6 +2,7 @@ import { clamp, lerp, lerpAngle } from "./sharedMath.js";
 
 const coordinatePrecision = 1000;
 const geometryEpsilon = 1e-7;
+const indexedBoundaryMaxDistanceSquared = 4;
 
 export function createSnapshotInterpolator(networkConfig, options = {}) {
     const snapshots = [];
@@ -15,7 +16,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         bufferMs: networkConfig.initialBufferMs,
         serverOffset: 0,
         lastSnapshotReceivedAt: performance.now(),
-        deltas: []
+        deltas: [],
+        lastSnapshotDeltaMs: 0,
+        averageSnapshotDeltaMs: 0,
+        jitterMs: 0
     };
     const debugState = {
         visiblePlayers: 0,
@@ -24,6 +28,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     };
     const pendingTerritoryOperations = new Map();
     const suppressedCaptureOperationResyncIds = new Set();
+    let hasServerClockSync = false;
     let lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
 
     return {
@@ -34,12 +39,27 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     function processSnapshot(rawSnapshot) {
         const now = performance.now();
+        const bufferBeforeMs = networkState.bufferMs;
         const applyResult = createApplyResult();
+        const expandStartedAt = performance.now();
         const snapshot = expandSnapshot(rawSnapshot, applyResult);
+        const expandMs = performance.now() - expandStartedAt;
 
         updateAdaptiveBuffer(now);
         syncServerClock(snapshot.time);
         saveSnapshot(snapshot);
+        applyResult.clientTiming = {
+            processMs: performance.now() - now,
+            expandMs,
+            bufferBeforeMs,
+            bufferAfterMs: networkState.bufferMs,
+            bufferDeltaMs: networkState.bufferMs - bufferBeforeMs,
+            snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
+            averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
+            jitterMs: networkState.jitterMs,
+            serverOffsetMs: networkState.serverOffset,
+            snapshotCountAfter: snapshots.length
+        };
 
         return applyResult;
     }
@@ -69,6 +89,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function getDebugState() {
         return {
             bufferMs: networkState.bufferMs,
+            serverOffsetMs: networkState.serverOffset,
+            snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
+            averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
+            jitterMs: networkState.jitterMs,
             snapshotCount: snapshots.length,
             visiblePlayers: debugState.visiblePlayers,
             visibleTerritories: debugState.visibleTerritories,
@@ -79,6 +103,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createApplyResult() {
         return {
             applied: true,
+            territoryOperationApplications: [],
             territoryOperationFailures: [],
             invalidations: {
                 playerInfo: [],
@@ -178,6 +203,9 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const jitter = calculateStandardDeviation(networkState.deltas, average);
         const nextBuffer = average + jitter * networkConfig.jitterMultiplier;
 
+        networkState.lastSnapshotDeltaMs = delta;
+        networkState.averageSnapshotDeltaMs = average;
+        networkState.jitterMs = jitter;
         networkState.bufferMs = clamp(
             nextBuffer,
             networkConfig.minBufferMs,
@@ -187,6 +215,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     function syncServerClock(serverTime) {
         const nextOffset = Date.now() - serverTime;
+
+        if (!hasServerClockSync) {
+            networkState.serverOffset = nextOffset;
+            hasServerClockSync = true;
+            return;
+        }
+
         networkState.serverOffset = networkState.serverOffset * 0.9 + nextOffset * 0.1;
     }
 
@@ -317,6 +352,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 continue;
             }
 
+            recordTerritoryOperationApplication(applyResult, id, operation, operationResult, activeTrailIds, "snapshot");
             pendingTerritoryOperations.delete(id);
             suppressedCaptureOperationResyncIds.delete(id);
         }
@@ -349,12 +385,15 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 continue;
             }
 
+            recordTerritoryOperationApplication(applyResult, id, operation, operationResult, activeTrailIds, "pending");
             pendingTerritoryOperations.delete(id);
             suppressedCaptureOperationResyncIds.delete(id);
         }
     }
 
     function applyCaptureTerritoryOperation(id, operation) {
+        const startedAt = performance.now();
+
         if (!operation || operation.type !== "trailCapture") {
             return createCaptureOperationFailure("invalid_operation", {
                 operationType: operation && operation.type
@@ -405,8 +444,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             });
         }
 
-        const localStartContact = findClosestPolygonBoundaryContact(ring, startContact.point);
-        const localEndContact = findClosestPolygonBoundaryContact(ring, endContact.point);
+        const localStartContact = getLocalBoundaryContact(ring, startContact);
+        const localEndContact = getLocalBoundaryContact(ring, endContact);
 
         if (!localStartContact || !localEndContact) {
             return createCaptureOperationFailure("boundary_contact_not_found", {
@@ -416,12 +455,12 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             });
         }
 
-        const boundaryPaths = createBoundaryPaths(ring, localEndContact, localStartContact);
-        const boundaryPath = selectBoundaryPathByAnchor(boundaryPaths, keepAnchor);
+        const boundaryPathState = getCaptureBoundaryPath(ring, localEndContact, localStartContact, operation, keepAnchor);
+        const boundaryPath = boundaryPathState.path;
 
         if (!boundaryPath) {
             return createCaptureOperationFailure("boundary_path_not_found", {
-                boundaryPathCount: boundaryPaths.length,
+                boundaryPathCount: boundaryPathState.pathCount,
                 ringLength: ring.length
             });
         }
@@ -450,7 +489,154 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             }
         };
 
-        return { applied: true };
+        return {
+            applied: true,
+            details: {
+                applyMs: performance.now() - startedAt,
+                ringLength: ring.length,
+                trailPointCount: trailPoints.length,
+                boundaryPathPointCount: boundaryPath.length,
+                nextRingLength: nextRing.length,
+                boundaryPathSource: boundaryPathState.source
+            }
+        };
+    }
+
+    function getLocalBoundaryContact(ring, contact) {
+        const indexedContact = createIndexedBoundaryContact(ring, contact);
+
+        if (indexedContact) {
+            return indexedContact;
+        }
+
+        return findClosestPolygonBoundaryContact(ring, contact.point);
+    }
+
+    function createIndexedBoundaryContact(ring, contact) {
+        if (!contact
+            || !Array.isArray(ring)
+            || !Number.isInteger(contact.segmentIndex)
+            || !Number.isFinite(contact.segmentT)) {
+            return null;
+        }
+
+        const openRingLength = getOpenRingLength(ring);
+
+        if (contact.segmentIndex < 0 || contact.segmentIndex >= openRingLength) {
+            return null;
+        }
+
+        const segmentStart = getOpenRingPoint(ring, contact.segmentIndex);
+        const segmentEnd = getOpenRingPoint(ring, (contact.segmentIndex + 1) % openRingLength);
+        const projection = projectPointOnSegment(contact.point, segmentStart, segmentEnd);
+
+        if (projection.distanceSquared > indexedBoundaryMaxDistanceSquared) {
+            return null;
+        }
+
+        return {
+            point: projection.point,
+            segmentIndex: contact.segmentIndex,
+            segmentT: projection.segmentT
+        };
+    }
+
+    function getOpenRingLength(ring) {
+        if (!Array.isArray(ring)) {
+            return 0;
+        }
+
+        if (ring.length > 1 && arePointsEqual(ring[0], ring[ring.length - 1])) {
+            return ring.length - 1;
+        }
+
+        return ring.length;
+    }
+
+    function getOpenRingPoint(ring, index) {
+        return ring[index];
+    }
+
+    function getCaptureBoundaryPath(ring, startContact, endContact, operation, keepAnchor) {
+        if (Number.isInteger(operation.boundaryPathIndex)) {
+            const indexedPath = createBoundaryPathByIndex(ring, startContact, endContact, operation.boundaryPathIndex);
+
+            if (indexedPath && isBoundaryPathConsistentWithAnchor(indexedPath, keepAnchor)) {
+                return {
+                    path: indexedPath,
+                    pathCount: 1,
+                    source: "index"
+                };
+            }
+        }
+
+        const boundaryPaths = createBoundaryPaths(ring, startContact, endContact);
+
+        return {
+            path: selectBoundaryPathByAnchor(boundaryPaths, keepAnchor),
+            pathCount: boundaryPaths.length,
+            source: "anchor"
+        };
+    }
+
+    function createBoundaryPathByIndex(ring, startContact, endContact, pathIndex) {
+        const openRingLength = getOpenRingLength(ring);
+
+        if (!startContact || !endContact || openRingLength < 3) {
+            return null;
+        }
+
+        if (pathIndex === 0) {
+            return removeConsecutiveDuplicatePoints(
+                createForwardBoundaryPathFromRing(ring, openRingLength, startContact, endContact)
+            );
+        }
+
+        if (pathIndex === 1) {
+            return removeConsecutiveDuplicatePoints(
+                createForwardBoundaryPathFromRing(ring, openRingLength, endContact, startContact).reverse()
+            );
+        }
+
+        return null;
+    }
+
+    function createForwardBoundaryPathFromRing(ring, openRingLength, startContact, endContact) {
+        if (startContact.segmentIndex === endContact.segmentIndex
+            && endContact.segmentT >= startContact.segmentT) {
+            return [startContact.point, endContact.point];
+        }
+
+        const path = [startContact.point];
+        let vertexIndex = (startContact.segmentIndex + 1) % openRingLength;
+        let guard = 0;
+
+        while (guard <= openRingLength) {
+            path.push(getOpenRingPoint(ring, vertexIndex));
+
+            if (vertexIndex === endContact.segmentIndex) {
+                break;
+            }
+
+            vertexIndex = (vertexIndex + 1) % openRingLength;
+            guard++;
+        }
+
+        path.push(endContact.point);
+
+        return path;
+    }
+
+    function isBoundaryPathConsistentWithAnchor(path, anchor) {
+        if (!Array.isArray(path) || path.length < 2 || !anchor) {
+            return false;
+        }
+
+        if (path.length > 2) {
+            return getDistanceSquared(path[1], anchor) <= indexedBoundaryMaxDistanceSquared;
+        }
+
+        return getPointPathDistanceSquared(anchor, path) <= indexedBoundaryMaxDistanceSquared;
     }
 
     function getCaptureTrailSegment(id, operation) {
@@ -562,6 +748,20 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         });
     }
 
+    function recordTerritoryOperationApplication(applyResult, id, operation, operationResult, activeTrailIds, source) {
+        if (!applyResult || !Array.isArray(applyResult.territoryOperationApplications)) {
+            return;
+        }
+
+        applyResult.territoryOperationApplications.push({
+            id,
+            source,
+            activeTrail: Boolean(activeTrailIds && activeTrailIds.has(id)),
+            operation: summarizeCaptureOperation(operation),
+            details: operationResult.details || {}
+        });
+    }
+
     function summarizeCaptureOperation(operation) {
         if (!operation) {
             return null;
@@ -574,6 +774,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             trailSide: operation.trailSide,
             trailSegmentIndex: operation.trailSegmentIndex,
             trailSegmentLength: operation.trailSegmentLength,
+            boundaryPathIndex: operation.boundaryPathIndex,
+            trace: operation.trace || null,
             fallbackTrailPointCount: unpackPoints(operation.trailPoints).length,
             trailTailStart: Number.isInteger(operation.trailTailStart) ? operation.trailTailStart : null,
             trailTailPointCount: unpackPoints(operation.trailTailPoints).length
@@ -596,7 +798,15 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
         const point = unpackPoint(contact);
 
-        return point ? { point } : null;
+        if (!point) {
+            return null;
+        }
+
+        return {
+            point,
+            segmentIndex: Number.isInteger(contact[2]) ? contact[2] : null,
+            segmentT: Number.isFinite(contact[3]) ? contact[3] : null
+        };
     }
 
     function unpackTerritoryPolygon(polygon) {

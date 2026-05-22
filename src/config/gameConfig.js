@@ -131,6 +131,7 @@ const network = Object.freeze({
     trailFullSyncIntervalMs: 4000,
     trailPatchFullRatio: 0.85,
     resyncRequestIntervalMs: 1000,
+    captureTimingDiagnosticsEnabled: true,
     snapshotDiagnosticsEnabled: false
 });
 
