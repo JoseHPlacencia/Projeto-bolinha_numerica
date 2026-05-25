@@ -349,6 +349,37 @@ export function startClient(gameConfig) {
 
             return rows;
         };
+
+        window.__printCaptureCalcExclusive = function printCaptureCalcExclusive(captureIdOrLimit = 1) {
+            const entries = getCaptureTimingEntriesForCalculationTable(captureIdOrLimit);
+            const rows = entries
+                .flatMap(createCaptureCalculationExclusiveRows)
+                .sort((first, second) => second.selfMs - first.selfMs);
+
+            console.table(rows);
+
+            return rows;
+        };
+
+        window.__printCaptureCalcTree = function printCaptureCalcTree(captureIdOrLimit = 1) {
+            const entries = getCaptureTimingEntriesForCalculationTable(captureIdOrLimit);
+            const rows = entries.flatMap(createCaptureCalculationTreeRows);
+
+            console.table(rows);
+
+            return rows;
+        };
+
+        window.__printCaptureCalcMax = function printCaptureCalcMax(captureIdOrLimit = 1) {
+            const entries = getCaptureTimingEntriesForCalculationTable(captureIdOrLimit);
+            const rows = entries
+                .flatMap(createCaptureCalculationMaxRows)
+                .sort((first, second) => second.maxMs - first.maxMs);
+
+            console.table(rows);
+
+            return rows;
+        };
     }
 
     function getCaptureTimingEntriesForCalculationTable(captureIdOrLimit) {
@@ -388,6 +419,161 @@ export function startClient(gameConfig) {
         }
 
         return row;
+    }
+
+    function createCaptureCalculationExclusiveRows(entry) {
+        return getCaptureCalculationStepNames(entry)
+            .map(stepName => createCaptureCalculationExclusiveRow(entry, stepName))
+            .filter(Boolean);
+    }
+
+    function createCaptureCalculationExclusiveRow(entry, stepName) {
+        const totalMs = getCaptureCalculationStepTotalMs(entry, stepName);
+
+        if (!Number.isFinite(totalMs)) {
+            return null;
+        }
+
+        const childMs = getCaptureCalculationStepChildren(stepName)
+            .reduce((sum, childName) => sum + (getCaptureCalculationStepTotalMs(entry, childName) || 0), 0);
+
+        return {
+            captureId: entry.captureId,
+            step: stepName,
+            totalMs: roundTimingMs(totalMs),
+            childMs: roundTimingMs(childMs),
+            selfMs: roundTimingMs(totalMs - childMs)
+        };
+    }
+
+    function createCaptureCalculationTreeRows(entry) {
+        const rows = [];
+        const visited = new Set();
+
+        appendCaptureCalculationTreeRow(entry, rows, visited, "capture.total", 0);
+
+        for (const stepName of getCaptureCalculationStepNames(entry)) {
+            if (!visited.has(stepName)) {
+                appendCaptureCalculationTreeRow(entry, rows, visited, stepName, 1);
+            }
+        }
+
+        return rows;
+    }
+
+    function appendCaptureCalculationTreeRow(entry, rows, visited, stepName, depth) {
+        if (visited.has(stepName)) {
+            return;
+        }
+
+        const totalMs = getCaptureCalculationStepTotalMs(entry, stepName);
+
+        if (!Number.isFinite(totalMs)) {
+            return;
+        }
+
+        visited.add(stepName);
+
+        const childMs = getCaptureCalculationStepChildren(stepName)
+            .reduce((sum, childName) => sum + (getCaptureCalculationStepTotalMs(entry, childName) || 0), 0);
+
+        rows.push({
+            captureId: entry.captureId,
+            step: `${"  ".repeat(depth)}${stepName}`,
+            totalMs: roundTimingMs(totalMs),
+            selfMs: roundTimingMs(totalMs - childMs)
+        });
+
+        for (const childName of getCaptureCalculationStepChildren(stepName)) {
+            appendCaptureCalculationTreeRow(entry, rows, visited, childName, depth + 1);
+        }
+    }
+
+    function createCaptureCalculationMaxRows(entry) {
+        const breakdown = entry.trace && entry.trace.calculationBreakdown || {};
+
+        return Object.entries(breakdown).map(([name, step]) => ({
+            captureId: entry.captureId,
+            step: name,
+            totalMs: step.totalMs,
+            count: step.count,
+            avgMs: step.avgMs,
+            maxMs: step.maxMs,
+            maxDetails: JSON.stringify(step.maxDetails || {})
+        }));
+    }
+
+    function getCaptureCalculationStepNames(entry) {
+        const breakdown = entry.trace && entry.trace.calculationBreakdown || {};
+
+        return [
+            "capture.total",
+            ...Object.keys(breakdown)
+        ];
+    }
+
+    function getCaptureCalculationStepTotalMs(entry, stepName) {
+        if (stepName === "capture.total") {
+            return entry.serverCaptureCalculationMs;
+        }
+
+        const breakdown = entry.trace && entry.trace.calculationBreakdown || {};
+        const step = breakdown[stepName];
+
+        return step && Number.isFinite(step.totalMs) ? step.totalMs : null;
+    }
+
+    function getCaptureCalculationStepChildren(stepName) {
+        const hierarchy = {
+            "capture.total": [
+                "hasAnySideTrailSegment",
+                "getPlayerTerritoryPolygon",
+                "createTrailCaptureCandidates.total",
+                "selectBestCaptureCandidate.total"
+            ],
+            "createTrailCaptureCandidates.total": [
+                "candidates.getTrailSegments",
+                "candidates.segment.total"
+            ],
+            "candidates.segment.total": [
+                "segment.getFinitePoints",
+                "segment.findStartBoundaryContact",
+                "segment.findEndBoundaryContact",
+                "segment.createBorderSnappedSidePoints",
+                "segment.createBoundaryPaths",
+                "candidate.createTrailBoundaryPoints",
+                "candidate.createPolygonAndArea",
+                "candidate.createCaptureOperation"
+            ],
+            "segment.createBoundaryPaths": [
+                "boundary.getOpenRing",
+                "boundary.createForwardPath",
+                "boundary.createReversePath",
+                "boundary.dedupePaths"
+            ],
+            "candidate.createPolygonAndArea": [
+                "candidate.createKnownSimplePolygonFromPoints",
+                "candidate.createPolygonFromPoints",
+                "candidate.calculatePolygonArea"
+            ],
+            "candidate.createCaptureOperation": [
+                "operation.createPreviewPolygon"
+            ],
+            "selectBestCaptureCandidate.total": [
+                "select.calculateCurrentArea",
+                "select.rankCandidate.total"
+            ],
+            "select.rankCandidate.total": [
+                "rank.useCandidateArea",
+                "rank.calculateAddedArea",
+                "rank.unionKnownSimplePolygons",
+                "rank.unionPolygons",
+                "rank.calculateCandidateArea",
+                "rank.calculateUnionArea"
+            ]
+        };
+
+        return hierarchy[stepName] || [];
     }
 
     function estimateNetworkMs(serverTiming, receiveTiming, serverOffsetMs) {

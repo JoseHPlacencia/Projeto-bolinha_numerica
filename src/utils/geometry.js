@@ -63,22 +63,6 @@ function unionPolygons(...polygons) {
     }
 }
 
-function unionKnownSimplePolygons(...polygons) {
-    const validMultiPolygons = polygons
-        .map(polygonToKnownSimpleMultiPolygon)
-        .filter(hasPolygons);
-
-    if (validMultiPolygons.length === 0) {
-        return [];
-    }
-
-    try {
-        return getLargestKnownSimplePolygon(polygonClipping.union(...validMultiPolygons));
-    } catch (_error) {
-        return unionPolygons(...polygons);
-    }
-}
-
 function subtractPolygon(subject, clipping) {
     if (!hasPolygon(subject)) {
         return [];
@@ -256,12 +240,6 @@ function polygonToMultiPolygon(polygon) {
     return normalizedPolygon.length > 0 ? [normalizedPolygon] : [];
 }
 
-function polygonToKnownSimpleMultiPolygon(polygon) {
-    const normalizedPolygon = normalizeKnownSimplePolygon(polygon);
-
-    return normalizedPolygon.length > 0 ? [normalizedPolygon] : [];
-}
-
 function getLargestSimplePolygon(multiPolygon) {
     let largestPolygon = [];
     let largestArea = 0;
@@ -279,22 +257,6 @@ function getLargestSimplePolygon(multiPolygon) {
     return largestPolygon;
 }
 
-function getLargestKnownSimplePolygon(multiPolygon) {
-    let largestPolygon = [];
-    let largestArea = 0;
-
-    for (const polygon of normalizeKnownSimpleMultiPolygon(multiPolygon)) {
-        const area = calculatePolygonArea(polygon);
-
-        if (area > largestArea) {
-            largestArea = area;
-            largestPolygon = polygon;
-        }
-    }
-
-    return largestPolygon;
-}
-
 function normalizeMultiPolygon(multiPolygon) {
     if (!Array.isArray(multiPolygon)) {
         return [];
@@ -302,16 +264,6 @@ function normalizeMultiPolygon(multiPolygon) {
 
     return multiPolygon
         .map(normalizeSimplePolygon)
-        .filter(hasPolygon);
-}
-
-function normalizeKnownSimpleMultiPolygon(multiPolygon) {
-    if (!Array.isArray(multiPolygon)) {
-        return [];
-    }
-
-    return multiPolygon
-        .map(normalizeKnownSimplePolygon)
         .filter(hasPolygon);
 }
 
@@ -661,6 +613,5 @@ module.exports = {
     isPointInPolygon,
     serializePolygon,
     subtractPolygon,
-    unionKnownSimplePolygons,
     unionPolygons
 };

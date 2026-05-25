@@ -6,8 +6,7 @@ const {
 const {
     calculatePolygonArea,
     createKnownSimplePolygonFromPoints,
-    findClosestPolygonBoundaryContact,
-    unionKnownSimplePolygons
+    findClosestPolygonBoundaryContact
 } = require("../utils/geometry");
 const { getHighResolutionTime, getServerTime } = require("../utils/time");
 const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
@@ -123,7 +122,7 @@ function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea, 
         const rankedCandidate = timeCaptureCalculationStep(
             captureTrace,
             "select.rankCandidate.total",
-            () => rankCaptureCandidate(currentTerritory, currentArea, candidate, captureTrace),
+            () => rankCaptureCandidate(currentArea, candidate, captureTrace),
             ranked => ({
                 candidatePointCount: getPolygonPointCount(candidate.polygon),
                 addedArea: ranked && ranked.addedArea
@@ -142,57 +141,34 @@ function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea, 
     return bestCandidate;
 }
 
-function rankCaptureCandidate(currentTerritory, currentArea, candidate, captureTrace = null) {
-    const union = timeCaptureCalculationStep(
-        captureTrace,
-        "rank.unionKnownSimplePolygons",
-        () => unionKnownSimplePolygons(currentTerritory, candidate.polygon),
-        result => ({
-            territoryPointCount: getPolygonPointCount(currentTerritory),
-            candidatePointCount: getPolygonPointCount(candidate.polygon),
-            unionPointCount: getPolygonPointCount(result)
-        })
-    );
+function rankCaptureCandidate(currentArea, candidate, captureTrace = null) {
     const candidateArea = timeCaptureCalculationStep(
         captureTrace,
-        "rank.calculateCandidateArea",
-        () => calculatePolygonArea(candidate.polygon),
+        "rank.useCandidateArea",
+        () => candidate.area,
         () => ({
             candidatePointCount: getPolygonPointCount(candidate.polygon)
         })
     );
-    const unionArea = timeCaptureCalculationStep(
+    const addedArea = timeCaptureCalculationStep(
         captureTrace,
-        "rank.calculateUnionArea",
-        () => calculatePolygonArea(union),
+        "rank.calculateAddedArea",
+        () => candidateArea - currentArea,
         () => ({
-            unionPointCount: getPolygonPointCount(union)
+            candidateArea,
+            currentArea
         })
     );
-    const addedArea = unionArea - currentArea;
-    const overlapArea = Math.max(0, candidateArea - addedArea);
+    const overlapArea = currentArea;
 
     return {
         ...candidate,
         addedArea,
-        overlapArea,
-        hasLowOverlap: hasLowTerritoryOverlap(candidateArea, overlapArea)
+        overlapArea
     };
 }
 
-function hasLowTerritoryOverlap(candidateArea, overlapArea) {
-    if (candidateArea <= Number.EPSILON) {
-        return false;
-    }
-
-    return overlapArea <= Math.max(1, candidateArea * 0.02);
-}
-
 function isBetterCaptureCandidate(candidate, bestCandidate) {
-    if (candidate.hasLowOverlap !== bestCandidate.hasLowOverlap) {
-        return candidate.hasLowOverlap;
-    }
-
     if (Math.abs(candidate.addedArea - bestCandidate.addedArea) > geometryEpsilon) {
         return candidate.addedArea > bestCandidate.addedArea;
     }
