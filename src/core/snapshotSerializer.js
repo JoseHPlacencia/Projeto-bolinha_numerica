@@ -53,12 +53,6 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         trails: trailUpdates
     };
 
-    if (config.network.snapshotDiagnosticsEnabled) {
-        snapshot.syncDebug = {
-            territories: territoryChanges.debug
-        };
-    }
-
     if (viewer && viewer.debugState) {
         snapshot.debug = {
             [viewer.id]: viewer.debugState
@@ -137,7 +131,6 @@ function serializeTerritoryVersions(territories, territoryIds) {
 function serializeChangedTerritoryState(territories, territoryIds, viewerId, clientState, now) {
     const serializedTerritories = {};
     const serializedOperations = {};
-    const syncDebug = config.network.snapshotDiagnosticsEnabled ? {} : null;
 
     for (const territoryId of territoryIds) {
         const territory = territories.get(territoryId);
@@ -158,15 +151,6 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
 
         if (operation) {
             serializedOperations[territoryId] = operation;
-            recordTerritorySyncDebug(
-                syncDebug,
-                territoryId,
-                "operation",
-                "capture_operation",
-                territory,
-                knownTerritory,
-                territory.lastCaptureOperation
-            );
             clientState.territories.set(territoryId, {
                 version,
                 sentAt: now
@@ -183,15 +167,6 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
             ],
             polygon: packReferencedPolygon(territory.polygon, clientState)
         };
-        recordTerritorySyncDebug(
-            syncDebug,
-            territoryId,
-            "full",
-            getCaptureOperationBlockReason(territory.lastCaptureOperation, territory, knownTerritory, territoryId, viewerId),
-            territory,
-            knownTerritory,
-            territory.lastCaptureOperation
-        );
         clientState.territories.set(territoryId, {
             version,
             sentAt: now
@@ -200,8 +175,7 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
 
     return {
         territories: serializedTerritories,
-        operations: serializedOperations,
-        debug: syncDebug || undefined
+        operations: serializedOperations
     };
 }
 
@@ -236,51 +210,7 @@ function createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, 
         }
     }
 
-    if (config.network.captureTimingDiagnosticsEnabled !== false && operation.captureTrace) {
-        serializedOperation.trace = packCaptureTrace(operation.captureTrace);
-    }
-
     return serializedOperation;
-}
-
-function packCaptureTrace(trace) {
-    return {
-        id: trace.id,
-        playerId: trace.playerId,
-        detectedAt: trace.detectedAt,
-        completedAt: trace.completedAt,
-        totalMs: packTimingMs(trace.totalMs),
-        calculationMs: packTimingMs(trace.calculationMs),
-        serverApplyMs: packTimingMs(trace.serverApplyMs),
-        storeMs: packTimingMs(trace.storeMs),
-        relocationMs: packTimingMs(trace.relocationMs),
-        baseTerritoryPointCount: trace.baseTerritoryPointCount || 0,
-        previewTerritoryPointCount: trace.previewTerritoryPointCount || 0,
-        finalCapturedPointCount: trace.finalCapturedPointCount || 0,
-        operationTrailPointCount: trace.operationTrailPointCount || 0,
-        operationBoundaryPathPointCount: trace.operationBoundaryPathPointCount || 0,
-        candidateCount: trace.candidateCount || 0,
-        changedPlayerCount: trace.changedPlayerCount || 0,
-        captureArea: packTimingMs(trace.captureArea),
-        addedArea: packTimingMs(trace.addedArea),
-        calculationBreakdown: packCaptureCalculationBreakdown(trace.calculationBreakdown)
-    };
-}
-
-function packCaptureCalculationBreakdown(breakdown) {
-    const packed = {};
-
-    for (const [name, step] of Object.entries(breakdown || {})) {
-        packed[name] = {
-            count: step.count || 0,
-            totalMs: packTimingMs(step.totalMs),
-            avgMs: step.count > 0 ? packTimingMs(step.totalMs / step.count) : null,
-            maxMs: packTimingMs(step.maxMs),
-            maxDetails: step.maxDetails || null
-        };
-    }
-
-    return packed;
 }
 
 function canSendCaptureTerritoryOperation(operation, territory, knownTerritory, territoryId, viewerId) {
@@ -310,77 +240,6 @@ function canUseKnownTerritoryForCaptureOperation(knownTerritory, operation, terr
 
     return config.network.optimisticOwnerCaptureOperationSyncEnabled !== false
         && territoryId === viewerId;
-}
-
-function getCaptureOperationBlockReason(operation, territory, knownTerritory, territoryId, viewerId) {
-    if (!knownTerritory) {
-        return "missing_known_territory";
-    }
-
-    if (config.network.captureOperationSyncEnabled === false) {
-        return "capture_operation_sync_disabled";
-    }
-
-    if (!operation) {
-        return "no_capture_operation";
-    }
-
-    if (operation.type !== "trailCapture") {
-        return "invalid_operation_type";
-    }
-
-    if (!canUseKnownTerritoryForCaptureOperation(knownTerritory, operation, territoryId, viewerId)) {
-        return "known_territory_version_not_at_operation_base";
-    }
-
-    if (territory.version !== operation.version) {
-        return "operation_not_current_territory_version";
-    }
-
-    if (!Number.isInteger(operation.trailSegmentIndex)) {
-        return "invalid_trail_segment_index";
-    }
-
-    if (!Number.isInteger(operation.trailSegmentLength) || operation.trailSegmentLength < 2) {
-        return "invalid_trail_segment_length";
-    }
-
-    if (!Number.isInteger(operation.boundaryPathIndex)) {
-        return "invalid_boundary_path_index";
-    }
-
-    if (!operation.startContact) {
-        return "missing_start_contact";
-    }
-
-    if (!operation.endContact) {
-        return "missing_end_contact";
-    }
-
-    if (!operation.keepAnchor) {
-        return "missing_keep_anchor";
-    }
-
-    if (shouldSendCaptureOperationFallbackTrailPoints() && !hasFallbackTrailPoints(operation)) {
-        return "missing_fallback_trail_points";
-    }
-
-    return "unknown";
-}
-
-function recordTerritorySyncDebug(syncDebug, territoryId, mode, reason, territory, knownTerritory, operation) {
-    if (!syncDebug) {
-        return;
-    }
-
-    syncDebug[territoryId] = {
-        mode,
-        reason,
-        knownVersion: knownTerritory && knownTerritory.version,
-        serverVersion: territory && territory.version,
-        operationBaseVersion: operation && operation.baseVersion,
-        operationVersion: operation && operation.version
-    };
 }
 
 function shouldSendCaptureOperationFallbackTrailPoints() {
@@ -870,10 +729,6 @@ function packCoordinate(value) {
 
 function packAngle(value) {
     return roundToPrecision(value, config.network.anglePrecision);
-}
-
-function packTimingMs(value) {
-    return Number.isFinite(value) ? roundToPrecision(value, 1000) : null;
 }
 
 function roundToPrecision(value, precision) {

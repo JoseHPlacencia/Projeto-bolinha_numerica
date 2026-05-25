@@ -8,15 +8,12 @@ const {
     createKnownSimplePolygonFromPoints,
     findClosestPolygonBoundaryContact
 } = require("../utils/geometry");
-const { getHighResolutionTime, getServerTime } = require("../utils/time");
 const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
 
 const geometryEpsilon = 1e-7;
-let nextCaptureTraceSequence = 1;
 
 function captureClosedTrail(player, territories, players) {
-    const captureTrace = createCaptureTrace(player);
-    const capture = createExternalTrailCapture(player, territories, captureTrace);
+    const capture = createExternalTrailCapture(player, territories);
 
     if (!capture) {
         return null;
@@ -24,24 +21,16 @@ function captureClosedTrail(player, territories, players) {
 
     const territory = territories.get(player.id);
     const baseVersion = territory ? territory.version || 0 : 0;
-    const applyStartedAt = getHighResolutionTime();
     const changedPlayerIds = applyCapturedPolygon(territories, player.id, capture.polygon, {
         ownerPolygon: capture.operation && capture.operation.previewPolygon
     });
 
-    recordCaptureTraceDuration(captureTrace, "serverApplyMs", applyStartedAt);
-
-    const storeStartedAt = getHighResolutionTime();
-    storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds, captureTrace);
-    recordCaptureTraceDuration(captureTrace, "storeMs", storeStartedAt);
+    storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
 
     const relocationPlayerIds = new Set(changedPlayerIds);
     relocationPlayerIds.delete(player.id);
 
-    const relocationStartedAt = getHighResolutionTime();
     relocatePlayersAfterTerritoryChange(players, territories, relocationPlayerIds);
-    recordCaptureTraceDuration(captureTrace, "relocationMs", relocationStartedAt);
-    finishCaptureTrace(captureTrace, capture, changedPlayerIds);
 
     return capture.polygon;
 }
@@ -52,53 +41,18 @@ function createExternalTrailCapturePolygon(player, territories) {
     return capture ? capture.polygon : null;
 }
 
-function createExternalTrailCapture(player, territories, captureTrace = null) {
-    const calculationStartedAt = getHighResolutionTime();
-
-    const hasTrail = timeCaptureCalculationStep(
-        captureTrace,
-        "hasAnySideTrailSegment",
-        () => hasAnySideTrailSegment(player)
-    );
-
-    if (!hasTrail) {
+function createExternalTrailCapture(player, territories) {
+    if (!hasAnySideTrailSegment(player)) {
         return null;
     }
 
-    const currentTerritory = timeCaptureCalculationStep(
-        captureTrace,
-        "getPlayerTerritoryPolygon",
-        () => getPlayerTerritoryPolygon(territories, player.id),
-        polygon => ({
-            territoryPointCount: getPolygonPointCount(polygon)
-        })
+    const currentTerritory = getPlayerTerritoryPolygon(territories, player.id);
+    const candidates = createTrailCaptureCandidates(player, currentTerritory);
+    const bestCandidate = selectBestCaptureCandidate(
+        currentTerritory,
+        candidates,
+        config.territory.minCaptureArea
     );
-    const candidates = timeCaptureCalculationStep(
-        captureTrace,
-        "createTrailCaptureCandidates.total",
-        () => createTrailCaptureCandidates(player, currentTerritory, captureTrace),
-        createdCandidates => ({
-            candidateCount: createdCandidates.length,
-            territoryPointCount: getPolygonPointCount(currentTerritory)
-        })
-    );
-    const bestCandidate = timeCaptureCalculationStep(
-        captureTrace,
-        "selectBestCaptureCandidate.total",
-        () => selectBestCaptureCandidate(
-            currentTerritory,
-            candidates,
-            config.territory.minCaptureArea,
-            captureTrace
-        ),
-        candidate => ({
-            selected: Boolean(candidate),
-            candidateCount: candidates.length,
-            selectedPointCount: getPolygonPointCount(candidate && candidate.polygon)
-        })
-    );
-
-    finishCaptureCalculationTrace(captureTrace, currentTerritory, candidates, bestCandidate, calculationStartedAt);
 
     if (!bestCandidate) {
         return null;
@@ -107,27 +61,12 @@ function createExternalTrailCapture(player, territories, captureTrace = null) {
     return bestCandidate;
 }
 
-function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea, captureTrace = null) {
-    const currentArea = timeCaptureCalculationStep(
-        captureTrace,
-        "select.calculateCurrentArea",
-        () => calculatePolygonArea(currentTerritory),
-        () => ({
-            territoryPointCount: getPolygonPointCount(currentTerritory)
-        })
-    );
+function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) {
+    const currentArea = calculatePolygonArea(currentTerritory);
     let bestCandidate = null;
 
     for (const candidate of candidates) {
-        const rankedCandidate = timeCaptureCalculationStep(
-            captureTrace,
-            "select.rankCandidate.total",
-            () => rankCaptureCandidate(currentArea, candidate, captureTrace),
-            ranked => ({
-                candidatePointCount: getPolygonPointCount(candidate.polygon),
-                addedArea: ranked && ranked.addedArea
-            })
-        );
+        const rankedCandidate = rankCaptureCandidate(currentArea, candidate);
 
         if (rankedCandidate.addedArea < minAddedArea) {
             continue;
@@ -141,30 +80,13 @@ function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea, 
     return bestCandidate;
 }
 
-function rankCaptureCandidate(currentArea, candidate, captureTrace = null) {
-    const candidateArea = timeCaptureCalculationStep(
-        captureTrace,
-        "rank.useCandidateArea",
-        () => candidate.area,
-        () => ({
-            candidatePointCount: getPolygonPointCount(candidate.polygon)
-        })
-    );
-    const addedArea = timeCaptureCalculationStep(
-        captureTrace,
-        "rank.calculateAddedArea",
-        () => candidateArea - currentArea,
-        () => ({
-            candidateArea,
-            currentArea
-        })
-    );
-    const overlapArea = currentArea;
+function rankCaptureCandidate(currentArea, candidate) {
+    const addedArea = candidate.area - currentArea;
 
     return {
         ...candidate,
         addedArea,
-        overlapArea
+        overlapArea: currentArea
     };
 }
 
@@ -176,157 +98,55 @@ function isBetterCaptureCandidate(candidate, bestCandidate) {
     return candidate.overlapArea < bestCandidate.overlapArea;
 }
 
-function createTrailCaptureCandidates(player, territoryPolygon, captureTrace = null) {
+function createTrailCaptureCandidates(player, territoryPolygon) {
     const candidates = [];
-    const trails = timeCaptureCalculationStep(
-        captureTrace,
-        "candidates.getTrailSegments",
-        () => getTrailSegments(player),
-        segments => ({
-            segmentCount: segments.length
-        })
-    );
 
-    for (const trail of trails) {
-        const segmentCandidates = timeCaptureCalculationStep(
-            captureTrace,
-            "candidates.segment.total",
-            () => createTrailCaptureCandidatesFromSegment(trail, territoryPolygon, captureTrace),
-            result => ({
-                trailSide: trail.side,
-                trailSegmentIndex: trail.index,
-                trailPointCount: Array.isArray(trail.points) ? trail.points.length : 0,
-                candidateCount: result.length
-            })
-        );
-
-        candidates.push(...segmentCandidates);
+    for (const trail of getTrailSegments(player)) {
+        candidates.push(...createTrailCaptureCandidatesFromSegment(trail, territoryPolygon));
     }
 
     return candidates;
 }
 
-function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon, captureTrace = null) {
+function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
     const candidates = [];
-    const finiteSidePoints = timeCaptureCalculationStep(
-        captureTrace,
-        "segment.getFinitePoints",
-        () => getFinitePoints(trail.points),
-        points => ({
-            trailSide: trail.side,
-            trailSegmentIndex: trail.index,
-            inputPointCount: Array.isArray(trail.points) ? trail.points.length : 0,
-            outputPointCount: points.length
-        })
-    );
+    const finiteSidePoints = getFinitePoints(trail.points);
 
     if (finiteSidePoints.length < 2) {
         return candidates;
     }
 
-    const startContact = timeCaptureCalculationStep(
-        captureTrace,
-        "segment.findStartBoundaryContact",
-        () => findClosestPolygonBoundaryContact(territoryPolygon, finiteSidePoints[0]),
-        () => ({
-            trailSide: trail.side,
-            trailSegmentIndex: trail.index,
-            territoryPointCount: getPolygonPointCount(territoryPolygon)
-        })
-    );
-    const endContact = timeCaptureCalculationStep(
-        captureTrace,
-        "segment.findEndBoundaryContact",
-        () => findClosestPolygonBoundaryContact(territoryPolygon, finiteSidePoints[finiteSidePoints.length - 1]),
-        () => ({
-            trailSide: trail.side,
-            trailSegmentIndex: trail.index,
-            territoryPointCount: getPolygonPointCount(territoryPolygon)
-        })
-    );
+    const startContact = findClosestPolygonBoundaryContact(territoryPolygon, finiteSidePoints[0]);
+    const endContact = findClosestPolygonBoundaryContact(territoryPolygon, finiteSidePoints[finiteSidePoints.length - 1]);
 
     if (!startContact || !endContact) {
         return candidates;
     }
 
-    const clippedSidePoints = timeCaptureCalculationStep(
-        captureTrace,
-        "segment.createBorderSnappedSidePoints",
-        () => createBorderSnappedSidePoints(
-            finiteSidePoints,
-            startContact.point,
-            endContact.point
-        ),
-        points => ({
-            trailSide: trail.side,
-            trailSegmentIndex: trail.index,
-            pointCount: points.length
-        })
+    const clippedSidePoints = createBorderSnappedSidePoints(
+        finiteSidePoints,
+        startContact.point,
+        endContact.point
     );
-    const boundaryPaths = timeCaptureCalculationStep(
-        captureTrace,
-        "segment.createBoundaryPaths",
-        () => createBoundaryPaths(territoryPolygon[0], endContact, startContact, captureTrace),
-        paths => ({
-            trailSide: trail.side,
-            trailSegmentIndex: trail.index,
-            pathCount: paths.length,
-            maxPathPointCount: getMaxPathPointCount(paths),
-            territoryPointCount: getPolygonPointCount(territoryPolygon)
-        })
-    );
+    const boundaryPaths = createBoundaryPaths(territoryPolygon[0], endContact, startContact);
     let bestCandidate = null;
 
     for (let boundaryPathIndex = 0; boundaryPathIndex < boundaryPaths.length; boundaryPathIndex++) {
         const boundaryPath = boundaryPaths[boundaryPathIndex];
-        const points = timeCaptureCalculationStep(
-            captureTrace,
-            "candidate.createTrailBoundaryPoints",
-            () => createTrailBoundaryCapturePoints(clippedSidePoints, boundaryPath),
-            result => ({
-                trailSide: trail.side,
-                trailSegmentIndex: trail.index,
-                boundaryPathIndex,
-                boundaryPathPointCount: boundaryPath.length,
-                resultPointCount: result.length
-            })
-        );
-        const candidate = timeCaptureCalculationStep(
-            captureTrace,
-            "candidate.createPolygonAndArea",
-            () => createTrailCandidateFromPoints(points, captureTrace),
-            result => ({
-                trailSide: trail.side,
-                trailSegmentIndex: trail.index,
-                boundaryPathIndex,
-                inputPointCount: points.length,
-                candidatePointCount: getPolygonPointCount(result && result.polygon),
-                area: result && result.area
-            })
-        );
+        const points = createTrailBoundaryCapturePoints(clippedSidePoints, boundaryPath);
+        const candidate = createTrailCandidateFromPoints(points);
 
         if (candidate && isLargerAreaCandidate(candidate, bestCandidate)) {
             bestCandidate = {
                 ...candidate,
-                operation: timeCaptureCalculationStep(
-                    captureTrace,
-                    "candidate.createCaptureOperation",
-                    () => createCaptureOperation(
-                        trail,
-                        clippedSidePoints,
-                        startContact,
-                        endContact,
-                        boundaryPaths,
-                        boundaryPathIndex,
-                        candidate.polygon,
-                        captureTrace
-                    ),
-                    operation => ({
-                        trailSide: trail.side,
-                        trailSegmentIndex: trail.index,
-                        boundaryPathIndex,
-                        previewPointCount: getPolygonPointCount(operation && operation.previewPolygon)
-                    })
+                operation: createCaptureOperation(
+                    trail,
+                    clippedSidePoints,
+                    startContact,
+                    endContact,
+                    boundaryPaths,
+                    boundaryPathIndex,
+                    candidate.polygon
                 )
             };
         }
@@ -383,29 +203,13 @@ function createTrailBoundaryCapturePoints(sidePoints, boundaryPath) {
     return removeConsecutiveDuplicatePoints(points);
 }
 
-function createTrailCandidateFromPoints(points, captureTrace = null) {
+function createTrailCandidateFromPoints(points) {
     if (points.length < config.territory.minCaptureTrailPoints) {
         return null;
     }
 
-    const polygon = timeCaptureCalculationStep(
-        captureTrace,
-        "candidate.createKnownSimplePolygonFromPoints",
-        () => createKnownSimplePolygonFromPoints(points),
-        result => ({
-            inputPointCount: points.length,
-            polygonPointCount: getPolygonPointCount(result)
-        })
-    );
-
-    const area = timeCaptureCalculationStep(
-        captureTrace,
-        "candidate.calculatePolygonArea",
-        () => calculatePolygonArea(polygon),
-        () => ({
-            polygonPointCount: getPolygonPointCount(polygon)
-        })
-    );
+    const polygon = createKnownSimplePolygonFromPoints(points);
+    const area = calculatePolygonArea(polygon);
 
     if (area <= 0) {
         return null;
@@ -421,8 +225,7 @@ function createCaptureOperation(
     endContact,
     boundaryPaths,
     capturedBoundaryPathIndex,
-    previewPolygon,
-    captureTrace = null
+    previewPolygon
 ) {
     const keepBoundaryPath = boundaryPaths[capturedBoundaryPathIndex];
 
@@ -445,7 +248,7 @@ function createCaptureOperation(
     };
 }
 
-function storeCaptureOperation(territories, playerId, capture, baseVersion, changedPlayerIds, captureTrace = null) {
+function storeCaptureOperation(territories, playerId, capture, baseVersion, changedPlayerIds) {
     if (!changedPlayerIds.has(playerId) || !capture.operation) {
         return;
     }
@@ -477,147 +280,12 @@ function storeCaptureOperation(territories, playerId, capture, baseVersion, chan
         boundaryPathIndex: capture.operation.boundaryPathIndex,
         startContact: capture.operation.startContact,
         endContact: capture.operation.endContact,
-        keepAnchor: capture.operation.keepAnchor,
-        captureTrace
+        keepAnchor: capture.operation.keepAnchor
     };
-}
-
-function createCaptureTrace(player) {
-    if (config.network.captureTimingDiagnosticsEnabled === false) {
-        return null;
-    }
-
-    const sequence = nextCaptureTraceSequence++;
-    const detectedAt = getServerTime();
-
-    return {
-        id: `${detectedAt.toString(36)}-${sequence}`,
-        playerId: player.id,
-        detectedAt,
-        startedAtHr: getHighResolutionTime()
-    };
-}
-
-function finishCaptureCalculationTrace(captureTrace, currentTerritory, candidates, bestCandidate, startedAt) {
-    if (!captureTrace) {
-        return;
-    }
-
-    captureTrace.calculationMs = getHighResolutionTime() - startedAt;
-    captureTrace.baseTerritoryPointCount = getPolygonPointCount(currentTerritory);
-    captureTrace.candidateCount = candidates.length;
-
-    if (!bestCandidate) {
-        return;
-    }
-
-    const operation = bestCandidate.operation || {};
-
-    captureTrace.captureArea = bestCandidate.area;
-    captureTrace.addedArea = bestCandidate.addedArea;
-    captureTrace.operationTrailPointCount = Array.isArray(operation.trailPoints)
-        ? operation.trailPoints.length
-        : 0;
-    captureTrace.operationBoundaryPathPointCount = Number.isInteger(operation.boundaryPathPointCount)
-        ? operation.boundaryPathPointCount
-        : 0;
-    captureTrace.previewTerritoryPointCount = getPolygonPointCount(operation.previewPolygon);
-}
-
-function finishCaptureTrace(captureTrace, capture, changedPlayerIds) {
-    if (!captureTrace) {
-        return;
-    }
-
-    captureTrace.completedAt = getServerTime();
-    captureTrace.totalMs = getHighResolutionTime() - captureTrace.startedAtHr;
-    captureTrace.changedPlayerCount = changedPlayerIds.size;
-    captureTrace.finalCapturedPointCount = getPolygonPointCount(capture && capture.polygon);
-
-    delete captureTrace.startedAtHr;
-}
-
-function recordCaptureTraceDuration(captureTrace, key, startedAt) {
-    if (!captureTrace) {
-        return;
-    }
-
-    captureTrace[key] = getHighResolutionTime() - startedAt;
-}
-
-function timeCaptureCalculationStep(captureTrace, name, callback, createDetails = null) {
-    if (!captureTrace) {
-        return callback();
-    }
-
-    const startedAt = getHighResolutionTime();
-    const result = callback();
-    const elapsedMs = getHighResolutionTime() - startedAt;
-    const details = typeof createDetails === "function"
-        ? createDetails(result)
-        : createDetails;
-
-    recordCaptureCalculationStep(captureTrace, name, elapsedMs, details);
-
-    return result;
-}
-
-function recordCaptureCalculationStep(captureTrace, name, elapsedMs, details = null) {
-    if (!captureTrace || !name || !Number.isFinite(elapsedMs)) {
-        return;
-    }
-
-    if (!captureTrace.calculationBreakdown) {
-        captureTrace.calculationBreakdown = {};
-    }
-
-    const existingStep = captureTrace.calculationBreakdown[name] || {
-        count: 0,
-        totalMs: 0,
-        maxMs: 0,
-        maxDetails: null
-    };
-
-    existingStep.count++;
-    existingStep.totalMs += elapsedMs;
-
-    if (elapsedMs >= existingStep.maxMs) {
-        existingStep.maxMs = elapsedMs;
-        existingStep.maxDetails = sanitizeCalculationDetails(details);
-    }
-
-    captureTrace.calculationBreakdown[name] = existingStep;
-}
-
-function sanitizeCalculationDetails(details) {
-    if (!details || typeof details !== "object") {
-        return null;
-    }
-
-    const sanitized = {};
-
-    for (const [key, value] of Object.entries(details)) {
-        if (Number.isFinite(value)) {
-            sanitized[key] = Math.round(value * 1000) / 1000;
-            continue;
-        }
-
-        if (typeof value === "string" || typeof value === "boolean") {
-            sanitized[key] = value;
-        }
-    }
-
-    return sanitized;
 }
 
 function getPolygonPointCount(polygon) {
     return (polygon || []).reduce((sum, ring) => sum + (Array.isArray(ring) ? ring.length : 0), 0);
-}
-
-function getMaxPathPointCount(paths) {
-    return (paths || []).reduce((max, path) => (
-        Math.max(max, Array.isArray(path) ? path.length : 0)
-    ), 0);
 }
 
 function createBoundaryPathAnchor(path) {
@@ -646,52 +314,20 @@ function arePolygonAreasClose(first, second) {
     return Math.abs(firstArea - secondArea) <= Math.max(1, secondArea * 0.001);
 }
 
-function createBoundaryPaths(ring, startContact, endContact, captureTrace = null) {
-    const openRing = timeCaptureCalculationStep(
-        captureTrace,
-        "boundary.getOpenRing",
-        () => getOpenRing(ring),
-        result => ({
-            ringPointCount: Array.isArray(ring) ? ring.length : 0,
-            openRingPointCount: result.length
-        })
-    );
+function createBoundaryPaths(ring, startContact, endContact) {
+    const openRing = getOpenRing(ring);
 
     if (openRing.length < 3) {
         return [];
     }
 
-    const forwardPath = timeCaptureCalculationStep(
-        captureTrace,
-        "boundary.createForwardPath",
-        () => createForwardBoundaryPath(openRing, startContact, endContact),
-        result => ({
-            pathPointCount: result.length,
-            openRingPointCount: openRing.length
-        })
-    );
-    const reversePath = timeCaptureCalculationStep(
-        captureTrace,
-        "boundary.createReversePath",
-        () => createForwardBoundaryPath(openRing, endContact, startContact).reverse(),
-        result => ({
-            pathPointCount: result.length,
-            openRingPointCount: openRing.length
-        })
-    );
+    const forwardPath = createForwardBoundaryPath(openRing, startContact, endContact);
+    const reversePath = createForwardBoundaryPath(openRing, endContact, startContact).reverse();
 
-    return timeCaptureCalculationStep(
-        captureTrace,
-        "boundary.dedupePaths",
-        () => [
-            removeConsecutiveDuplicatePoints(forwardPath),
-            removeConsecutiveDuplicatePoints(reversePath)
-        ].filter(path => path.length >= 2),
-        result => ({
-            pathCount: result.length,
-            maxPathPointCount: getMaxPathPointCount(result)
-        })
-    );
+    return [
+        removeConsecutiveDuplicatePoints(forwardPath),
+        removeConsecutiveDuplicatePoints(reversePath)
+    ].filter(path => path.length >= 2);
 }
 
 function createForwardBoundaryPath(openRing, startContact, endContact) {

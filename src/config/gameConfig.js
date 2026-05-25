@@ -130,9 +130,7 @@ const network = Object.freeze({
     territoryFullSyncIntervalMs: 10000,
     trailFullSyncIntervalMs: 4000,
     trailPatchFullRatio: 0.85,
-    resyncRequestIntervalMs: 1000,
-    captureTimingDiagnosticsEnabled: true,
-    snapshotDiagnosticsEnabled: false
+    resyncRequestIntervalMs: 1000
 });
 
 const security = Object.freeze({

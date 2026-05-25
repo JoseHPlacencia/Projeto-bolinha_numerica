@@ -39,27 +39,12 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     function processSnapshot(rawSnapshot) {
         const now = performance.now();
-        const bufferBeforeMs = networkState.bufferMs;
         const applyResult = createApplyResult();
-        const expandStartedAt = performance.now();
         const snapshot = expandSnapshot(rawSnapshot, applyResult);
-        const expandMs = performance.now() - expandStartedAt;
 
         updateAdaptiveBuffer(now);
         syncServerClock(snapshot.time);
         saveSnapshot(snapshot);
-        applyResult.clientTiming = {
-            processMs: performance.now() - now,
-            expandMs,
-            bufferBeforeMs,
-            bufferAfterMs: networkState.bufferMs,
-            bufferDeltaMs: networkState.bufferMs - bufferBeforeMs,
-            snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
-            averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
-            jitterMs: networkState.jitterMs,
-            serverOffsetMs: networkState.serverOffset,
-            snapshotCountAfter: snapshots.length
-        };
 
         return applyResult;
     }
@@ -103,8 +88,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createApplyResult() {
         return {
             applied: true,
-            territoryOperationApplications: [],
-            territoryOperationFailures: [],
             invalidations: {
                 playerInfo: [],
                 territories: [],
@@ -346,13 +329,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
             if (!operationResult.applied) {
                 failedIds.add(id);
-                recordTerritoryOperationFailure(applyResult, id, operation, operationResult, activeTrailIds, "snapshot");
                 markCacheInvalid(applyResult, "territories", id);
                 handleCaptureOperationFailure(id);
                 continue;
             }
 
-            recordTerritoryOperationApplication(applyResult, id, operation, operationResult, activeTrailIds, "snapshot");
             pendingTerritoryOperations.delete(id);
             suppressedCaptureOperationResyncIds.delete(id);
         }
@@ -379,21 +360,17 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
             if (!operationResult.applied) {
                 failedIds.add(id);
-                recordTerritoryOperationFailure(applyResult, id, operation, operationResult, activeTrailIds, "pending");
                 markCacheInvalid(applyResult, "territories", id);
                 handleCaptureOperationFailure(id);
                 continue;
             }
 
-            recordTerritoryOperationApplication(applyResult, id, operation, operationResult, activeTrailIds, "pending");
             pendingTerritoryOperations.delete(id);
             suppressedCaptureOperationResyncIds.delete(id);
         }
     }
 
     function applyCaptureTerritoryOperation(id, operation) {
-        const startedAt = performance.now();
-
         if (!operation || operation.type !== "trailCapture") {
             return createCaptureOperationFailure("invalid_operation", {
                 operationType: operation && operation.type
@@ -490,15 +467,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         };
 
         return {
-            applied: true,
-            details: {
-                applyMs: performance.now() - startedAt,
-                ringLength: ring.length,
-                trailPointCount: trailPoints.length,
-                boundaryPathPointCount: boundaryPath.length,
-                nextRingLength: nextRing.length,
-                boundaryPathSource: boundaryPathState.source
-            }
+            applied: true
         };
     }
 
@@ -730,55 +699,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             applied: false,
             reason,
             details
-        };
-    }
-
-    function recordTerritoryOperationFailure(applyResult, id, operation, operationResult, activeTrailIds, source) {
-        if (!applyResult || !Array.isArray(applyResult.territoryOperationFailures)) {
-            return;
-        }
-
-        applyResult.territoryOperationFailures.push({
-            id,
-            source,
-            reason: operationResult.reason || "unknown",
-            activeTrail: Boolean(activeTrailIds && activeTrailIds.has(id)),
-            operation: summarizeCaptureOperation(operation),
-            details: operationResult.details || {}
-        });
-    }
-
-    function recordTerritoryOperationApplication(applyResult, id, operation, operationResult, activeTrailIds, source) {
-        if (!applyResult || !Array.isArray(applyResult.territoryOperationApplications)) {
-            return;
-        }
-
-        applyResult.territoryOperationApplications.push({
-            id,
-            source,
-            activeTrail: Boolean(activeTrailIds && activeTrailIds.has(id)),
-            operation: summarizeCaptureOperation(operation),
-            details: operationResult.details || {}
-        });
-    }
-
-    function summarizeCaptureOperation(operation) {
-        if (!operation) {
-            return null;
-        }
-
-        return {
-            type: operation.type,
-            baseVersion: operation.baseVersion,
-            version: operation.version,
-            trailSide: operation.trailSide,
-            trailSegmentIndex: operation.trailSegmentIndex,
-            trailSegmentLength: operation.trailSegmentLength,
-            boundaryPathIndex: operation.boundaryPathIndex,
-            trace: operation.trace || null,
-            fallbackTrailPointCount: unpackPoints(operation.trailPoints).length,
-            trailTailStart: Number.isInteger(operation.trailTailStart) ? operation.trailTailStart : null,
-            trailTailPointCount: unpackPoints(operation.trailTailPoints).length
         };
     }
 

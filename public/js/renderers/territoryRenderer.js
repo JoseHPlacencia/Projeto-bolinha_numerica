@@ -4,10 +4,8 @@ import {
 } from "./viewportCulling.js";
 
 const territoryRenderCache = new WeakMap();
-const maxTerritoryRenderLogEntries = 120;
 
 export function drawTerritoryLayer(context, state, gameConfig, viewportBounds) {
-    const startedAt = performance.now();
     const territories = Object.values(state.territories || {});
     const borderInset = getTerritoryBorderInset(gameConfig);
     const visibleShapes = getVisibleShapes(
@@ -24,12 +22,6 @@ export function drawTerritoryLayer(context, state, gameConfig, viewportBounds) {
     for (const shape of visibleShapes) {
         drawTerritoryBorder(context, shape, gameConfig);
     }
-
-    recordTerritoryRenderDiagnostics({
-        renderMs: performance.now() - startedAt,
-        visibleShapes: visibleShapes.length,
-        visiblePointCount: visibleShapes.reduce((sum, shape) => sum + shape.pointCount, 0)
-    });
 }
 
 function getVisibleShapes(territories, viewportBounds, margin, borderInset) {
@@ -305,27 +297,4 @@ function getValidPoints(points) {
     return points.filter(point => (
         Number.isFinite(point.x) && Number.isFinite(point.y)
     ));
-}
-
-function recordTerritoryRenderDiagnostics(stats) {
-    if (typeof window === "undefined") {
-        return;
-    }
-
-    const entry = {
-        at: performance.now(),
-        ...stats
-    };
-    const log = Array.isArray(window.__territoryRenderDiagnosticsLog)
-        ? window.__territoryRenderDiagnosticsLog
-        : [];
-
-    log.push(entry);
-
-    while (log.length > maxTerritoryRenderLogEntries) {
-        log.shift();
-    }
-
-    window.__lastTerritoryRenderDiagnostics = entry;
-    window.__territoryRenderDiagnosticsLog = log;
 }
