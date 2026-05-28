@@ -2,6 +2,7 @@ export function createMinimapRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
     const settings = getMinimapSettings(gameConfig);
     let territoryPathCache = new WeakMap();
+    let trailPathCache = new WeakMap();
     let displaySize = settings.size;
     let pixelRatio = 1;
 
@@ -19,6 +20,7 @@ export function createMinimapRenderer(canvas, gameConfig) {
         canvas.style.width = `${displaySize}px`;
         canvas.style.height = `${displaySize}px`;
         territoryPathCache = new WeakMap();
+        trailPathCache = new WeakMap();
     }
 
     function render(state, currentPlayerId) {
@@ -146,39 +148,81 @@ export function createMinimapRenderer(canvas, gameConfig) {
     }
 
     function drawTrail(trail, player) {
+        const preparedTrail = getTrailPath(trail);
         const color = trail.color || (player && player.color);
 
         if (!color) {
             return;
         }
 
-        drawTrailFill(trail.fillPolygon, color);
-        drawTrailEdges(trail.leftSegments, color);
-        drawTrailEdges(trail.rightSegments, color);
+        drawTrailFill(preparedTrail.fill, color);
+        drawTrailEdges(preparedTrail.left, color);
+        drawTrailEdges(preparedTrail.right, color);
     }
 
-    function drawTrailFill(fillPolygon, color) {
+    function getTrailPath(trail) {
+        const cached = trailPathCache.get(trail);
+
+        if (cached && cached.displaySize === displaySize) {
+            return cached;
+        }
+
+        const prepared = {
+            displaySize,
+            fill: prepareTrailFill(trail.fillPolygon),
+            left: prepareTrailEdges(trail.leftSegments),
+            right: prepareTrailEdges(trail.rightSegments)
+        };
+
+        trailPathCache.set(trail, prepared);
+
+        return prepared;
+    }
+
+    function prepareTrailFill(fillPolygon) {
         const rings = getPolygonRings(fillPolygon);
 
-        if (rings.length === 0) {
+        return {
+            path: createMinimapPolygonPath(rings),
+            rings
+        };
+    }
+
+    function prepareTrailEdges(segments) {
+        const validSegments = getTrailSegments(segments);
+
+        return {
+            path: createMinimapTrailPath(validSegments),
+            segments: validSegments
+        };
+    }
+
+    function drawTrailFill(fill, color) {
+        if (!fill || fill.rings.length === 0) {
             return;
         }
 
         context.save();
-        context.beginPath();
-
-        for (const ring of rings) {
-            traceRing(ring);
-        }
-
         context.fillStyle = color;
         context.globalAlpha = gameConfig.territory.fillAlpha;
-        context.fill("evenodd");
+
+        if (fill.path) {
+            context.fill(fill.path, "evenodd");
+        } else {
+            context.beginPath();
+
+            for (const ring of fill.rings) {
+                traceRing(ring);
+            }
+
+            context.fill("evenodd");
+        }
+
         context.restore();
     }
 
-    function drawTrailEdges(segments, color) {
-        if (!Array.isArray(segments)) {
+    function drawTrailEdges(edge, color) {
+        if (!edge || edge.segments.length === 0) {
             return;
         }
 
@@ -188,8 +232,12 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.lineJoin = "round";
         context.lineWidth = settings.trailBorderWidth;
 
-        for (const segment of segments) {
-            strokeTrailSegment(segment);
+        if (edge.path) {
+            context.stroke(edge.path);
+        } else {
+            for (const segment of edge.segments) {
+                strokeTrailSegment(segment);
+            }
         }
 
         context.restore();
@@ -251,17 +299,11 @@ export function createMinimapRenderer(canvas, gameConfig) {
     }
 
     function strokeTrailSegment(segment) {
-        if (!Array.isArray(segment)) {
+        if (!Array.isArray(segment) || segment.length < 2) {
             return;
         }
 
-        const points = segment.map(worldToMinimap).filter(isValidPoint);
-
-        if (points.length < 2) {
-            return;
-        }
-
-        strokeSmoothPath(points);
+        strokeSmoothPath(segment);
     }
 
     function strokeSmoothPath(points) {
@@ -277,12 +319,10 @@ export function createMinimapRenderer(canvas, gameConfig) {
         for (let index = 1; index < points.length - 1; index++) {
             const current = points[index];
             const next = points[index + 1];
-            const midpoint = {
-                x: (current.x + next.x) / 2,
-                y: (current.y + next.y) / 2
-            };
+            const midpointX = (current.x + next.x) / 2;
+            const midpointY = (current.y + next.y) / 2;
 
-            context.quadraticCurveTo(current.x, current.y, midpoint.x, midpoint.y);
+            context.quadraticCurveTo(current.x, current.y, midpointX, midpointY);
         }
 
         const lastPoint = points[points.length - 1];
@@ -300,6 +340,56 @@ export function createMinimapRenderer(canvas, gameConfig) {
             x: circle.x + point.x * scale,
             y: circle.y + point.y * scale
         };
+    }
+
+    function getTrailSegments(segments) {
+        if (!Array.isArray(segments)) {
+            return [];
+        }
+
+        return segments
+            .map(segment => segment.map(worldToMinimap).filter(isValidPoint))
+            .filter(segment => segment.length >= 2);
+    }
+
+    function createMinimapTrailPath(segments) {
+        if (typeof Path2D !== "function" || segments.length === 0) {
+            return null;
+        }
+
+        const path = new Path2D();
+
+        for (const segment of segments) {
+            traceSmoothPath(path, segment);
+        }
+
+        return path;
+    }
+
+    function traceSmoothPath(path, points) {
+        if (points.length < 2) {
+            return;
+        }
+
+        path.moveTo(points[0].x, points[0].y);
+
+        if (points.length === 2) {
+            path.lineTo(points[1].x, points[1].y);
+            return;
+        }
+
+        for (let index = 1; index < points.length - 1; index++) {
+            const current = points[index];
+            const next = points[index + 1];
+            const midpointX = (current.x + next.x) / 2;
+            const midpointY = (current.y + next.y) / 2;
+
+            path.quadraticCurveTo(current.x, current.y, midpointX, midpointY);
+        }
+
+        const lastPoint = points[points.length - 1];
+
+        path.lineTo(lastPoint.x, lastPoint.y);
     }
 
     function clampIconPosition(point, player) {
