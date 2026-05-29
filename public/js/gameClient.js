@@ -3,7 +3,7 @@ import { createHud } from "./hud.js";
 import { createInputControls } from "./input.js";
 import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
-import { createCanvasRenderer } from "./renderer.js";
+import { createWorldRenderer } from "./worldRenderer.js";
 
 export function startClient(gameConfig) {
     const socket = io({
@@ -11,7 +11,10 @@ export function startClient(gameConfig) {
     });
     const canvas = document.getElementById("gameCanvas");
     const minimapCanvas = document.getElementById("minimapCanvas");
-    const renderer = createCanvasRenderer(canvas, gameConfig);
+    const renderer = createWorldRenderer(canvas, gameConfig, {
+        onSnapshotCacheInvalid: invalidations => socket.emit("snapshotCacheInvalid", invalidations),
+        onSnapshotResync: () => socket.emit("snapshotResync")
+    });
     const minimap = createMinimapRenderer(minimapCanvas, gameConfig);
     const snapshots = createSnapshotInterpolator(gameConfig.network, {
         onResyncNeeded: () => socket.emit("snapshotResync")
@@ -27,10 +30,12 @@ export function startClient(gameConfig) {
 
     socket.on("connect", () => {
         myId = socket.id;
+        renderer.setPlayerId(myId);
         sendViewportState(true);
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
+        renderer.processSnapshot(snapshot);
         const applyResult = snapshots.processSnapshot(snapshot);
 
         if (typeof acknowledge === "function") {

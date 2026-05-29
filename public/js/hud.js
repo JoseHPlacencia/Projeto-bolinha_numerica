@@ -1,6 +1,7 @@
 export function createHud({ debugLevel }) {
     const debugPanel = document.getElementById("debugPanel");
     const debugFps = document.getElementById("debugFps");
+    const debugRenderFps = document.getElementById("debugRenderFps");
     const debugBuffer = document.getElementById("debugBuffer");
     const debugCanvas = document.getElementById("debugCanvas");
     const debugFrame = document.getElementById("debugFrame");
@@ -42,12 +43,21 @@ export function createHud({ debugLevel }) {
 
         lastUpdatedAt = now;
         setText(debugFps, frameStats.fps);
+        setText(debugRenderFps, getRenderFps(frameStats, rendererStats));
         setText(debugFrame, `${frameStats.frameMs.toFixed(1)}ms`);
         setText(debugBuffer, `${Math.round(snapshotStats.bufferMs)}ms`);
         setText(debugSnapshots, snapshotStats.snapshotCount);
         setText(debugPixelRatio, rendererStats.pixelRatio.toFixed(2));
         setText(debugCanvas, `${rendererStats.canvasWidth}x${rendererStats.canvasHeight}`);
         updateMovementDebug(playerDebug);
+    }
+
+    function getRenderFps(frameStats, rendererStats) {
+        if (rendererStats && rendererStats.mode === "worker") {
+            return Number.isFinite(rendererStats.workerFps) ? rendererStats.workerFps : 0;
+        }
+
+        return frameStats.fps;
     }
 
     function updateDebugLevelRows() {

@@ -69,9 +69,11 @@ function prepareTerritoryRenderData(territory, borderInset) {
         const borderRings = createInsetRings(rings, borderInset);
 
         shapes.push({
+            borderRings,
             bounds,
             borderPath: createPath(borderRings),
             fillPath: createPath(rings),
+            rings,
             pointCount: getRingsPointCount(rings) + getRingsPointCount(borderRings)
         });
     }
@@ -102,19 +104,31 @@ function expandBounds(bounds, margin) {
 }
 
 function drawPolygonFill(context, polygon, fillAlpha) {
-    if (!polygon.fillPath || !polygon.color) {
+    if ((!polygon.fillPath && !polygon.rings) || !polygon.color) {
         return;
     }
 
     context.save();
     context.globalAlpha = fillAlpha;
     context.fillStyle = polygon.color;
-    context.fill(polygon.fillPath, "evenodd");
+
+    if (polygon.fillPath) {
+        context.fill(polygon.fillPath, "evenodd");
+    } else {
+        context.beginPath();
+
+        for (const ring of polygon.rings) {
+            traceRing(context, ring);
+        }
+
+        context.fill("evenodd");
+    }
+
     context.restore();
 }
 
 function drawTerritoryBorder(context, polygon, gameConfig) {
-    if (!polygon.borderPath || !polygon.color) {
+    if ((!polygon.borderPath && !polygon.borderRings) || !polygon.color) {
         return;
     }
 
@@ -124,7 +138,19 @@ function drawTerritoryBorder(context, polygon, gameConfig) {
     context.strokeStyle = polygon.color;
     context.lineJoin = "round";
     context.lineCap = "round";
-    context.stroke(polygon.borderPath);
+
+    if (polygon.borderPath) {
+        context.stroke(polygon.borderPath);
+    } else {
+        context.beginPath();
+
+        for (const ring of polygon.borderRings) {
+            traceRing(context, ring);
+        }
+
+        context.stroke();
+    }
+
     context.restore();
 }
 
