@@ -13,4 +13,6 @@ export function createInputControls(socket, inputBindings, inputActionAngles) {
     registerKeyboardInput(keyToAction, inputActionAngles, inputState, inputOwnership);
     registerPointerDirectionInput(inputState);
     registerGamepadDirectionInput(inputActionAngles, inputState, inputOwnership);
+
+    return inputState;
 }

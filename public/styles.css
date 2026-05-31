@@ -129,3 +129,148 @@ canvas {
         min-width: 64px;
     }
 }
+
+.room-menu-button {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 5;
+    min-width: 96px;
+    padding: 10px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: background 120ms ease, transform 120ms ease;
+}
+
+.room-menu-button:hover {
+    background: rgba(255, 255, 255, 0.14);
+    transform: translateY(-1px);
+}
+
+.room-modal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.84);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 180ms ease, visibility 180ms ease;
+    z-index: 10;
+}
+
+.room-modal.is-open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+.room-modal__content {
+    width: min(400px, calc(100vw - 32px));
+    padding: 28px;
+    border-radius: 18px;
+    background: rgba(12, 16, 24, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.room-modal__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 22px;
+}
+
+.room-modal__header h1 {
+    font-size: 18px;
+    margin: 0;
+}
+
+.room-modal__close {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.room-modal__section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 18px;
+}
+
+.room-modal__divider {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.48);
+    margin: 12px 0;
+}
+
+.room-modal__divider span {
+    display: inline-block;
+    padding: 0 12px;
+    background: rgba(12, 16, 24, 0.96);
+}
+
+.room-modal__form input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.04);
+    color: #fff;
+    font-size: 14px;
+}
+
+.room-button,
+.room-link {
+    padding: 12px 16px;
+    border: none;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.room-button:disabled,
+.room-link:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.room-info {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.room-info.hidden {
+    display: none;
+}
+
+.room-status {
+    min-height: 22px;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.room-status.is-error {
+    color: #ff7f7f;
+}

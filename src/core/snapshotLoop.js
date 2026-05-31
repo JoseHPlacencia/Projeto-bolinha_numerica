@@ -1,17 +1,19 @@
 const config = require("../config/gameConfig");
 const { createSnapshot } = require("./snapshotSerializer");
 
-function startSnapshotLoop(io, players) {
+function startRoomSnapshotLoop(io, room) {
     const intervalMs = 1000 / config.loop.snapshotRate;
 
     return setInterval(() => {
-        sendSnapshot(io, players);
+        sendRoomSnapshot(io, room);
     }, intervalMs);
 }
 
-function sendSnapshot(io, players) {
-    io.volatile.emit("gameState", createSnapshot(players));
+function sendRoomSnapshot(io, room) {
+    io.to(room.code).volatile.emit("gameState", createSnapshot(room.players));
 }
 
-module.exports = startSnapshotLoop;
-module.exports.sendSnapshot = sendSnapshot;
+module.exports = {
+    startRoomSnapshotLoop,
+    sendRoomSnapshot
+};

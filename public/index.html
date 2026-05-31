@@ -19,9 +19,33 @@
         <div><span>Canvas</span><strong id="debugCanvas">0x0</strong></div>
     </div>
 </div>
-<div id="touchControls" class="touch-controls" aria-hidden="true">
-    <div id="moveStick" class="move-stick">
-        <div id="moveStickKnob" class="move-stick-knob"></div>
+<button id="roomMenuButton" class="room-menu-button" type="button">Sala</button>
+<div id="roomModal" class="room-modal" aria-hidden="true">
+    <div class="room-modal__content" role="dialog" aria-modal="true" aria-label="Menu de salas">
+        <div class="room-modal__header">
+            <h1>Menu de salas</h1>
+            <button id="closeRoomMenuButton" class="room-modal__close" type="button">×</button>
+        </div>
+
+        <div class="room-modal__section">
+            <button id="createRoomButton" class="room-button" type="button">Criar nova sala</button>
+        </div>
+
+        <div class="room-modal__divider"><span>ou</span></div>
+
+        <div class="room-modal__section room-modal__form">
+            <label for="roomCodeInput">Código da sala</label>
+            <input id="roomCodeInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
+            <button id="joinRoomButton" class="room-button" type="button">Entrar</button>
+        </div>
+
+        <p id="roomStatus" class="room-status" aria-live="polite"></p>
+
+        <div id="roomInfo" class="room-info hidden">
+            <span>Sala atual:</span>
+            <strong id="roomCodeDisplay"></strong>
+            <button id="leaveRoomButton" class="room-link" type="button">Sair da sala</button>
+        </div>
     </div>
 </div>
 

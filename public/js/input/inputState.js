@@ -16,14 +16,16 @@ export function createInputState(socket) {
     let activeDirectionSource = null;
     let lastDirectionSentAt = 0;
     let lastSentDirection = null;
+    let enabled = true;
 
     return {
         clearDirection,
-        setDirection
+        setDirection,
+        setEnabled
     };
 
     function setDirection(source, angle, options = {}) {
-        if (!Number.isFinite(angle)) {
+        if (!enabled || !Number.isFinite(angle)) {
             return;
         }
 
@@ -41,6 +43,10 @@ export function createInputState(socket) {
     }
 
     function clearDirection(source, options = {}) {
+        if (!enabled && !options.force) {
+            return;
+        }
+
         if (!activeDirections.has(source) && !options.force) {
             return;
         }
@@ -64,7 +70,24 @@ export function createInputState(socket) {
         socket.emit("inputDirectionEnd");
     }
 
+    function setEnabled(value) {
+        enabled = Boolean(value);
+
+        if (!enabled) {
+            for (const source of Array.from(activeDirections.keys())) {
+                clearDirection(source, { force: true });
+            }
+
+            activeDirections.clear();
+            activeDirectionSource = null;
+        }
+    }
+
     function sendDirection(angle, force = false) {
+        if (!enabled) {
+            return;
+        }
+
         const now = performance.now();
         const changedEnough = lastSentDirection === null
             || Math.abs(getAngleDelta(lastSentDirection, angle)) >= DIRECTION_ANGLE_EPSILON;

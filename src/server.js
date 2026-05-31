@@ -5,13 +5,11 @@ const { Server } = require("socket.io");
 
 const config = require("./config/gameConfig");
 const registerSocket = require("./core/socketHandler");
-const startGameLoop = require("./core/gameLoop");
-const startSnapshotLoop = require("./core/snapshotLoop");
+const roomManager = require("./core/roomManager");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, createSocketOptions());
-const players = new Map();
 const publicPath = path.join(__dirname, "..", "public");
 const sharedMathPath = path.join(__dirname, "utils", "math.js");
 
@@ -26,9 +24,7 @@ app.get("/shared/math.js", (_request, response) => {
 
 app.use(express.static(publicPath));
 
-registerSocket(io, players);
-startGameLoop(players);
-startSnapshotLoop(io, players);
+registerSocket(io, roomManager);
 
 server.listen(config.server.port, () => {
     console.log(`Server running at http://localhost:${config.server.port}`);

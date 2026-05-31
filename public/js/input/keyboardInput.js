@@ -26,6 +26,10 @@ export function registerKeyboardInput(keyToAction, inputActionAngles, inputState
     window.addEventListener("blur", releaseKeyboardInput);
 
     function sendInputDown(event) {
+        if (shouldIgnoreKeyboardEvent(event)) {
+            return;
+        }
+
         const key = getEventKey(event);
         const action = keyToAction.get(key);
         const keyboardGroup = getKeyboardGroup(key);
@@ -54,6 +58,10 @@ export function registerKeyboardInput(keyToAction, inputActionAngles, inputState
     }
 
     function sendInputUp(event) {
+        if (shouldIgnoreKeyboardEvent(event)) {
+            return;
+        }
+
         const key = getEventKey(event);
         const action = keyToAction.get(key);
 
@@ -141,6 +149,27 @@ function getKeyboardGroup(key) {
     return KEYBOARD_GROUPS[key] || null;
 }
 
+function shouldIgnoreKeyboardEvent(event) {
+    const target = event.target;
+
+    if (!target) {
+        return false;
+    }
+
+    const tagName = String(target.tagName).toUpperCase();
+
+    if (tagName === "INPUT" || tagName === "TEXTAREA") {
+        return true;
+    }
+
+    if (target.isContentEditable) {
+        return true;
+    }
+
+    return false;
+}
+
 function getEventKey(event) {
     return event.key.toLowerCase();
 }
+

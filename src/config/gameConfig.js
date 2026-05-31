@@ -77,6 +77,14 @@ const security = Object.freeze({
     })
 });
 
+const rooms = Object.freeze({
+    maxRooms: 50,
+    maxPlayersPerRoom: 10,
+    roomCodeLength: 6,
+    roomCodeCharset: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    roomCodeMaxGenerationAttempts: 1000
+});
+
 // Only values needed by the browser are exposed through /game-config.
 const client = Object.freeze({
     socket: Object.freeze({
@@ -99,5 +107,6 @@ module.exports = Object.freeze({
     inputActionAngles,
     inputBindings,
     security,
+    rooms,
     client
 });
