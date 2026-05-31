@@ -12,7 +12,7 @@ const diffRow = document.querySelector(".diff-row");
 const btnPlay = document.getElementById("btn-play");
 const statusMessage = createStatusMessage();
 
-let selectedColor = "#63d2ff";
+let selectedColor = "#4a90e2";
 let selectedDifficulty = "medium";
 
 initializeScreen();
@@ -69,11 +69,11 @@ function attachPlayButton() {
     localStorage.setItem(STORAGE_KEYS.color, selectedColor);
     localStorage.setItem(STORAGE_KEYS.difficulty, selectedDifficulty);
 
-    statusMessage.update("Abrindo servidor do jogo...");
+    statusMessage.update("Abrindo o jogo...");
     btnPlay.disabled = true;
     btnPlay.textContent = "Acessando...";
 
-    const targetUrl = new URL(SERVER_ORIGIN);
+    const targetUrl = new URL("/index.html", SERVER_ORIGIN);
     targetUrl.searchParams.set("playerName", name);
     targetUrl.searchParams.set("playerColor", selectedColor);
     targetUrl.searchParams.set("difficulty", selectedDifficulty);
@@ -97,6 +97,24 @@ function attachOverlayButtons() {
   document.getElementById("btn-sobre")?.addEventListener("click", () => {
     document.getElementById("overlay-sobre")?.classList.add("open");
   });
+
+  // Tab navigation inside the help overlay
+  const tabPills = document.querySelectorAll(".tab-pill");
+  if (tabPills && tabPills.length) {
+    tabPills.forEach(pill => {
+      pill.addEventListener("click", () => {
+        const tabName = pill.dataset.tab;
+        // deactivate all pills and panels
+        document.querySelectorAll(".tab-pill").forEach(p => p.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
+
+        // activate selected
+        pill.classList.add("active");
+        const panel = document.getElementById(`tab-${tabName}`);
+        if (panel) panel.classList.add("active");
+      });
+    });
+  }
 }
 
 function selectColor(color) {

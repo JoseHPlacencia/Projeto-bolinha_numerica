@@ -15,6 +15,10 @@ const players = new Map();
 const publicPath = path.join(__dirname, "..", "public");
 const sharedMathPath = path.join(__dirname, "utils", "math.js");
 
+app.get("/", (_request, response) => {
+    response.redirect("/telainicial/");
+});
+
 app.get("/game-config", (_request, response) => {
     response.json(config.client);
 });
@@ -24,6 +28,7 @@ app.get("/shared/math.js", (_request, response) => {
     response.sendFile(sharedMathPath);
 });
 
+app.use("/telainicial", express.static(path.join(publicPath, "telainicial")));
 app.use(express.static(publicPath));
 
 registerSocket(io, players);
