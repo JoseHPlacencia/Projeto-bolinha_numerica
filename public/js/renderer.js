@@ -4,10 +4,10 @@ import { drawTerritoryLayer } from "./renderers/territoryRenderer.js";
 
 export function createCanvasRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
-    let viewportWidth = 0;
+    let viewportWidth  = 0;
     let viewportHeight = 0;
-    let canvasScale = 1;
-    let pixelRatio = 1;
+    let canvasScale    = 1;
+    let pixelRatio     = 1;
 
     return {
         getDebugState,
@@ -16,7 +16,7 @@ export function createCanvasRenderer(canvas, gameConfig) {
     };
 
     function resizeCanvas() {
-        let width = window.innerWidth;
+        let width  = window.innerWidth;
         let height = window.innerHeight;
         const aspectRatio = width / height;
 
@@ -26,36 +26,27 @@ export function createCanvasRenderer(canvas, gameConfig) {
             width = height * gameConfig.screen.maxAspectRatio;
         }
 
-        width = Math.round(width);
+        width  = Math.round(width);
         height = Math.round(height);
 
-        viewportWidth = width;
+        viewportWidth  = width;
         viewportHeight = height;
-        pixelRatio = getPixelRatio();
+        pixelRatio     = getPixelRatio();
 
-        canvas.width = Math.round(width * pixelRatio);
+        canvas.width  = Math.round(width  * pixelRatio);
         canvas.height = Math.round(height * pixelRatio);
-        canvas.style.width = `${width}px`;
+        canvas.style.width  = `${width}px`;
         canvas.style.height = `${height}px`;
 
         canvasScale = Math.min(
-            width / gameConfig.screen.virtualWidth,
+            width  / gameConfig.screen.virtualWidth,
             height / gameConfig.screen.virtualHeight
         );
     }
 
-    // estadoTerritorio — objeto com a matriz de células do jogador local
-    // (criado pelo territorioSystem.js e gerenciado no gameClient.js)
-    //
-    // cameraOverride — {x, y} opcional: quando fornecido, a câmera ignora a posição
-    // interpolada do jogador e centraliza neste ponto. Usado durante a morte para
-    // fixar a câmera instantaneamente no centro da base, sem aguardar o snapshot.
     function renderWorld(state, currentPlayerId, estadoTerritorio, cameraOverride) {
         const currentPlayer = state[currentPlayerId];
-
-        if (!currentPlayer) {
-            return;
-        }
+        if (!currentPlayer) return;
 
         clearCanvas();
         applyViewportTransform();
@@ -64,18 +55,29 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
     function drawWorld(state, currentPlayer, currentPlayerId, estadoTerritorio, cameraOverride) {
         const cam = cameraOverride || currentPlayer;
+
+        // Viewport AABB em coordenadas de mundo — usado para frustum culling.
+        // Elementos cujo bounding circle não intersecta este retângulo não são renderizados.
+        // Margem extra de playerSize evita pop-in de entidades na borda.
+        const margin  = gameConfig.world.playerSize * 2;
+        const halfW   = (viewportWidth  / 2) / canvasScale + margin;
+        const halfH   = (viewportHeight / 2) / canvasScale + margin;
+        const viewport = {
+            minX: cam.x - halfW,
+            maxX: cam.x + halfW,
+            minY: cam.y - halfH,
+            maxY: cam.y + halfH
+        };
+
         context.save();
-        context.translate(viewportWidth / 2, viewportHeight / 2);
+        context.translate(viewportWidth  / 2, viewportHeight / 2);
         context.scale(canvasScale, canvasScale);
         context.translate(-cam.x, -cam.y);
 
         drawMap(context, gameConfig.world);
+        drawTerritoryLayer(context, state, gameConfig.world, estadoTerritorio, currentPlayerId, viewport);
+        drawPlayerLayer(context, state, currentPlayer, currentPlayerId, viewport);
 
-        // Passa o estadoTerritorio e o ID do jogador local para que o renderer
-        // de território saiba qual jogador deve usar a grade de células (e não o círculo)
-        drawTerritoryLayer(context, state, gameConfig.world, estadoTerritorio, currentPlayerId);
-
-        drawPlayerLayer(context, state, currentPlayer, currentPlayerId);
         context.restore();
     }
 
@@ -94,8 +96,8 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
     function getDebugState() {
         return {
-            canvasHeight: canvas.height,
-            canvasWidth: canvas.width,
+            canvasHeight:   canvas.height,
+            canvasWidth:    canvas.width,
             pixelRatio,
             viewportHeight,
             viewportWidth

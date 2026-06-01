@@ -1,143 +1,182 @@
-// Importa as constantes de tipo de célula do sistema de território.
-// Esses valores (0, 1, 2) identificam se uma célula é vazia, base ou rastro.
+// ============================================================
+// minimapRenderer.js — Minimapa (Território Próprio Apenas)
+// ============================================================
+//
+// Exibe APENAS o estado do próprio jogador:
+//   - Território dominado (polígono vetorial)
+//   - Rastro ativo
+//   - Ponto do próprio jogador
+//
+// Inimigos NÃO são exibidos:
+//   - Menos poluição visual
+//   - Foco pedagógico (o aluno vê seu próprio domínio)
+//   - Melhor desempenho (sem iteração de todos os jogadores a cada frame)
+//
+// Renderização em dois passes:
+//   1. Offscreen canvas: polígono de território (atualiza só quando minimapDirty=true)
+//   2. Canvas principal: trail (atualiza todo frame pois muda continuamente)
+
 import { CELULA_BASE, CELULA_RASTRO, TAMANHO_GRADE } from "../territorioSystem.js";
 
-// Tamanho (em pixels) de cada célula da grade no canvas do minimapa.
-// O minimapa tem 150px e a grade tem TAMANHO_GRADE células → 150 / 50 = 3px por célula.
 const TAMANHO_CELULA_MINIMAP = 150 / TAMANHO_GRADE;
 
-// ─── Função Principal do Minimapa ────────────────────────────────────────────
-//
-// Parâmetros adicionados em relação à versão anterior:
-//   estadoTerritorio — objeto { matrizTerritorio, rastro, estaForaDaBase }
-//                      criado pelo territorioSystem.js
-//                      Se for null (ainda carregando), usa o círculo de fallback.
+// ─── Offscreen Canvas ─────────────────────────────────────────
+let _offscreenCanvas = null;
+let _offscreenCtx    = null;
+let _offscreenColor  = null;
+
+function _ensureOffscreen(tamanho) {
+    if (!_offscreenCanvas) {
+        _offscreenCanvas = document.createElement("canvas");
+        _offscreenCanvas.width  = tamanho;
+        _offscreenCanvas.height = tamanho;
+        _offscreenCtx = _offscreenCanvas.getContext("2d");
+    }
+}
+
+// ─── Função Principal ─────────────────────────────────────────
 export function desenharCamadaMinimap(canvas, estado, idJogadorAtual, configMundo, estadoTerritorio) {
-    const contexto = canvas.getContext("2d");
-    const tamanho = canvas.width;
-    const escala = (tamanho / 2) / configMundo.mapRadius;
-    const centroX = tamanho / 2;
-    const centroY = tamanho / 2;
-    const jogadorAtual = estado[idJogadorAtual];
+    const ctx    = canvas.getContext("2d");
+    const tam    = canvas.width;
+    const escala = (tam / 2) / configMundo.mapRadius;
+    const cx     = tam / 2;
+    const cy     = tam / 2;
 
-    // Limpa o canvas inteiro antes de redesenhar
-    contexto.clearRect(0, 0, tamanho, tamanho);
-    contexto.save();
+    ctx.clearRect(0, 0, tam, tam);
+    ctx.save();
 
-    // Aplica um recorte circular — tudo fora deste círculo não é desenhado
-    contexto.beginPath();
-    contexto.arc(centroX, centroY, centroX, 0, Math.PI * 2);
-    contexto.clip();
+    // Clip circular — tudo dentro do círculo
+    ctx.beginPath();
+    ctx.arc(cx, cy, cx, 0, Math.PI * 2);
+    ctx.clip();
 
-    // Fundo escuro semi-transparente do minimapa
-    contexto.fillStyle = "rgba(0, 0, 0, 0.55)";
-    contexto.fillRect(0, 0, tamanho, tamanho);
+    // Fundo semi-opaco
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, tam, tam);
 
-    // Fundo cinza claro representando o mapa circular do mundo
-    contexto.beginPath();
-    contexto.arc(centroX, centroY, configMundo.mapRadius * escala, 0, Math.PI * 2);
-    contexto.fillStyle = "#d8d8d8";
-    contexto.fill();
+    // Círculo do mapa (área jogável)
+    ctx.beginPath();
+    ctx.arc(cx, cy, configMundo.mapRadius * escala, 0, Math.PI * 2);
+    ctx.fillStyle = "#d8d8d8";
+    ctx.fill();
 
-    if (jogadorAtual) {
-        // Se já temos a grade de território, desenhamos ela (modo novo, detalhado)
-        // Caso contrário, desenhamos o círculo simples de fallback (modo antigo)
-        if (estadoTerritorio) {
-            desenharMatrizTerritorio(contexto, jogadorAtual.color, estadoTerritorio.matrizTerritorio);
-        } else {
-            // Fallback: mantém o círculo original caso o território ainda não esteja pronto
-            desenharAreaDominada(contexto, jogadorAtual, configMundo, centroX, centroY, escala);
+    // ── Território do próprio jogador ─────────────────────────
+    const jogador = estado[idJogadorAtual];
+    if (jogador && estadoTerritorio) {
+        _ensureOffscreen(tam);
+
+        if (estadoTerritorio.polygon && estadoTerritorio.polygon.length >= 3) {
+            _desenharPoligono(ctx, jogador.color, estadoTerritorio, cx, cy, escala, tam);
+            _desenharTrail(ctx, estadoTerritorio.trail, jogador.color, cx, cy, escala);
         }
 
-        // Ponto do jogador sempre desenhado por cima, em qualquer modo
-        desenharPontoJogador(contexto, jogadorAtual, centroX, centroY, escala);
+        _desenharPonto(ctx, jogador, cx, cy, escala);
     }
 
-    contexto.restore();
+    ctx.restore();
 
-    // Borda circular branca do minimapa (desenhada por último, por cima de tudo)
-    contexto.beginPath();
-    contexto.arc(centroX, centroY, centroX - 1, 0, Math.PI * 2);
-    contexto.lineWidth = 2;
-    contexto.strokeStyle = "rgba(255, 255, 255, 0.55)";
-    contexto.stroke();
+    // Borda circular (fora do clip para não ser cortada)
+    ctx.beginPath();
+    ctx.arc(cx, cy, cx - 1, 0, Math.PI * 2);
+    ctx.lineWidth   = 2;
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.stroke();
 }
 
-function desenharAreaDominada(contexto, jogador, configMundo, centroX, centroY, escala) {
-    const territorioX = centroX + jogador.territoryX * escala;
-    const territorioY = centroY + jogador.territoryY * escala;
-    const raioTerritorio = Math.max(3, configMundo.initialTerritoryRadius * escala);
-
-    contexto.globalAlpha = 0.45;
-    contexto.beginPath();
-    contexto.arc(territorioX, territorioY, raioTerritorio, 0, Math.PI * 2);
-    contexto.fillStyle = jogador.color;
-    contexto.fill();
-    contexto.globalAlpha = 1;
-}
-
-function desenharPontoJogador(contexto, jogador, centroX, centroY, escala) {
-    const posX = centroX + jogador.x * escala;
-    const posY = centroY + jogador.y * escala;
-
-    contexto.beginPath();
-    contexto.arc(posX, posY, 5, 0, Math.PI * 2);
-    contexto.fillStyle = jogador.color;
-    contexto.fill();
-
-    contexto.lineWidth = 1.5;
-    contexto.strokeStyle = "#fff";
-    contexto.stroke();
-}
-
-// ─── Renderização da Grade de Território ──────────────────────────────────────
+// ─── Polígono de Território (Offscreen) ───────────────────────
 //
-// Percorre a matrizTerritorio e desenha um pequeno quadrado colorido
-// para cada célula que não esteja vazia (base ou rastro).
-//
-// Parâmetros:
-//   contexto          — contexto 2D do canvas do minimapa
-//   corJogador        — cor HSL do jogador (ex: "hsl(120,80%,50%)")
-//   matrizTerritorio  — grade 2D [linha][coluna] com valores 0, 1 ou 2
-function desenharMatrizTerritorio(contexto, corJogador, matrizTerritorio) {
-    // Percorre todas as linhas da grade (eixo Y)
-    for (let lin = 0; lin < TAMANHO_GRADE; lin++) {
-        // Percorre todas as colunas da grade (eixo X)
-        for (let col = 0; col < TAMANHO_GRADE; col++) {
-            const tipoCelula = matrizTerritorio[lin][col];
+// O polígono é desenhado no offscreen e copiado para o canvas principal.
+// Só redraw quando minimapDirty=true (território mudou) ou cor mudou.
+// O trail é sempre desenhado direto no canvas principal (muda todo frame).
+function _desenharPoligono(ctx, cor, estadoTerritorio, cx, cy, escala, tam) {
+    const dirty   = estadoTerritorio.minimapDirty;
+    const corNova = cor !== _offscreenColor;
 
-            // Células vazias (valor 0) não são desenhadas — o fundo cinza já aparece
-            if (tipoCelula === CELULA_BASE) {
-                // Célula de base: desenha na cor do jogador com opacidade moderada
-                contexto.globalAlpha = 0.60;
-                contexto.fillStyle = corJogador;
-
-                // Posição do quadrado no canvas:
-                // coluna * tamanho da célula = posição X em pixels
-                // linha  * tamanho da célula = posição Y em pixels
-                contexto.fillRect(
-                    col * TAMANHO_CELULA_MINIMAP,
-                    lin * TAMANHO_CELULA_MINIMAP,
-                    TAMANHO_CELULA_MINIMAP,
-                    TAMANHO_CELULA_MINIMAP
-                );
-
-            } else if (tipoCelula === CELULA_RASTRO) {
-                // Célula de rastro: desenha em branco com alta opacidade
-                // O branco contrasta bem com qualquer cor de jogador
-                contexto.globalAlpha = 0.90;
-                contexto.fillStyle = "#ffffff";
-
-                contexto.fillRect(
-                    col * TAMANHO_CELULA_MINIMAP,
-                    lin * TAMANHO_CELULA_MINIMAP,
-                    TAMANHO_CELULA_MINIMAP,
-                    TAMANHO_CELULA_MINIMAP
-                );
-            }
-        }
+    if (dirty || corNova || !_offscreenColor) {
+        _redesenharOffscreen(cor, estadoTerritorio.polygon, cx, cy, escala, tam);
+        _offscreenColor = cor;
+        estadoTerritorio.minimapDirty = false;
     }
 
-    // Restaura a opacidade padrão para não afetar outros elementos desenhados depois
-    contexto.globalAlpha = 1;
+    ctx.globalAlpha = 1.0;
+    ctx.drawImage(_offscreenCanvas, 0, 0);
+}
+
+function _redesenharOffscreen(cor, poly, cx, cy, escala, tam) {
+    const ctx2 = _offscreenCtx;
+    ctx2.clearRect(0, 0, tam, tam);
+    if (!poly || poly.length < 3) return;
+
+    // Fill semi-transparente
+    ctx2.globalAlpha = 0.65;
+    ctx2.fillStyle   = cor;
+    _tracarPoligono(ctx2, poly, cx, cy, escala);
+    ctx2.fill();
+
+    // Borda opaca
+    ctx2.globalAlpha = 0.90;
+    ctx2.strokeStyle = cor;
+    ctx2.lineWidth   = 1.5;
+    ctx2.lineJoin    = "round";
+    ctx2.lineCap     = "round";
+    _tracarPoligono(ctx2, poly, cx, cy, escala);
+    ctx2.stroke();
+
+    ctx2.globalAlpha = 1.0;
+}
+
+function _tracarPoligono(ctx, poly, cx, cy, escala) {
+    ctx.beginPath();
+    ctx.moveTo(cx + poly[0].x * escala, cy + poly[0].y * escala);
+    for (let i = 1; i < poly.length; i++) {
+        ctx.lineTo(cx + poly[i].x * escala, cy + poly[i].y * escala);
+    }
+    ctx.closePath();
+}
+
+// ─── Trail Ativo ──────────────────────────────────────────────
+//
+// Desenhado diretamente no canvas principal (não offscreen) para ter
+// zero latência — muda continuamente enquanto o jogador está fora da base.
+function _desenharTrail(ctx, trail, cor, cx, cy, escala) {
+    if (!trail || trail.length < 2) return;
+
+    ctx.globalAlpha = 0.92;
+    ctx.strokeStyle = cor;
+    ctx.lineWidth   = 2.5;
+    ctx.lineCap     = "round";
+    ctx.lineJoin    = "round";
+    ctx.beginPath();
+    ctx.moveTo(cx + trail[0].x * escala, cy + trail[0].y * escala);
+    for (let i = 1; i < trail.length; i++) {
+        ctx.lineTo(cx + trail[i].x * escala, cy + trail[i].y * escala);
+    }
+    ctx.stroke();
+
+    // Realce branco central no trail (indica risco de auto-colisão)
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+
+    ctx.globalAlpha = 1.0;
+}
+
+// ─── Ponto do Jogador ─────────────────────────────────────────
+function _desenharPonto(ctx, jogador, cx, cy, escala) {
+    const px = cx + jogador.x * escala;
+    const py = cy + jogador.y * escala;
+
+    // Sombra para legibilidade
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur  = 4;
+
+    ctx.beginPath();
+    ctx.arc(px, py, 5, 0, Math.PI * 2);
+    ctx.fillStyle = jogador.color;
+    ctx.fill();
+
+    ctx.shadowBlur  = 0;
+    ctx.lineWidth   = 1.5;
+    ctx.strokeStyle = "#fff";
+    ctx.stroke();
 }

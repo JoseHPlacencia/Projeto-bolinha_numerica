@@ -19,6 +19,16 @@
         return Math.hypot(x1 - x2, y1 - y2);
     }
 
+    // PERFORMANCE: Versão sem sqrt para comparações de distância.
+    // Usar quando apenas se quer saber se dist(A,B) <= r — evita Math.sqrt(),
+    // que é uma operação de ponto flutuante cara (~20 ciclos vs ~2 de multiplicação).
+    // Uso: distanceSqBetween(x1,y1,x2,y2) <= r*r
+    function distanceSqBetween(x1, y1, x2, y2) {
+        const dx = x1 - x2;
+        const dy = y1 - y2;
+        return dx * dx + dy * dy;
+    }
+
     function normalizeAngleDelta(currentAngle, targetAngle) {
         let delta = targetAngle - currentAngle;
 
@@ -80,6 +90,7 @@
         createMovementVector,
         createVectorFromAngle,
         distanceBetween,
+        distanceSqBetween,
         dotProduct,
         lerp,
         lerpAngle,

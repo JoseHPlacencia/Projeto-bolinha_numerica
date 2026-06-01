@@ -32,6 +32,8 @@ class Player {
         this.lastAction = null;
         this.directionAngle = null;
         this.isDead = false;
+        this.trail = [];
+        this._trailKilledAt = 0;
     }
 
     pressAction(action) {
@@ -65,7 +67,8 @@ class Player {
             angle: this.angle,
             color: this.color,
             territoryX: this.territoryX,
-            territoryY: this.territoryY
+            territoryY: this.territoryY,
+            trail: this.trail.length > 120 ? this.trail.slice(-120) : this.trail
         };
     }
 }

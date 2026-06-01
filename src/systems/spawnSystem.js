@@ -1,11 +1,14 @@
 const config = require("../config/gameConfig");
-const { distanceBetween } = require("../utils/math");
+const { distanceSqBetween } = require("../utils/math");
+
+// PERFORMANCE: Usa distanceSqBetween para evitar Math.sqrt() em cada comparação.
+// Com N jogadores, são N sqrt() eliminados por tentativa de spawn.
+// Compara distância² com limiar² (minDistSq) — matematicamente equivalente.
+const _MIN_DIST_SQ = config.spawn.minTerritoryDistance * config.spawn.minTerritoryDistance;
 
 function isSpawnPositionValid(players, x, y) {
     for (const player of players.values()) {
-        const distance = distanceBetween(x, y, player.territoryX, player.territoryY);
-
-        if (distance < config.spawn.minTerritoryDistance) {
+        if (distanceSqBetween(x, y, player.territoryX, player.territoryY) < _MIN_DIST_SQ) {
             return false;
         }
     }

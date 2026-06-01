@@ -91,39 +91,87 @@ function registerGameEvents(socket, players, io) {
     });
 
     // === TERRITÓRIO INIMIGO ===
-    // Recebido quando o jogador passou pelo território de um inimigo e retornou à
-    // sua base — aquelas células devem ser removidas do domínio do inimigo.
+    // Enviado quando o jogador fecha um loop que captura território inimigo.
+    // O polígono da área capturada é repassado ao inimigo para que ele
+    // subtraia a interseção do próprio polígono de território.
     //
-    // Dados esperados: { alvoId: string, celulas: string[] }
-    //   alvoId  — socket ID do inimigo que perderá território
-    //   celulas — array de "lin,col" das células a serem removidas
-    //
-    // O servidor apenas encaminha a mensagem ao inimigo correto, sem processar
-    // a lógica de território (que vive no cliente de cada jogador).
+    // Dados esperados: { alvoId: string, poligono: [{x, y}, ...] }
+    //   alvoId   — socket ID do inimigo que perderá território
+    //   poligono — polígono da área capturada (coordenadas do mundo)
     socket.on("subtrairTerritorio", data => {
-        // Valida estrutura básica dos dados recebidos
         if (!data || typeof data !== "object") return;
 
-        const { alvoId, celulas } = data;
+        const { alvoId, poligono } = data;
 
-        // Valida tipos antes de encaminhar
         if (typeof alvoId !== "string") return;
-        if (!Array.isArray(celulas)) return;
+        if (!Array.isArray(poligono) || poligono.length < 3) return;
+        if (poligono.length > 500) return; // limite de segurança
 
-        // Limita o número de células para evitar abuso (máximo = total de células da grade)
-        if (celulas.length > 2500) return;
+        // Valida que todos os vértices são objetos com x/y numéricos finitos
+        const poligonoValido = poligono.every(
+            v => v && typeof v.x === "number" && typeof v.y === "number" &&
+                 Number.isFinite(v.x) && Number.isFinite(v.y)
+        );
+        if (!poligonoValido) return;
 
-        // Valida o formato de cada célula ("lin,col" com números inteiros)
-        const formatoValido = /^\d{1,2},\d{1,2}$/;
-        if (!celulas.every(c => typeof c === "string" && formatoValido.test(c))) return;
-
-        // Busca o socket do inimigo pelo ID — ele pode ter desconectado
         const socketAlvo = io.sockets.sockets.get(alvoId);
         if (!socketAlvo) return;
 
-        // Encaminha o array de células diretamente para o cliente do inimigo.
-        // O cliente receberá o evento "territorioSubtraido" e limpará sua grade.
-        socketAlvo.emit("territorioSubtraido", celulas);
+        // Encaminha o polígono para o cliente do inimigo
+        socketAlvo.emit("territorioSubtraido", poligono);
+    });
+
+    // === SYNC DE RASTRO ===
+    // O cliente envia seu rastro ativo periodicamente para que o servidor
+    // possa transmiti-lo nos snapshots — outros clientes usam isso para
+    // renderizar rastros inimigos e detectar interseções.
+    socket.on("syncTrail", trailData => {
+        if (!Array.isArray(trailData)) return;
+        if (trailData.length > 200) return;
+
+        const player = players.get(socket.id);
+        if (!player) return;
+
+        const valid = trailData.every(
+            p => p && typeof p.x === "number" && typeof p.y === "number" &&
+                 Number.isFinite(p.x) && Number.isFinite(p.y)
+        );
+        if (!valid) return;
+
+        player.trail = trailData;
+    });
+
+    // === INTERCEPTAÇÃO DE RASTRO ===
+    // Enviado quando o dono do rastro detecta que um inimigo passou por cima
+    // do seu rastro ativo. O dono do rastro (vítima) morre.
+    //
+    // Dados esperados: { victimId: string }
+    //   victimId — socket ID do dono do rastro (que deve morrer)
+    socket.on("reportTrailKill", data => {
+        if (!data || typeof data.victimId !== "string") return;
+
+        const victim = players.get(data.victimId);
+        if (!victim || victim.isDead) return;
+
+        // Debounce: ignora se a vítima já morreu recentemente
+        const now = Date.now();
+        if (now - victim._trailKilledAt < 1500) return;
+        victim._trailKilledAt = now;
+
+        // Mata o dono do rastro: congela, teleporta, limpa trail
+        victim.isDead = true;
+        victim.directionAngle = null;
+        victim.lastAction = null;
+        victim.pressedActions.clear();
+        victim.x = victim.territoryX;
+        victim.y = victim.territoryY;
+        victim.trail = [];
+
+        // Notifica o cliente da vítima para acionar o overlay de morte
+        const victimSocket = io.sockets.sockets.get(data.victimId);
+        if (victimSocket) {
+            victimSocket.emit("trailIntercepted");
+        }
     });
 }
 
