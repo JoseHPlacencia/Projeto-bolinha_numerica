@@ -8,6 +8,10 @@ const registerSocket = require("./core/socketHandler");
 const startGameLoop = require("./core/gameLoop");
 const startSnapshotLoop = require("./core/snapshotLoop");
 const { createTerritories } = require("./state/territories");
+<<<<<<< HEAD
+=======
+const { initNumbers } = require("./systems/numberSystem");
+>>>>>>> 70aca42 (teste)
 
 const app = express();
 const server = http.createServer(app);
@@ -29,7 +33,15 @@ app.get("/shared/math.js", (_request, response) => {
 app.use(express.static(publicPath));
 
 registerSocket(io, players, territories);
+<<<<<<< HEAD
 startGameLoop(players, territories);
+=======
+
+// Inicializa números no mapa (sem jogadores ainda)
+initNumbers(config.world.mapRadius, players);
+
+startGameLoop(players, territories, io);
+>>>>>>> 70aca42 (teste)
 startSnapshotLoop(io, players, territories);
 
 const host = process.env.HOST;
@@ -40,11 +52,15 @@ if (host) {
     server.listen(config.server.port, logServerStart);
 }
 
+<<<<<<< HEAD
 module.exports = {
     app,
     io,
     server
 };
+=======
+module.exports = { app, io, server };
+>>>>>>> 70aca42 (teste)
 
 function createSocketOptions() {
     return {

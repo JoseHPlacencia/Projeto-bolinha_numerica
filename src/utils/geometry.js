@@ -33,6 +33,23 @@ function createPolygonFromPoints(points) {
     return normalizeSimplePolygon([ring]);
 }
 
+<<<<<<< HEAD
+=======
+function createKnownSimplePolygonFromPoints(points) {
+    const ring = points
+        .filter(point => Number.isFinite(point.x) && Number.isFinite(point.y))
+        .map(point => [point.x, point.y]);
+
+    if (ring.length < 3) {
+        return [];
+    }
+
+    closeRing(ring);
+
+    return normalizeKnownSimplePolygon([ring]);
+}
+
+>>>>>>> 70aca42 (teste)
 function unionPolygons(...polygons) {
     const validMultiPolygons = polygons
         .map(polygonToMultiPolygon)
@@ -267,7 +284,31 @@ function normalizeSimplePolygon(polygon) {
     return [ring];
 }
 
+<<<<<<< HEAD
 function normalizeRing(ring) {
+=======
+function normalizeKnownSimplePolygon(polygon) {
+    if (!Array.isArray(polygon)) {
+        return [];
+    }
+
+    const ring = normalizeKnownSimpleRing(polygon[0]);
+
+    if (ring.length < 4) {
+        return [];
+    }
+
+    return [ring];
+}
+
+function normalizeRing(ring) {
+    const normalizedRing = normalizeKnownSimpleRing(ring);
+
+    return hasSelfIntersections(normalizedRing) ? [] : normalizedRing;
+}
+
+function normalizeKnownSimpleRing(ring) {
+>>>>>>> 70aca42 (teste)
     if (!Array.isArray(ring)) {
         return [];
     }
@@ -291,7 +332,11 @@ function normalizeRing(ring) {
         closeRing(normalizedRing);
     }
 
+<<<<<<< HEAD
     return hasSelfIntersections(normalizedRing) ? [] : normalizedRing;
+=======
+    return normalizedRing;
+>>>>>>> 70aca42 (teste)
 }
 
 function removeConsecutiveDuplicatePoints(ring) {
@@ -569,6 +614,10 @@ module.exports = {
     calculatePolygonArea,
     calculatePolygonCentroid,
     createCirclePolygon,
+<<<<<<< HEAD
+=======
+    createKnownSimplePolygonFromPoints,
+>>>>>>> 70aca42 (teste)
     createPolygonFromPoints,
     findClosestPolygonBoundaryContact,
     findSegmentPolygonBoundaryContact,

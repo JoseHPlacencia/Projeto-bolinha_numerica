@@ -4,6 +4,10 @@ const {
     deletePlayerTerritory,
     initializePlayerTerritory
 } = require("../state/territories");
+<<<<<<< HEAD
+=======
+const { invalidateSnapshotCache } = require("./snapshotLoop");
+>>>>>>> 70aca42 (teste)
 const { createRateLimiter } = require("../utils/rateLimiter");
 
 function registerSocket(io, players, territories) {
@@ -21,6 +25,10 @@ function registerSocket(io, players, territories) {
 
 function registerInputEvents(socket, players) {
     const inputGuard = createInputGuard(socket);
+<<<<<<< HEAD
+=======
+    const viewportGuard = createViewportGuard(socket);
+>>>>>>> 70aca42 (teste)
 
     socket.on("inputDown", rawAction => {
         if (!inputGuard.canHandleInput()) {
@@ -53,10 +61,49 @@ function registerInputEvents(socket, players) {
 
         handleInputDirectionEnd(players, socket.id);
     });
+<<<<<<< HEAD
 }
 
 function createInputGuard(socket) {
     const rateLimiter = createRateLimiter(config.security.inputRateLimit);
+=======
+
+    socket.on("viewport", rawViewport => {
+        if (!viewportGuard.canHandleInput()) {
+            return;
+        }
+
+        handleViewport(players, socket.id, rawViewport);
+    });
+
+    socket.on("snapshotResync", () => {
+        if (!viewportGuard.canHandleInput()) {
+            return;
+        }
+
+        socket.data.snapshotState = null;
+    });
+
+    socket.on("snapshotCacheInvalid", rawInvalidations => {
+        if (!viewportGuard.canHandleInput()) {
+            return;
+        }
+
+        invalidateSnapshotCache(socket, rawInvalidations);
+    });
+}
+
+function createInputGuard(socket) {
+    return createSocketRateGuard(socket, config.security.inputRateLimit);
+}
+
+function createViewportGuard(socket) {
+    return createSocketRateGuard(socket, config.security.viewportRateLimit);
+}
+
+function createSocketRateGuard(socket, rateLimitConfig) {
+    const rateLimiter = createRateLimiter(rateLimitConfig);
+>>>>>>> 70aca42 (teste)
     let violations = 0;
 
     return {
@@ -70,7 +117,11 @@ function createInputGuard(socket) {
 
         violations++;
 
+<<<<<<< HEAD
         if (violations >= config.security.inputRateLimit.maxViolations) {
+=======
+        if (violations >= rateLimitConfig.maxViolations) {
+>>>>>>> 70aca42 (teste)
             socket.disconnect(true);
         }
 
@@ -130,6 +181,18 @@ function handleInputDirectionEnd(players, playerId) {
     }
 }
 
+<<<<<<< HEAD
+=======
+function handleViewport(players, playerId, rawViewport) {
+    const viewport = normalizeViewport(rawViewport);
+    const player = players.get(playerId);
+
+    if (player && viewport) {
+        player.setViewport(viewport);
+    }
+}
+
+>>>>>>> 70aca42 (teste)
 function normalizeInputAction(action) {
     return String(action || "").toLowerCase();
 }
@@ -183,4 +246,35 @@ function isInputSourceValid(source) {
         || source === "gamepad-dpad";
 }
 
+<<<<<<< HEAD
+=======
+function normalizeViewport(rawViewport) {
+    if (!rawViewport || typeof rawViewport !== "object") {
+        return null;
+    }
+
+    const width = clampNumber(Number(rawViewport.width), 1, config.screen.virtualWidth * 2);
+    const height = clampNumber(Number(rawViewport.height), 1, config.screen.virtualHeight * 2);
+    const scale = clampNumber(Number(rawViewport.scale), 0.05, 4);
+
+    if (width === null || height === null || scale === null) {
+        return null;
+    }
+
+    return {
+        width,
+        height,
+        scale
+    };
+}
+
+function clampNumber(value, min, max) {
+    if (!Number.isFinite(value)) {
+        return null;
+    }
+
+    return Math.min(Math.max(value, min), max);
+}
+
+>>>>>>> 70aca42 (teste)
 module.exports = registerSocket;

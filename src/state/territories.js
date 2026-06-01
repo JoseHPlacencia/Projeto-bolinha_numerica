@@ -15,11 +15,23 @@ function createTerritories() {
 }
 
 function initializePlayerTerritory(territories, player) {
+<<<<<<< HEAD
     territories.set(player.id, {
         id: player.id,
         color: player.color,
         baseX: player.territoryX,
         baseY: player.territoryY,
+=======
+    const previousTerritory = territories.get(player.id);
+
+    territories.set(player.id, {
+        id: player.id,
+        color: player.color,
+        version: previousTerritory ? (previousTerritory.version || 0) + 1 : 1,
+        baseX: player.territoryX,
+        baseY: player.territoryY,
+        captureOperationLog: [],
+>>>>>>> 70aca42 (teste)
         polygon: createCirclePolygon(
             player.territoryX,
             player.territoryY,
@@ -53,7 +65,11 @@ function getPlayerTerritoryPolygon(territories, playerId) {
     return territory.polygon;
 }
 
+<<<<<<< HEAD
 function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
+=======
+function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {}) {
+>>>>>>> 70aca42 (teste)
     const changedPlayerIds = new Set();
     const territory = territories.get(ownerId);
 
@@ -61,9 +77,15 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
         return changedPlayerIds;
     }
 
+<<<<<<< HEAD
     const ownerPolygon = unionPolygons(territory.polygon, capturedPolygon);
 
     if (updateTerritoryPolygon(territory, ownerPolygon)) {
+=======
+    const ownerPolygon = getOwnerCapturedPolygon(territory.polygon, capturedPolygon, options.ownerPolygon);
+
+    if (updateTerritoryPolygon(territory, ownerPolygon, { preserveCaptureOperationLog: true })) {
+>>>>>>> 70aca42 (teste)
         changedPlayerIds.add(ownerId);
     }
 
@@ -82,7 +104,17 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon) {
     return changedPlayerIds;
 }
 
+<<<<<<< HEAD
 function updateTerritoryPolygon(territory, nextPolygon) {
+=======
+function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolygon) {
+    return calculatePolygonArea(operationPolygon) > 0
+        ? operationPolygon
+        : unionPolygons(currentPolygon, capturedPolygon);
+}
+
+function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
+>>>>>>> 70aca42 (teste)
     const previousArea = calculatePolygonArea(territory.polygon);
     const nextArea = calculatePolygonArea(nextPolygon);
 
@@ -90,7 +122,18 @@ function updateTerritoryPolygon(territory, nextPolygon) {
         return false;
     }
 
+<<<<<<< HEAD
     territory.polygon = nextPolygon;
+=======
+    delete territory.lastCaptureOperation;
+
+    if (!options.preserveCaptureOperationLog) {
+        territory.captureOperationLog = [];
+    }
+
+    territory.polygon = nextPolygon;
+    territory.version = (territory.version || 0) + 1;
+>>>>>>> 70aca42 (teste)
 
     return true;
 }

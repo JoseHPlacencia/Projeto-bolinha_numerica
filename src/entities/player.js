@@ -31,8 +31,15 @@ class Player {
         this.pendingDirectionAngle = null;
         this.lastMouseDirectionAngle = null;
         this.inputVersion = 0;
+<<<<<<< HEAD
         this.boundarySlideInputVersion = 0;
         this.debugState = null;
+=======
+        this.infoVersion = 0;
+        this.boundarySlideInputVersion = 0;
+        this.debugState = null;
+        this.viewport = null;
+>>>>>>> 70aca42 (teste)
         this.reconnect(spawn);
     }
 
@@ -43,6 +50,10 @@ class Player {
         this.color = createRandomColor();
         this.territoryX = spawn.x;
         this.territoryY = spawn.y;
+<<<<<<< HEAD
+=======
+        this.markInfoChanged();
+>>>>>>> 70aca42 (teste)
         this.clearInput();
         this.clearTrailState();
     }
@@ -58,6 +69,14 @@ class Player {
     setSpawnPoint(point) {
         this.territoryX = point.x;
         this.territoryY = point.y;
+<<<<<<< HEAD
+=======
+        this.markInfoChanged();
+    }
+
+    setViewport(viewport) {
+        this.viewport = viewport;
+>>>>>>> 70aca42 (teste)
     }
 
     clearInput() {
@@ -149,6 +168,13 @@ class Player {
         this.inputVersion++;
     }
 
+<<<<<<< HEAD
+=======
+    markInfoChanged() {
+        this.infoVersion++;
+    }
+
+>>>>>>> 70aca42 (teste)
     serialize() {
         const serializedPlayer = {
             id: this.id,
@@ -164,11 +190,14 @@ class Player {
             serializedPlayer.debug = this.debugState;
         }
 
+<<<<<<< HEAD
         if (this.capturas && this.capturas.length > 0) {
             serializedPlayer.capturas = this.capturas.slice();
             this.capturas = []; // flush após serializar
         }
 
+=======
+>>>>>>> 70aca42 (teste)
         return serializedPlayer;
     }
 }

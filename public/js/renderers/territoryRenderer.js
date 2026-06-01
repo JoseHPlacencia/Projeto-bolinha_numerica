@@ -1,5 +1,6 @@
 import {
     boundsOverlap,
+<<<<<<< HEAD
     clipClosedRingStrokeToBounds,
     clipRingsToBounds,
     getRingsBounds
@@ -9,12 +10,24 @@ export function drawTerritoryLayer(context, state, gameConfig, viewportBounds) {
     const territories = Object.values(state.territories || {});
     const borderInset = getTerritoryBorderInset(gameConfig);
     const visiblePolygons = getVisiblePolygons(
+=======
+    getRingsBounds
+} from "./viewportCulling.js";
+
+const territoryRenderCache = new WeakMap();
+
+export function drawTerritoryLayer(context, state, gameConfig, viewportBounds) {
+    const territories = Object.values(state.territories || {});
+    const borderInset = getTerritoryBorderInset(gameConfig);
+    const visibleShapes = getVisibleShapes(
+>>>>>>> 70aca42 (teste)
         territories,
         viewportBounds,
         gameConfig.territory.baseBorderWidth + borderInset,
         borderInset
     );
 
+<<<<<<< HEAD
     for (const polygon of visiblePolygons) {
         drawPolygonFill(context, polygon, gameConfig.territory.fillAlpha);
     }
@@ -26,12 +39,26 @@ export function drawTerritoryLayer(context, state, gameConfig, viewportBounds) {
 
 function getVisiblePolygons(territories, viewportBounds, margin, borderInset) {
     const polygons = [];
+=======
+    for (const shape of visibleShapes) {
+        drawPolygonFill(context, shape, gameConfig.territory.fillAlpha);
+    }
+
+    for (const shape of visibleShapes) {
+        drawTerritoryBorder(context, shape, gameConfig);
+    }
+}
+
+function getVisibleShapes(territories, viewportBounds, margin, borderInset) {
+    const shapes = [];
+>>>>>>> 70aca42 (teste)
 
     for (const territory of territories) {
         if (!territory.color) {
             continue;
         }
 
+<<<<<<< HEAD
         for (const polygon of getTerritoryPolygons(territory)) {
             const rings = getPolygonRings(polygon);
             const bounds = getRingsBounds(rings, margin);
@@ -51,11 +78,23 @@ function getVisiblePolygons(territories, viewportBounds, margin, borderInset) {
             polygons.push({
                 borderSegments,
                 fillRings,
+=======
+        const preparedTerritory = prepareTerritoryRenderData(territory, borderInset);
+
+        for (const shape of preparedTerritory.shapes) {
+            if (!boundsOverlap(expandBounds(shape.bounds, margin), viewportBounds)) {
+                continue;
+            }
+
+            shapes.push({
+                ...shape,
+>>>>>>> 70aca42 (teste)
                 color: territory.color
             });
         }
     }
 
+<<<<<<< HEAD
     return polygons;
 }
 
@@ -63,19 +102,100 @@ function drawPolygonFill(context, polygon, fillAlpha) {
     const rings = polygon.fillRings;
 
     if (rings.length === 0 || !polygon.color) {
+=======
+    return shapes;
+}
+
+function prepareTerritoryRenderData(territory, borderInset) {
+    const cached = territoryRenderCache.get(territory);
+
+    if (cached && cached.borderInset === borderInset) {
+        return cached;
+    }
+
+    const shapes = [];
+
+    for (const polygon of getTerritoryPolygons(territory)) {
+        const rings = getPolygonRings(polygon);
+        const bounds = getRingsBounds(rings);
+
+        if (rings.length === 0 || !bounds) {
+            continue;
+        }
+
+        const borderRings = createInsetRings(rings, borderInset);
+
+        shapes.push({
+            borderRings,
+            bounds,
+            borderPath: createPath(borderRings),
+            fillPath: createPath(rings),
+            rings,
+            pointCount: getRingsPointCount(rings) + getRingsPointCount(borderRings)
+        });
+    }
+
+    const prepared = {
+        borderInset,
+        shapes
+    };
+
+    territoryRenderCache.set(territory, prepared);
+
+    return prepared;
+}
+
+function expandBounds(bounds, margin) {
+    const safeMargin = Number.isFinite(margin) ? Math.max(0, margin) : 0;
+
+    if (!bounds) {
+        return null;
+    }
+
+    return {
+        minX: bounds.minX - safeMargin,
+        minY: bounds.minY - safeMargin,
+        maxX: bounds.maxX + safeMargin,
+        maxY: bounds.maxY + safeMargin
+    };
+}
+
+function drawPolygonFill(context, polygon, fillAlpha) {
+    if ((!polygon.fillPath && !polygon.rings) || !polygon.color) {
+>>>>>>> 70aca42 (teste)
         return;
     }
 
     context.save();
     context.globalAlpha = fillAlpha;
     context.fillStyle = polygon.color;
+<<<<<<< HEAD
     createPolygonPath(context, rings);
     context.fill("evenodd");
+=======
+
+    if (polygon.fillPath) {
+        context.fill(polygon.fillPath, "evenodd");
+    } else {
+        context.beginPath();
+
+        for (const ring of polygon.rings) {
+            traceRing(context, ring);
+        }
+
+        context.fill("evenodd");
+    }
+
+>>>>>>> 70aca42 (teste)
     context.restore();
 }
 
 function drawTerritoryBorder(context, polygon, gameConfig) {
+<<<<<<< HEAD
     if (polygon.borderSegments.length === 0 || !polygon.color) {
+=======
+    if ((!polygon.borderPath && !polygon.borderRings) || !polygon.color) {
+>>>>>>> 70aca42 (teste)
         return;
     }
 
@@ -86,13 +206,27 @@ function drawTerritoryBorder(context, polygon, gameConfig) {
     context.lineJoin = "round";
     context.lineCap = "round";
 
+<<<<<<< HEAD
     for (const segment of polygon.borderSegments) {
         strokeSegment(context, segment);
+=======
+    if (polygon.borderPath) {
+        context.stroke(polygon.borderPath);
+    } else {
+        context.beginPath();
+
+        for (const ring of polygon.borderRings) {
+            traceRing(context, ring);
+        }
+
+        context.stroke();
+>>>>>>> 70aca42 (teste)
     }
 
     context.restore();
 }
 
+<<<<<<< HEAD
 function strokeSegment(context, points) {
     if (points.length < 2) {
         return;
@@ -108,6 +242,8 @@ function strokeSegment(context, points) {
     context.stroke();
 }
 
+=======
+>>>>>>> 70aca42 (teste)
 function createInsetRings(rings, inset) {
     if (!Number.isFinite(inset) || inset <= 0) {
         return rings;
@@ -191,6 +327,7 @@ function getPointsCenter(points) {
     };
 }
 
+<<<<<<< HEAD
 function createPolygonPath(context, rings) {
     context.beginPath();
 
@@ -200,12 +337,30 @@ function createPolygonPath(context, rings) {
 }
 
 function traceRing(context, ring) {
+=======
+function createPath(rings) {
+    if (typeof Path2D !== "function") {
+        return null;
+    }
+
+    const path = new Path2D();
+
+    for (const ring of rings) {
+        traceRing(path, ring);
+    }
+
+    return path;
+}
+
+function traceRing(path, ring) {
+>>>>>>> 70aca42 (teste)
     const points = getValidPoints(ring);
 
     if (points.length < 3) {
         return;
     }
 
+<<<<<<< HEAD
     context.moveTo(points[0].x, points[0].y);
 
     for (let index = 1; index < points.length; index++) {
@@ -213,6 +368,19 @@ function traceRing(context, ring) {
     }
 
     context.closePath();
+=======
+    path.moveTo(points[0].x, points[0].y);
+
+    for (let index = 1; index < points.length; index++) {
+        path.lineTo(points[index].x, points[index].y);
+    }
+
+    path.closePath();
+}
+
+function getRingsPointCount(rings) {
+    return (rings || []).reduce((sum, ring) => sum + ring.length, 0);
+>>>>>>> 70aca42 (teste)
 }
 
 function getOpenRing(ring) {

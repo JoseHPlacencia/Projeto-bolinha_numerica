@@ -5,6 +5,7 @@ const {
 } = require("../state/territories");
 const {
     calculatePolygonArea,
+<<<<<<< HEAD
     createPolygonFromPoints,
     findClosestPolygonBoundaryContact,
     unionPolygons,
@@ -12,10 +13,17 @@ const {
 } = require("../utils/geometry");
 const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
 const numberSystem = require("./numberSystem");
+=======
+    createKnownSimplePolygonFromPoints,
+    findClosestPolygonBoundaryContact
+} = require("../utils/geometry");
+const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
+>>>>>>> 70aca42 (teste)
 
 const geometryEpsilon = 1e-7;
 
 function captureClosedTrail(player, territories, players) {
+<<<<<<< HEAD
     const capturedPolygon = createExternalTrailCapturePolygon(player, territories);
 
     if (!capturedPolygon) {
@@ -45,6 +53,37 @@ function captureClosedTrail(player, territories, players) {
 }
 
 function createExternalTrailCapturePolygon(player, territories) {
+=======
+    const capture = createExternalTrailCapture(player, territories);
+
+    if (!capture) {
+        return null;
+    }
+
+    const territory = territories.get(player.id);
+    const baseVersion = territory ? territory.version || 0 : 0;
+    const changedPlayerIds = applyCapturedPolygon(territories, player.id, capture.polygon, {
+        ownerPolygon: capture.operation && capture.operation.previewPolygon
+    });
+
+    storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
+
+    const relocationPlayerIds = new Set(changedPlayerIds);
+    relocationPlayerIds.delete(player.id);
+
+    relocatePlayersAfterTerritoryChange(players, territories, relocationPlayerIds);
+
+    return capture.polygon;
+}
+
+function createExternalTrailCapturePolygon(player, territories) {
+    const capture = createExternalTrailCapture(player, territories);
+
+    return capture ? capture.polygon : null;
+}
+
+function createExternalTrailCapture(player, territories) {
+>>>>>>> 70aca42 (teste)
     if (!hasAnySideTrailSegment(player)) {
         return null;
     }
@@ -61,7 +100,11 @@ function createExternalTrailCapturePolygon(player, territories) {
         return null;
     }
 
+<<<<<<< HEAD
     return bestCandidate.polygon;
+=======
+    return bestCandidate;
+>>>>>>> 70aca42 (teste)
 }
 
 function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) {
@@ -69,7 +112,11 @@ function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) 
     let bestCandidate = null;
 
     for (const candidate of candidates) {
+<<<<<<< HEAD
         const rankedCandidate = rankCaptureCandidate(currentTerritory, currentArea, candidate);
+=======
+        const rankedCandidate = rankCaptureCandidate(currentArea, candidate);
+>>>>>>> 70aca42 (teste)
 
         if (rankedCandidate.addedArea < minAddedArea) {
             continue;
@@ -83,15 +130,21 @@ function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) 
     return bestCandidate;
 }
 
+<<<<<<< HEAD
 function rankCaptureCandidate(currentTerritory, currentArea, candidate) {
     const union = unionPolygons(currentTerritory, candidate.polygon);
     const candidateArea = calculatePolygonArea(candidate.polygon);
     const addedArea = calculatePolygonArea(union) - currentArea;
     const overlapArea = Math.max(0, candidateArea - addedArea);
+=======
+function rankCaptureCandidate(currentArea, candidate) {
+    const addedArea = candidate.area - currentArea;
+>>>>>>> 70aca42 (teste)
 
     return {
         ...candidate,
         addedArea,
+<<<<<<< HEAD
         overlapArea,
         hasLowOverlap: hasLowTerritoryOverlap(candidateArea, overlapArea)
     };
@@ -110,6 +163,13 @@ function isBetterCaptureCandidate(candidate, bestCandidate) {
         return candidate.hasLowOverlap;
     }
 
+=======
+        overlapArea: currentArea
+    };
+}
+
+function isBetterCaptureCandidate(candidate, bestCandidate) {
+>>>>>>> 70aca42 (teste)
     if (Math.abs(candidate.addedArea - bestCandidate.addedArea) > geometryEpsilon) {
         return candidate.addedArea > bestCandidate.addedArea;
     }
@@ -120,16 +180,27 @@ function isBetterCaptureCandidate(candidate, bestCandidate) {
 function createTrailCaptureCandidates(player, territoryPolygon) {
     const candidates = [];
 
+<<<<<<< HEAD
     for (const segment of getTrailSegments(player)) {
         candidates.push(...createTrailCaptureCandidatesFromSegment(segment, territoryPolygon));
+=======
+    for (const trail of getTrailSegments(player)) {
+        candidates.push(...createTrailCaptureCandidatesFromSegment(trail, territoryPolygon));
+>>>>>>> 70aca42 (teste)
     }
 
     return candidates;
 }
 
+<<<<<<< HEAD
 function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
     const candidates = [];
     const finiteSidePoints = getFinitePoints(segment);
+=======
+function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
+    const candidates = [];
+    const finiteSidePoints = getFinitePoints(trail.points);
+>>>>>>> 70aca42 (teste)
 
     if (finiteSidePoints.length < 2) {
         return candidates;
@@ -150,12 +221,32 @@ function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
     const boundaryPaths = createBoundaryPaths(territoryPolygon[0], endContact, startContact);
     let bestCandidate = null;
 
+<<<<<<< HEAD
     for (const boundaryPath of boundaryPaths) {
+=======
+    for (let boundaryPathIndex = 0; boundaryPathIndex < boundaryPaths.length; boundaryPathIndex++) {
+        const boundaryPath = boundaryPaths[boundaryPathIndex];
+>>>>>>> 70aca42 (teste)
         const points = createTrailBoundaryCapturePoints(clippedSidePoints, boundaryPath);
         const candidate = createTrailCandidateFromPoints(points);
 
         if (candidate && isLargerAreaCandidate(candidate, bestCandidate)) {
+<<<<<<< HEAD
             bestCandidate = candidate;
+=======
+            bestCandidate = {
+                ...candidate,
+                operation: createCaptureOperation(
+                    trail,
+                    clippedSidePoints,
+                    startContact,
+                    endContact,
+                    boundaryPaths,
+                    boundaryPathIndex,
+                    candidate.polygon
+                )
+            };
+>>>>>>> 70aca42 (teste)
         }
     }
 
@@ -168,8 +259,21 @@ function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
 
 function getTrailSegments(player) {
     return [
+<<<<<<< HEAD
         ...getVisibleSegments(player.trailLeftSegments),
         ...getVisibleSegments(player.trailRightSegments)
+=======
+        ...getVisibleSegments(player.trailLeftSegments).map((points, index) => ({
+            side: "left",
+            index,
+            points
+        })),
+        ...getVisibleSegments(player.trailRightSegments).map((points, index) => ({
+            side: "right",
+            index,
+            points
+        }))
+>>>>>>> 70aca42 (teste)
     ];
 }
 
@@ -207,8 +311,12 @@ function createTrailCandidateFromPoints(points) {
         return null;
     }
 
+<<<<<<< HEAD
     const polygon = createPolygonFromPoints(points);
 
+=======
+    const polygon = createKnownSimplePolygonFromPoints(points);
+>>>>>>> 70aca42 (teste)
     const area = calculatePolygonArea(polygon);
 
     if (area <= 0) {
@@ -218,6 +326,105 @@ function createTrailCandidateFromPoints(points) {
     return { polygon, area };
 }
 
+<<<<<<< HEAD
+=======
+function createCaptureOperation(
+    trail,
+    clippedSidePoints,
+    startContact,
+    endContact,
+    boundaryPaths,
+    capturedBoundaryPathIndex,
+    previewPolygon
+) {
+    const keepBoundaryPath = boundaryPaths[capturedBoundaryPathIndex];
+
+    if (!keepBoundaryPath || keepBoundaryPath.length < 2 || getPolygonPointCount(previewPolygon) < 4) {
+        return null;
+    }
+
+    return {
+        type: "trailCapture",
+        trailSide: trail.side,
+        trailSegmentIndex: trail.index,
+        trailSegmentLength: trail.points.length,
+        trailPoints: clippedSidePoints.map(clonePoint),
+        boundaryPathIndex: capturedBoundaryPathIndex,
+        startContact: cloneContact(startContact),
+        endContact: cloneContact(endContact),
+        keepAnchor: createBoundaryPathAnchor(keepBoundaryPath),
+        boundaryPathPointCount: keepBoundaryPath.length,
+        previewPolygon
+    };
+}
+
+function storeCaptureOperation(territories, playerId, capture, baseVersion, changedPlayerIds) {
+    if (!changedPlayerIds.has(playerId) || !capture.operation) {
+        return;
+    }
+
+    const territory = territories.get(playerId);
+
+    if (!territory) {
+        return;
+    }
+
+    const nextVersion = territory.version || 0;
+
+    if (capture.operation.previewPolygon.length === 0) {
+        return;
+    }
+
+    if (!arePolygonAreasClose(capture.operation.previewPolygon, territory.polygon)) {
+        return;
+    }
+
+    territory.lastCaptureOperation = {
+        type: "trailCapture",
+        baseVersion,
+        version: nextVersion,
+        trailSide: capture.operation.trailSide,
+        trailSegmentIndex: capture.operation.trailSegmentIndex,
+        trailSegmentLength: capture.operation.trailSegmentLength,
+        trailPoints: capture.operation.trailPoints,
+        boundaryPathIndex: capture.operation.boundaryPathIndex,
+        startContact: capture.operation.startContact,
+        endContact: capture.operation.endContact,
+        keepAnchor: capture.operation.keepAnchor
+    };
+}
+
+function getPolygonPointCount(polygon) {
+    return (polygon || []).reduce((sum, ring) => sum + (Array.isArray(ring) ? ring.length : 0), 0);
+}
+
+function createBoundaryPathAnchor(path) {
+    if (path.length > 2) {
+        return clonePoint(path[1]);
+    }
+
+    return {
+        x: (path[0].x + path[path.length - 1].x) / 2,
+        y: (path[0].y + path[path.length - 1].y) / 2
+    };
+}
+
+function cloneContact(contact) {
+    return {
+        point: clonePoint(contact.point),
+        segmentIndex: contact.segmentIndex,
+        segmentT: contact.segmentT
+    };
+}
+
+function arePolygonAreasClose(first, second) {
+    const firstArea = calculatePolygonArea(first);
+    const secondArea = calculatePolygonArea(second);
+
+    return Math.abs(firstArea - secondArea) <= Math.max(1, secondArea * 0.001);
+}
+
+>>>>>>> 70aca42 (teste)
 function createBoundaryPaths(ring, startContact, endContact) {
     const openRing = getOpenRing(ring);
 
@@ -310,6 +517,16 @@ function coordinatesToPoint(coordinates) {
     };
 }
 
+<<<<<<< HEAD
+=======
+function clonePoint(point) {
+    return {
+        x: point.x,
+        y: point.y
+    };
+}
+
+>>>>>>> 70aca42 (teste)
 function arePointsEqual(first, second) {
     return Math.abs(first.x - second.x) <= geometryEpsilon
         && Math.abs(first.y - second.y) <= geometryEpsilon;

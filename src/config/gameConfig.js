@@ -27,12 +27,25 @@ const server = Object.freeze({
 
 const socket = Object.freeze({
     transports: socketTransports,
+<<<<<<< HEAD
     perMessageDeflate: false
+=======
+    perMessageDeflate: Object.freeze({
+        threshold: 256,
+        zlibDeflateOptions: Object.freeze({
+            level: 6
+        })
+    })
+>>>>>>> 70aca42 (teste)
 });
 
 const loop = Object.freeze({
     tickRate: 60,
+<<<<<<< HEAD
     snapshotRate: 30,
+=======
+    snapshotRate: 20,
+>>>>>>> 70aca42 (teste)
     maxDeltaTime: 0.1
 });
 
@@ -49,7 +62,11 @@ const territory = Object.freeze({
     fillAlpha: 0.36,
     minCaptureArea: 800,
     minCaptureTrailPoints: 4,
+<<<<<<< HEAD
     trailPointSpacing: 10
+=======
+    trailPointSpacing: 14
+>>>>>>> 70aca42 (teste)
 });
 
 const movement = Object.freeze({
@@ -96,12 +113,45 @@ const screen = Object.freeze({
 });
 
 const network = Object.freeze({
+<<<<<<< HEAD
     initialBufferMs: 140,
     minBufferMs: 100,
     maxBufferMs: 250,
     jitterMultiplier: 2,
     maxJitterSamples: 30,
     maxSnapshots: 15
+=======
+    initialBufferMs: 180,
+    minBufferMs: 100,
+    maxBufferMs: 360,
+    jitterMultiplier: 2,
+    maxJitterSamples: 30,
+    maxSnapshots: 18,
+    viewportReportIntervalMs: 250,
+    interestMargin: 800,
+    maxViewportWorldWidth: 3200,
+    maxViewportWorldHeight: 2200,
+    cullPlayerPositionsByViewport: false,
+    captureOperationSyncEnabled: true,
+    captureOperationFallbackTrailPointsEnabled: false,
+    captureOperationNeededTrailPointsEnabled: true,
+    captureOperationBatchTrailPointsEnabled: true,
+    captureOperationHistoryLimit: 128,
+    optimisticOwnerCaptureOperationSyncEnabled: true,
+    captureOperationResyncEnabled: false,
+    reliableTrailUpdatesEnabled: true,
+    coordinatePrecision: 10,
+    anglePrecision: 1000,
+    forcedFullSyncsEnabled: false,
+    volatileSnapshotsWhileReliablePendingEnabled: true,
+    reliableSnapshotAckTimeoutMs: 3000,
+    reliableSnapshotRetryMs: 4000,
+    playerInfoFullSyncIntervalMs: 5000,
+    territoryFullSyncIntervalMs: 10000,
+    trailFullSyncIntervalMs: 4000,
+    trailPatchFullRatio: 0.85,
+    resyncRequestIntervalMs: 1000
+>>>>>>> 70aca42 (teste)
 });
 
 const security = Object.freeze({
@@ -109,6 +159,14 @@ const security = Object.freeze({
         maxEvents: 60,
         intervalMs: 1000,
         maxViolations: 10
+<<<<<<< HEAD
+=======
+    }),
+    viewportRateLimit: Object.freeze({
+        maxEvents: 12,
+        intervalMs: 1000,
+        maxViolations: 5
+>>>>>>> 70aca42 (teste)
     })
 });
 
@@ -136,7 +194,13 @@ module.exports = Object.freeze({
     movement,
     player,
     minimap,
+<<<<<<< HEAD
     spawn,
+=======
+    network,
+    spawn,
+    screen,
+>>>>>>> 70aca42 (teste)
     inputActionAngles,
     inputBindings,
     security,
