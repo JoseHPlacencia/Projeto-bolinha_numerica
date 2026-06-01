@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
 const { startRoomGameLoop } = require("./gameLoop");
@@ -6,7 +7,7 @@ const { startRoomSnapshotLoop } = require("./snapshotLoop");
 const rooms = new Map();
 const socketIdToRoomCode = new Map();
 
-function createRoom(io) {
+function createRoom(io, options = {}) {
     if (rooms.size >= config.rooms.maxRooms) {
         return {
             success: false,
@@ -15,14 +16,40 @@ function createRoom(io) {
     }
 
     const roomCode = generateRoomCode();
+    const isPrivate = Boolean(options.isPrivate);
     const room = {
         code: roomCode,
         players: new Map(),
         createdAt: Date.now(),
         lastActivity: Date.now(),
         gameLoopInterval: null,
-        snapshotLoopInterval: null
+        snapshotLoopInterval: null,
+        isPrivate,
+        passwordHash: null,
+        passwordSalt: null
     };
+
+    if (isPrivate) {
+        const password = String(options.password || "").trim();
+
+        if (!password) {
+            return {
+                success: false,
+                message: "A senha é obrigatória para salas privadas."
+            };
+        }
+
+        if (password.length < config.rooms.privateRoomPasswordMinLength) {
+            return {
+                success: false,
+                message: `A senha deve ter pelo menos ${config.rooms.privateRoomPasswordMinLength} caracteres.`
+            };
+        }
+
+        const { hash, salt } = createPasswordHash(password);
+        room.passwordHash = hash;
+        room.passwordSalt = salt;
+    }
 
     room.gameLoopInterval = startRoomGameLoop(room);
     room.snapshotLoopInterval = startRoomSnapshotLoop(io, room);
@@ -34,7 +61,7 @@ function createRoom(io) {
     };
 }
 
-function joinRoom(roomCode, socket) {
+function joinRoom(roomCode, socket, password = "") {
     const normalizedRoomCode = String(roomCode || "").trim().toUpperCase();
 
     if (!normalizedRoomCode) {
@@ -51,6 +78,22 @@ function joinRoom(roomCode, socket) {
             success: false,
             message: "Room not found."
         };
+    }
+
+    if (room.isPrivate) {
+        if (!password) {
+            return {
+                success: false,
+                message: "Password is required for private rooms."
+            };
+        }
+
+        if (!verifyPassword(password, room.passwordHash, room.passwordSalt)) {
+            return {
+                success: false,
+                message: "Invalid room password."
+            };
+        }
     }
 
     if (room.players.size >= config.rooms.maxPlayersPerRoom) {
@@ -74,6 +117,22 @@ function joinRoom(roomCode, socket) {
         success: true,
         room
     };
+}
+
+function createPasswordHash(password) {
+    const salt = crypto.randomBytes(16).toString("hex");
+    const hash = crypto.createHash("sha256").update(salt + password).digest("hex");
+
+    return { salt, hash };
+}
+
+function verifyPassword(password, hash, salt) {
+    if (!password || !hash || !salt) {
+        return false;
+    }
+
+    const computedHash = crypto.createHash("sha256").update(salt + password).digest("hex");
+    return computedHash === hash;
 }
 
 function leaveRoom(socket) {

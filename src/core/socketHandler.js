@@ -7,6 +7,9 @@ function registerSocket(io, roomManager) {
         registerRoomEvents(socket, io, roomManager);
         registerInputEvents(socket, roomManager);
 
+        // Send current rooms list to the newly connected client
+        socket.emit("roomsList", buildRoomsList(roomManager));
+
         socket.on("disconnect", () => {
             const leaveResult = roomManager.leaveRoom(socket);
 
@@ -15,17 +18,40 @@ function registerSocket(io, roomManager) {
                     playerId: socket.id
                 });
             }
+
+            // Always notify clients about rooms list changes after a disconnect/leave
+            io.emit("roomsList", buildRoomsList(roomManager));
         });
     });
+}
+
+function buildRoomsList(roomManager) {
+    const list = [];
+
+    for (const [code, room] of roomManager.rooms) {
+        list.push({
+            code,
+            playerCount: room.players.size,
+            isPrivate: Boolean(room.isPrivate),
+            createdAt: room.createdAt
+        });
+    }
+
+    return list;
 }
 
 function registerRoomEvents(socket, io, roomManager) {
     socket.on("joinRoom", payload => {
         const createNewRoom = Boolean(payload && payload.createNewRoom);
         const requestedCode = String(payload && payload.roomCode || "").trim().toUpperCase();
+        const password = String(payload && payload.password || "");
+        const isPrivate = Boolean(payload && payload.isPrivate);
 
         if (createNewRoom) {
-            const createResult = roomManager.createRoom(io);
+            const createResult = roomManager.createRoom(io, {
+                isPrivate,
+                password
+            });
 
             if (!createResult.success) {
                 socket.emit("joinRoomResult", {
@@ -35,7 +61,7 @@ function registerRoomEvents(socket, io, roomManager) {
                 return;
             }
 
-            const joinResult = roomManager.joinRoom(createResult.room.code, socket);
+            const joinResult = roomManager.joinRoom(createResult.room.code, socket, password);
 
             if (!joinResult.success) {
                 socket.emit("joinRoomResult", {
@@ -49,6 +75,8 @@ function registerRoomEvents(socket, io, roomManager) {
                 success: true,
                 roomCode: createResult.room.code
             });
+            // Notify all clients about the new room
+            io.emit("roomsList", buildRoomsList(roomManager));
             return;
         }
 
@@ -60,7 +88,7 @@ function registerRoomEvents(socket, io, roomManager) {
             return;
         }
 
-        const joinResult = roomManager.joinRoom(requestedCode, socket);
+        const joinResult = roomManager.joinRoom(requestedCode, socket, password);
 
         if (!joinResult.success) {
             socket.emit("joinRoomResult", {
@@ -74,6 +102,8 @@ function registerRoomEvents(socket, io, roomManager) {
             success: true,
             roomCode: requestedCode
         });
+        // Notify all clients about the updated player count
+        io.emit("roomsList", buildRoomsList(roomManager));
     });
 
     socket.on("leaveRoom", () => {
@@ -84,6 +114,8 @@ function registerRoomEvents(socket, io, roomManager) {
                 playerId: socket.id
             });
         }
+        // Notify all clients about the updated rooms list (room removed or player count changed)
+        io.emit("roomsList", buildRoomsList(roomManager));
     });
 }
 

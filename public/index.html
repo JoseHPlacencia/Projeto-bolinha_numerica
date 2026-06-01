@@ -27,8 +27,16 @@
             <button id="closeRoomMenuButton" class="room-modal__close" type="button">×</button>
         </div>
 
-        <div class="room-modal__section">
-            <button id="createRoomButton" class="room-button" type="button">Criar nova sala</button>
+        <div class="room-modal__section room-modal__form room-modal__private-card">
+            <label class="room-toggle">
+                <input id="privateRoomCheckbox" type="checkbox">
+                <span class="room-toggle__track"><span class="room-toggle__thumb"></span></span>
+                <span class="room-toggle__label">Sala privada</span>
+            </label>
+            <p class="room-modal__hint">Proteja a sala com senha e compartilhe o código apenas com quem você quiser.</p>
+            <label for="roomCreatePasswordInput" class="room-modal__input-label hidden">Senha da sala</label>
+            <input id="roomCreatePasswordInput" class="room-modal__input hidden" type="password" maxlength="20" autocomplete="new-password" placeholder="Senha para sala privada">
+            <button id="createRoomButton" class="room-button room-button--accent" type="button">Criar nova sala</button>
         </div>
 
         <div class="room-modal__divider"><span>ou</span></div>
@@ -36,7 +44,21 @@
         <div class="room-modal__section room-modal__form">
             <label for="roomCodeInput">Código da sala</label>
             <input id="roomCodeInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
+            <label for="roomJoinPasswordInput">Senha da sala</label>
+            <input id="roomJoinPasswordInput" type="password" maxlength="20" autocomplete="current-password" placeholder="Senha da sala privada">
             <button id="joinRoomButton" class="room-button" type="button">Entrar</button>
+        </div>
+
+        <div class="room-modal__section">
+            <div class="rooms-filter">
+                <span>Salas ativas:</span>
+                <div class="rooms-filter__badges">
+                    <button id="filterAllBtn" class="rooms-filter__badge rooms-filter__badge--active" data-filter="all" type="button">Todas</button>
+                    <button id="filterPublicBtn" class="rooms-filter__badge" data-filter="public" type="button">Públicas</button>
+                    <button id="filterPrivateBtn" class="rooms-filter__badge" data-filter="private" type="button">Privadas</button>
+                </div>
+            </div>
+            <ul id="roomsList" class="rooms-list"></ul>
         </div>
 
         <p id="roomStatus" class="room-status" aria-live="polite"></p>

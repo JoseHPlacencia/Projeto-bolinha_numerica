@@ -82,7 +82,9 @@ const rooms = Object.freeze({
     maxPlayersPerRoom: 10,
     roomCodeLength: 6,
     roomCodeCharset: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
-    roomCodeMaxGenerationAttempts: 1000
+    roomCodeMaxGenerationAttempts: 1000,
+    privateRoomPasswordMinLength: 4,
+    privateRoomPasswordMaxLength: 20
 });
 
 // Only values needed by the browser are exposed through /game-config.
@@ -94,7 +96,12 @@ const client = Object.freeze({
     screen,
     network,
     inputActionAngles,
-    inputBindings
+    inputBindings,
+    rooms: Object.freeze({
+        roomCodeLength: rooms.roomCodeLength,
+        privateRoomPasswordMinLength: rooms.privateRoomPasswordMinLength,
+        privateRoomPasswordMaxLength: rooms.privateRoomPasswordMaxLength
+    })
 });
 
 module.exports = Object.freeze({

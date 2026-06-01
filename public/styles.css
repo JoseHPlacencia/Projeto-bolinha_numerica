@@ -137,19 +137,22 @@ canvas {
     z-index: 5;
     min-width: 96px;
     padding: 10px 16px;
-    border: 1px solid rgba(255, 255, 255, 0.24);
+    border: 1px solid rgba(255, 255, 255, 0.32);
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(8, 12, 24, 0.92);
     color: #fff;
     font-size: 14px;
     cursor: pointer;
     pointer-events: auto;
-    transition: background 120ms ease, transform 120ms ease;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
+    backdrop-filter: blur(10px);
+    transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
 }
 
 .room-menu-button:hover {
-    background: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.12);
     transform: translateY(-1px);
+    box-shadow: 0 16px 28px rgba(0, 0, 0, 0.32);
 }
 
 .room-modal {
@@ -173,12 +176,13 @@ canvas {
 }
 
 .room-modal__content {
-    width: min(400px, calc(100vw - 32px));
+    width: min(420px, calc(100vw - 32px));
     padding: 28px;
-    border-radius: 18px;
-    background: rgba(12, 16, 24, 0.96);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+    border-radius: 24px;
+    background: linear-gradient(180deg, rgba(18, 22, 38, 0.98), rgba(10, 12, 24, 0.98));
+    border: 1px solid rgba(124, 58, 237, 0.16);
+    box-shadow: 0 28px 90px rgba(7, 9, 16, 0.45);
+    backdrop-filter: blur(12px);
 }
 
 .room-modal__header {
@@ -215,41 +219,150 @@ canvas {
 
 .room-modal__divider {
     text-align: center;
-    color: rgba(255, 255, 255, 0.48);
-    margin: 12px 0;
+    color: rgba(255, 255, 255, 0.55);
+    margin: 14px 0;
 }
 
 .room-modal__divider span {
     display: inline-block;
-    padding: 0 12px;
-    background: rgba(12, 16, 24, 0.96);
+    padding: 0 14px;
+    border-radius: 999px;
+    background: rgba(124, 58, 237, 0.14);
 }
 
-.room-modal__form input {
+.room-modal__form {
+    display: grid;
+    gap: 12px;
+}
+
+.room-modal__form input,
+.room-modal__form .room-button,
+.room-modal__form .room-modal__input-label {
     width: 100%;
-    padding: 12px 14px;
-    border-radius: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.04);
+}
+
+.room-modal__input {
+    width: 100%;
+    padding: 14px 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.05);
     color: #fff;
     font-size: 14px;
+    outline: none;
+}
+
+.room-modal__input:focus {
+    border-color: rgba(124, 58, 237, 0.9);
+    box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+
+.room-modal__input-label {
+    color: rgba(255, 255, 255, 0.74);
+    font-size: 13px;
+}
+
+.room-modal__hint {
+    color: rgba(205, 200, 255, 0.75);
+    font-size: 13px;
+    line-height: 1.4;
+    margin: 0;
+}
+
+.room-modal__private-card {
+    padding: 20px;
+    border-radius: 24px;
+    background: rgba(80, 56, 154, 0.12);
+    border: 1px solid rgba(124, 58, 237, 0.22);
+}
+
+.room-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.room-toggle input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.room-toggle__track {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.16);
+    transition: background 180ms ease;
+    flex-shrink: 0;
+}
+
+.room-toggle__thumb {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 180ms ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.24);
+}
+
+.room-toggle input:checked + .room-toggle__track {
+    background: rgba(124, 58, 237, 0.94);
+}
+
+.room-toggle input:checked + .room-toggle__track .room-toggle__thumb {
+    transform: translateX(20px);
 }
 
 .room-button,
 .room-link {
     padding: 12px 16px;
     border: none;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.1);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.08);
     color: #fff;
     cursor: pointer;
     font-size: 14px;
+    transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.room-button:hover,
+.room-link:hover {
+    transform: translateY(-1px);
+    background: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+}
+
+.room-button--accent {
+    background: rgba(124, 58, 237, 0.94);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.room-button--accent:hover {
+    background: rgba(138, 71, 248, 1);
+}
+
+.room-button--accent:hover {
+    background: rgba(124, 58, 237, 1);
 }
 
 .room-button:disabled,
 .room-link:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+.hidden {
+    display: none !important;
 }
 
 .room-info {
@@ -273,4 +386,86 @@ canvas {
 
 .room-status.is-error {
     color: #ff7f7f;
+}
+
+.rooms-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.rooms-filter__badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.rooms-filter__badge {
+    padding: 8px 14px;
+    border: 1px solid rgba(124, 58, 237, 0.24);
+    border-radius: 999px;
+    background: rgba(124, 58, 237, 0.08);
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 12px;
+    cursor: pointer;
+    transition: transform 150ms ease, background 150ms ease, border-color 150ms ease;
+}
+
+.rooms-filter__badge:hover {
+    background: rgba(124, 58, 237, 0.16);
+    border-color: rgba(124, 58, 237, 0.35);
+}
+
+.rooms-filter__badge--active {
+    background: rgba(124, 58, 237, 0.3);
+    color: #fff;
+    border-color: rgba(124, 58, 237, 0.5);
+    font-weight: 600;
+}
+
+.rooms-filter__badge:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.rooms-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rooms-list__item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: 16px;
+    background: rgba(65, 46, 135, 0.14);
+    border: 1px solid rgba(124, 58, 237, 0.16);
+}
+
+.rooms-list__title {
+    font-weight: 600;
+    color: rgba(255,255,255,0.9);
+}
+
+.rooms-list__lock {
+    margin-left: 8px;
+}
+
+.rooms-list__join {
+    padding: 8px 12px;
+}
+
+
+.rooms-list__empty {
+    text-align: center;
+    padding: 16px 8px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
 }
