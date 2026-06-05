@@ -3,6 +3,8 @@ import { clamp, lerp, lerpAngle } from "./sharedMath.js";
 const coordinatePrecision = 1000;
 const geometryEpsilon = 1e-7;
 const indexedBoundaryMaxDistanceSquared = 4;
+const captureAreaRegressionTolerance = 1;
+const captureAreaRegressionRatioTolerance = 0.001;
 
 export function createSnapshotInterpolator(networkConfig, options = {}) {
     const snapshots = [];
@@ -458,6 +460,17 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             });
         }
 
+        const validationResult = validateCaptureOperationResult(territory, ring, nextRing);
+
+        if (!validationResult.valid) {
+            return createCaptureOperationFailure(validationResult.reason, {
+                ...validationResult.details,
+                trailPointCount: trailPoints.length,
+                boundaryPathPointCount: boundaryPath.length,
+                boundaryPathSource: boundaryPathState.source
+            });
+        }
+
         entityCache.territories[id] = {
             ...territory,
             version: operation.version,
@@ -468,6 +481,72 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
         return {
             applied: true
+        };
+    }
+
+    function validateCaptureOperationResult(territory, previousRing, nextRing) {
+        const previousArea = Math.abs(calculateRingArea(previousRing));
+        const nextArea = Math.abs(calculateRingArea(nextRing));
+
+        if (!Number.isFinite(nextArea) || nextArea <= geometryEpsilon) {
+            return {
+                valid: false,
+                reason: "capture_result_invalid_area",
+                details: {
+                    nextArea
+                }
+            };
+        }
+
+        if (Number.isFinite(previousArea) && previousArea > geometryEpsilon) {
+            const tolerance = Math.max(
+                captureAreaRegressionTolerance,
+                previousArea * captureAreaRegressionRatioTolerance
+            );
+
+            if (nextArea + tolerance < previousArea) {
+                return {
+                    valid: false,
+                    reason: "capture_result_area_regressed",
+                    details: {
+                        nextArea,
+                        previousArea,
+                        tolerance
+                    }
+                };
+            }
+        }
+
+        const basePoint = getTerritoryBasePoint(territory);
+
+        if (basePoint && !isPointInsideOrOnRing(basePoint, nextRing)) {
+            return {
+                valid: false,
+                reason: "capture_result_lost_base",
+                details: {
+                    baseX: basePoint.x,
+                    baseY: basePoint.y,
+                    nextArea,
+                    previousArea
+                }
+            };
+        }
+
+        return {
+            valid: true
+        };
+    }
+
+    function getTerritoryBasePoint(territory) {
+        if (!territory
+            || !Number.isFinite(territory.baseX)
+            || !Number.isFinite(territory.baseY)) {
+            return null;
+        }
+
+        return {
+            x: territory.baseX,
+            y: territory.baseY
         };
     }
 
@@ -895,19 +974,39 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             return null;
         }
 
+        const fillChanged = leftFillPath !== trail.leftFillPath
+            || rightFillPath !== trail.rightFillPath;
+        const color = update.color || trail.color;
+
+        if (
+            leftSegments === trail.leftSegments
+            && rightSegments === trail.rightSegments
+            && !fillChanged
+            && color === trail.color
+        ) {
+            return trail;
+        }
+
         return {
             id: trail.id,
-            color: update.color || trail.color,
+            color,
             leftSegments,
             rightSegments,
             leftFillPath,
             rightFillPath,
-            fillPolygon: createTrailFillPolygon(leftFillPath, rightFillPath)
+            fillPolygon: fillChanged
+                ? createTrailFillPolygon(leftFillPath, rightFillPath)
+                : trail.fillPolygon
         };
     }
 
     function applySegmentPatches(segments, patches) {
-        const nextSegments = (segments || []).map(segment => segment.slice());
+        if (!Array.isArray(patches) || patches.length === 0) {
+            return segments || [];
+        }
+
+        const sourceSegments = segments || [];
+        const nextSegments = sourceSegments.slice();
 
         for (const patch of patches || []) {
             if (!Number.isInteger(patch.index) || patch.index < 0 || patch.index > nextSegments.length) {
@@ -915,33 +1014,34 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             }
 
             if (patch.index === nextSegments.length) {
-                nextSegments.push([]);
+                nextSegments.push(unpackPoints(patch.points));
+                continue;
             }
 
-            if (nextSegments[patch.index].length !== patch.start) {
+            const sourceSegment = sourceSegments[patch.index] || [];
+
+            if (sourceSegment.length !== patch.start) {
                 return null;
             }
 
-            nextSegments[patch.index].push(...unpackPoints(patch.points));
+            nextSegments[patch.index] = sourceSegment.concat(unpackPoints(patch.points));
         }
 
         return nextSegments;
     }
 
     function appendPathPoints(points, packedPoints, startIndex) {
-        const nextPoints = (points || []).slice();
-
         if (!Array.isArray(packedPoints) || packedPoints.length === 0) {
-            return nextPoints;
+            return points || [];
         }
 
-        if (nextPoints.length !== startIndex) {
+        const sourcePoints = points || [];
+
+        if (sourcePoints.length !== startIndex) {
             return null;
         }
 
-        nextPoints.push(...unpackPoints(packedPoints));
-
-        return nextPoints;
+        return sourcePoints.concat(unpackPoints(packedPoints));
     }
 
     function requestResync() {
@@ -1262,6 +1362,71 @@ function getDistanceSquared(first, second) {
     const y = first.y - second.y;
 
     return x * x + y * y;
+}
+
+function calculateRingArea(ring) {
+    const openRing = getOpenRing(ring);
+
+    if (openRing.length < 3) {
+        return 0;
+    }
+
+    let area = 0;
+
+    for (let index = 0; index < openRing.length; index++) {
+        const current = openRing[index];
+        const next = openRing[(index + 1) % openRing.length];
+
+        area += current.x * next.y - next.x * current.y;
+    }
+
+    return area / 2;
+}
+
+function isPointInsideOrOnRing(point, ring) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        return false;
+    }
+
+    const openRing = getOpenRing(ring);
+
+    if (openRing.length < 3) {
+        return false;
+    }
+
+    for (let index = 0; index < openRing.length; index++) {
+        if (getPointSegmentDistanceSquared(
+            point,
+            openRing[index],
+            openRing[(index + 1) % openRing.length]
+        ) <= indexedBoundaryMaxDistanceSquared) {
+            return true;
+        }
+    }
+
+    let inside = false;
+
+    for (let index = 0, previousIndex = openRing.length - 1;
+        index < openRing.length;
+        previousIndex = index++) {
+        const current = openRing[index];
+        const previous = openRing[previousIndex];
+        const crossesY = (current.y > point.y) !== (previous.y > point.y);
+
+        if (!crossesY) {
+            continue;
+        }
+
+        const intersectionX = (previous.x - current.x) * (point.y - current.y)
+            / (previous.y - current.y)
+            + current.x;
+
+        if (point.x < intersectionX) {
+            inside = !inside;
+        }
+    }
+
+    return inside;
 }
 
 function roundCoordinate(value) {

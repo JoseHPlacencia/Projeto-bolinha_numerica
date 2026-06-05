@@ -2,6 +2,10 @@ import {
     boundsOverlap,
     getRingsBounds
 } from "./viewportCulling.js";
+import {
+    clipPolygonRingsToBounds,
+    clipPolylineToBounds
+} from "./viewportClipping.js";
 
 const territoryRenderCache = new WeakMap();
 
@@ -16,11 +20,11 @@ export function drawTerritoryLayer(context, state, gameConfig, viewportBounds) {
     );
 
     for (const shape of visibleShapes) {
-        drawPolygonFill(context, shape, gameConfig.territory.fillAlpha);
+        drawPolygonFill(context, shape, gameConfig.territory.fillAlpha, viewportBounds);
     }
 
     for (const shape of visibleShapes) {
-        drawTerritoryBorder(context, shape, gameConfig);
+        drawTerritoryBorder(context, shape, gameConfig, viewportBounds);
     }
 }
 
@@ -103,8 +107,12 @@ function expandBounds(bounds, margin) {
     };
 }
 
-function drawPolygonFill(context, polygon, fillAlpha) {
-    if ((!polygon.fillPath && !polygon.rings) || !polygon.color) {
+function drawPolygonFill(context, polygon, fillAlpha, viewportBounds) {
+    const rings = viewportBounds
+        ? clipPolygonRingsToBounds(polygon.rings, viewportBounds)
+        : polygon.rings;
+
+    if (rings.length === 0 || !polygon.color) {
         return;
     }
 
@@ -112,12 +120,20 @@ function drawPolygonFill(context, polygon, fillAlpha) {
     context.globalAlpha = fillAlpha;
     context.fillStyle = polygon.color;
 
-    if (polygon.fillPath) {
+    if (!viewportBounds && polygon.fillPath) {
         context.fill(polygon.fillPath, "evenodd");
     } else {
+        const path = createPath(rings);
+
+        if (path) {
+            context.fill(path, "evenodd");
+            context.restore();
+            return;
+        }
+
         context.beginPath();
 
-        for (const ring of polygon.rings) {
+        for (const ring of rings) {
             traceRing(context, ring);
         }
 
@@ -127,31 +143,50 @@ function drawPolygonFill(context, polygon, fillAlpha) {
     context.restore();
 }
 
-function drawTerritoryBorder(context, polygon, gameConfig) {
+function drawTerritoryBorder(context, polygon, gameConfig, viewportBounds) {
     if ((!polygon.borderPath && !polygon.borderRings) || !polygon.color) {
+        return;
+    }
+
+    const lineWidth = gameConfig.territory.baseBorderWidth;
+    const borderSegments = viewportBounds
+        ? clipBorderRingsToViewport(polygon.borderRings, viewportBounds, lineWidth)
+        : polygon.borderRings;
+
+    if (viewportBounds && borderSegments.length === 0) {
         return;
     }
 
     context.save();
     context.globalAlpha = 1;
-    context.lineWidth = gameConfig.territory.baseBorderWidth;
+    context.lineWidth = lineWidth;
     context.strokeStyle = polygon.color;
     context.lineJoin = "round";
     context.lineCap = "round";
 
-    if (polygon.borderPath) {
+    if (!viewportBounds && polygon.borderPath) {
         context.stroke(polygon.borderPath);
     } else {
-        context.beginPath();
+        const path = createPolylinePath(borderSegments);
 
-        for (const ring of polygon.borderRings) {
-            traceRing(context, ring);
+        if (path) {
+            context.stroke(path);
+            context.restore();
+            return;
         }
 
-        context.stroke();
+        strokePolylineSegments(context, borderSegments);
     }
 
     context.restore();
+}
+
+function clipBorderRingsToViewport(rings, viewportBounds, lineWidth) {
+    const clipBounds = expandBounds(viewportBounds, lineWidth);
+
+    return (rings || [])
+        .flatMap(ring => clipPolylineToBounds(ring, clipBounds, { closed: true }))
+        .filter(segment => segment.length >= 2);
 }
 
 function createInsetRings(rings, inset) {
@@ -251,6 +286,20 @@ function createPath(rings) {
     return path;
 }
 
+function createPolylinePath(segments) {
+    if (typeof Path2D !== "function" || segments.length === 0) {
+        return null;
+    }
+
+    const path = new Path2D();
+
+    for (const segment of segments) {
+        tracePolyline(path, segment);
+    }
+
+    return path;
+}
+
 function traceRing(path, ring) {
     const points = getValidPoints(ring);
 
@@ -265,6 +314,28 @@ function traceRing(path, ring) {
     }
 
     path.closePath();
+}
+
+function tracePolyline(path, points) {
+    if (points.length < 2) {
+        return;
+    }
+
+    path.moveTo(points[0].x, points[0].y);
+
+    for (let index = 1; index < points.length; index++) {
+        path.lineTo(points[index].x, points[index].y);
+    }
+}
+
+function strokePolylineSegments(context, segments) {
+    context.beginPath();
+
+    for (const segment of segments) {
+        tracePolyline(context, segment);
+    }
+
+    context.stroke();
 }
 
 function getRingsPointCount(rings) {

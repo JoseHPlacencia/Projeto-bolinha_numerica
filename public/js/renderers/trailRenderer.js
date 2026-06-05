@@ -3,8 +3,13 @@ import {
     getPointsBounds,
     getRingsBounds
 } from "./viewportCulling.js";
+import {
+    clipPolygonRingsToBounds,
+    clipPolylineToBounds
+} from "./viewportClipping.js";
 
 const trailRenderCache = new WeakMap();
+const trailSegmentRenderCache = new WeakMap();
 
 export function drawTrailLayer(context, state, gameConfig, viewportBounds) {
     const trails = state.trails || {};
@@ -40,16 +45,32 @@ function drawTrailFill(context, polygon, color, fillAlpha, viewportBounds) {
         return;
     }
 
+    const rings = viewportBounds
+        ? clipPolygonRingsToBounds(polygon.rings, viewportBounds)
+        : polygon.rings;
+
+    if (rings.length === 0) {
+        return;
+    }
+
     context.save();
     context.globalAlpha = fillAlpha;
     context.fillStyle = color;
 
-    if (polygon.path) {
+    if (!viewportBounds && polygon.path) {
         context.fill(polygon.path, "evenodd");
     } else {
+        const path = createFillPath(rings);
+
+        if (path) {
+            context.fill(path, "evenodd");
+            context.restore();
+            return;
+        }
+
         context.beginPath();
 
-        for (const ring of polygon.rings) {
+        for (const ring of rings) {
             traceRing(context, ring);
         }
 
@@ -64,20 +85,51 @@ function drawTrailEdges(context, edge, color, lineWidth, viewportBounds) {
         return;
     }
 
+    const segments = viewportBounds
+        ? clipTrailSegmentsToViewport(edge.segments, viewportBounds, lineWidth)
+        : edge.segments.map(segment => segment.points);
+
+    if (segments.length === 0) {
+        return;
+    }
+
     context.save();
     context.globalAlpha = 1;
     context.strokeStyle = color;
     context.lineWidth = lineWidth;
 
-    if (edge.path) {
+    if (!viewportBounds && edge.path) {
         context.stroke(edge.path);
     } else {
-        for (const segment of edge.segments) {
+        const path = createSmoothSegmentsPath(segments);
+
+        if (path) {
+            context.stroke(path);
+            context.restore();
+            return;
+        }
+
+        for (const segment of segments) {
             strokeSmoothPath(context, segment);
         }
     }
 
     context.restore();
+}
+
+function clipTrailSegmentsToViewport(segments, viewportBounds, lineWidth) {
+    const clipBounds = expandBounds(viewportBounds, lineWidth);
+    const clippedSegments = [];
+
+    for (const segment of segments) {
+        if (!boundsOverlap(expandBounds(segment.bounds, lineWidth), viewportBounds)) {
+            continue;
+        }
+
+        clippedSegments.push(...clipPolylineToBounds(segment.points, clipBounds));
+    }
+
+    return clippedSegments.filter(segment => segment.length >= 2);
 }
 
 function strokeSmoothPath(context, points) {
@@ -141,23 +193,46 @@ function prepareTrailRenderData(trail) {
 }
 
 function prepareTrailEdges(segments) {
-    const validSegments = getValidSegments(segments);
+    const validSegments = getPreparedSegments(segments);
 
     return {
-        bounds: getSegmentsBounds(validSegments),
-        path: createSmoothSegmentsPath(validSegments),
+        bounds: getPreparedSegmentsBounds(validSegments),
+        path: createSmoothSegmentsPath(validSegments.map(segment => segment.points)),
         segments: validSegments
     };
 }
 
-function getValidSegments(segments) {
+function getPreparedSegments(segments) {
     if (!Array.isArray(segments)) {
         return [];
     }
 
     return segments
-        .map(getValidPoints)
-        .filter(segment => segment.length >= 2);
+        .map(prepareTrailSegment)
+        .filter(Boolean);
+}
+
+function prepareTrailSegment(segment) {
+    const cached = trailSegmentRenderCache.get(segment);
+
+    if (cached) {
+        return cached;
+    }
+
+    const points = getValidPoints(segment);
+
+    if (points.length < 2) {
+        return null;
+    }
+
+    const prepared = {
+        bounds: getPointsBounds(points),
+        points
+    };
+
+    trailSegmentRenderCache.set(segment, prepared);
+
+    return prepared;
 }
 
 function prepareTrailFill(polygon) {
@@ -186,11 +261,11 @@ function getValidPoints(points) {
     ));
 }
 
-function getSegmentsBounds(segments) {
+function getPreparedSegmentsBounds(segments) {
     let bounds = null;
 
     for (const segment of segments || []) {
-        bounds = mergeBounds(bounds, getPointsBounds(segment));
+        bounds = mergeBounds(bounds, segment.bounds);
     }
 
     return bounds;

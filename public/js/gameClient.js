@@ -5,6 +5,8 @@ import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createWorldRenderer } from "./worldRenderer.js";
 
+const WORKER_MAIN_UPDATE_INTERVAL_MS = 1000 / 15;
+
 export function startClient(gameConfig) {
     const socket = io({
         transports: gameConfig.socket.transports
@@ -22,8 +24,10 @@ export function startClient(gameConfig) {
     const debugLevel = getDebugLevel();
     const hud = createHud({ debugLevel });
     const frameMonitor = createFrameMonitor();
+    const isWorkerRenderer = renderer.getDebugState().mode === "worker";
     let myId = null;
     let lastViewportSentAt = 0;
+    let lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
     window.addEventListener("resize", resizeCanvases);
@@ -53,7 +57,13 @@ export function startClient(gameConfig) {
 
     function render() {
         requestAnimationFrame(render);
-        frameMonitor.recordFrame(performance.now());
+        const now = performance.now();
+
+        frameMonitor.recordFrame(now);
+
+        if (isWorkerRenderer && !shouldUpdateWorkerMainViews(now)) {
+            return;
+        }
 
         const state = snapshots.getRenderState();
         const currentPlayer = state && myId ? state.players[myId] : null;
@@ -73,8 +83,20 @@ export function startClient(gameConfig) {
             return;
         }
 
-        renderer.renderWorld(state, myId);
+        if (!isWorkerRenderer) {
+            renderer.renderWorld(state, myId);
+        }
+
         minimap.render(state, myId);
+    }
+
+    function shouldUpdateWorkerMainViews(now) {
+        if (now - lastWorkerMainUpdateAt < WORKER_MAIN_UPDATE_INTERVAL_MS) {
+            return false;
+        }
+
+        lastWorkerMainUpdateAt = now;
+        return true;
     }
 
     function resizeCanvases() {
