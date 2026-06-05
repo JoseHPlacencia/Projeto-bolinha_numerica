@@ -5,55 +5,14 @@ const {
 } = require("../state/territories");
 const {
     calculatePolygonArea,
-<<<<<<< HEAD
-    createPolygonFromPoints,
-    findClosestPolygonBoundaryContact,
-    unionPolygons,
-    isPointInPolygon
-} = require("../utils/geometry");
-const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
-const numberSystem = require("./numberSystem");
-=======
     createKnownSimplePolygonFromPoints,
     findClosestPolygonBoundaryContact
 } = require("../utils/geometry");
 const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
->>>>>>> 70aca42 (teste)
 
 const geometryEpsilon = 1e-7;
 
 function captureClosedTrail(player, territories, players) {
-<<<<<<< HEAD
-    const capturedPolygon = createExternalTrailCapturePolygon(player, territories);
-
-    if (!capturedPolygon) {
-        return null;
-    }
-
-    const changedPlayerIds = applyCapturedPolygon(territories, player.id, capturedPolygon);
-
-    relocatePlayersAfterTerritoryChange(players, territories, changedPlayerIds);
-
-    // ── Captura de números dentro do polígono fechado ──
-    const idsCapturados = [];
-    for (const num of numberSystem.getNumeros().values()) {
-        if (isPointInPolygon(capturedPolygon, num.x, num.y)) {
-            idsCapturados.push(num.id);
-        }
-    }
-    if (idsCapturados.length > 0) {
-        const resultados = numberSystem.processarCaptura(idsCapturados);
-        if (!player.capturas) player.capturas = [];
-        for (const r of resultados) {
-            player.capturas.push(r);
-        }
-    }
-
-    return capturedPolygon;
-}
-
-function createExternalTrailCapturePolygon(player, territories) {
-=======
     const capture = createExternalTrailCapture(player, territories);
 
     if (!capture) {
@@ -83,7 +42,6 @@ function createExternalTrailCapturePolygon(player, territories) {
 }
 
 function createExternalTrailCapture(player, territories) {
->>>>>>> 70aca42 (teste)
     if (!hasAnySideTrailSegment(player)) {
         return null;
     }
@@ -100,11 +58,7 @@ function createExternalTrailCapture(player, territories) {
         return null;
     }
 
-<<<<<<< HEAD
-    return bestCandidate.polygon;
-=======
     return bestCandidate;
->>>>>>> 70aca42 (teste)
 }
 
 function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) {
@@ -112,11 +66,7 @@ function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) 
     let bestCandidate = null;
 
     for (const candidate of candidates) {
-<<<<<<< HEAD
-        const rankedCandidate = rankCaptureCandidate(currentTerritory, currentArea, candidate);
-=======
         const rankedCandidate = rankCaptureCandidate(currentArea, candidate);
->>>>>>> 70aca42 (teste)
 
         if (rankedCandidate.addedArea < minAddedArea) {
             continue;
@@ -130,46 +80,17 @@ function selectBestCaptureCandidate(currentTerritory, candidates, minAddedArea) 
     return bestCandidate;
 }
 
-<<<<<<< HEAD
-function rankCaptureCandidate(currentTerritory, currentArea, candidate) {
-    const union = unionPolygons(currentTerritory, candidate.polygon);
-    const candidateArea = calculatePolygonArea(candidate.polygon);
-    const addedArea = calculatePolygonArea(union) - currentArea;
-    const overlapArea = Math.max(0, candidateArea - addedArea);
-=======
 function rankCaptureCandidate(currentArea, candidate) {
     const addedArea = candidate.area - currentArea;
->>>>>>> 70aca42 (teste)
 
     return {
         ...candidate,
         addedArea,
-<<<<<<< HEAD
-        overlapArea,
-        hasLowOverlap: hasLowTerritoryOverlap(candidateArea, overlapArea)
-    };
-}
-
-function hasLowTerritoryOverlap(candidateArea, overlapArea) {
-    if (candidateArea <= Number.EPSILON) {
-        return false;
-    }
-
-    return overlapArea <= Math.max(1, candidateArea * 0.02);
-}
-
-function isBetterCaptureCandidate(candidate, bestCandidate) {
-    if (candidate.hasLowOverlap !== bestCandidate.hasLowOverlap) {
-        return candidate.hasLowOverlap;
-    }
-
-=======
         overlapArea: currentArea
     };
 }
 
 function isBetterCaptureCandidate(candidate, bestCandidate) {
->>>>>>> 70aca42 (teste)
     if (Math.abs(candidate.addedArea - bestCandidate.addedArea) > geometryEpsilon) {
         return candidate.addedArea > bestCandidate.addedArea;
     }
@@ -180,27 +101,16 @@ function isBetterCaptureCandidate(candidate, bestCandidate) {
 function createTrailCaptureCandidates(player, territoryPolygon) {
     const candidates = [];
 
-<<<<<<< HEAD
-    for (const segment of getTrailSegments(player)) {
-        candidates.push(...createTrailCaptureCandidatesFromSegment(segment, territoryPolygon));
-=======
     for (const trail of getTrailSegments(player)) {
         candidates.push(...createTrailCaptureCandidatesFromSegment(trail, territoryPolygon));
->>>>>>> 70aca42 (teste)
     }
 
     return candidates;
 }
 
-<<<<<<< HEAD
-function createTrailCaptureCandidatesFromSegment(segment, territoryPolygon) {
-    const candidates = [];
-    const finiteSidePoints = getFinitePoints(segment);
-=======
 function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
     const candidates = [];
     const finiteSidePoints = getFinitePoints(trail.points);
->>>>>>> 70aca42 (teste)
 
     if (finiteSidePoints.length < 2) {
         return candidates;
@@ -221,19 +131,12 @@ function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
     const boundaryPaths = createBoundaryPaths(territoryPolygon[0], endContact, startContact);
     let bestCandidate = null;
 
-<<<<<<< HEAD
-    for (const boundaryPath of boundaryPaths) {
-=======
     for (let boundaryPathIndex = 0; boundaryPathIndex < boundaryPaths.length; boundaryPathIndex++) {
         const boundaryPath = boundaryPaths[boundaryPathIndex];
->>>>>>> 70aca42 (teste)
         const points = createTrailBoundaryCapturePoints(clippedSidePoints, boundaryPath);
         const candidate = createTrailCandidateFromPoints(points);
 
         if (candidate && isLargerAreaCandidate(candidate, bestCandidate)) {
-<<<<<<< HEAD
-            bestCandidate = candidate;
-=======
             bestCandidate = {
                 ...candidate,
                 operation: createCaptureOperation(
@@ -246,7 +149,6 @@ function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
                     candidate.polygon
                 )
             };
->>>>>>> 70aca42 (teste)
         }
     }
 
@@ -259,10 +161,6 @@ function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
 
 function getTrailSegments(player) {
     return [
-<<<<<<< HEAD
-        ...getVisibleSegments(player.trailLeftSegments),
-        ...getVisibleSegments(player.trailRightSegments)
-=======
         ...getVisibleSegments(player.trailLeftSegments).map((points, index) => ({
             side: "left",
             index,
@@ -273,7 +171,6 @@ function getTrailSegments(player) {
             index,
             points
         }))
->>>>>>> 70aca42 (teste)
     ];
 }
 
@@ -311,12 +208,7 @@ function createTrailCandidateFromPoints(points) {
         return null;
     }
 
-<<<<<<< HEAD
-    const polygon = createPolygonFromPoints(points);
-
-=======
     const polygon = createKnownSimplePolygonFromPoints(points);
->>>>>>> 70aca42 (teste)
     const area = calculatePolygonArea(polygon);
 
     if (area <= 0) {
@@ -326,8 +218,6 @@ function createTrailCandidateFromPoints(points) {
     return { polygon, area };
 }
 
-<<<<<<< HEAD
-=======
 function createCaptureOperation(
     trail,
     clippedSidePoints,
@@ -424,7 +314,6 @@ function arePolygonAreasClose(first, second) {
     return Math.abs(firstArea - secondArea) <= Math.max(1, secondArea * 0.001);
 }
 
->>>>>>> 70aca42 (teste)
 function createBoundaryPaths(ring, startContact, endContact) {
     const openRing = getOpenRing(ring);
 
@@ -517,8 +406,6 @@ function coordinatesToPoint(coordinates) {
     };
 }
 
-<<<<<<< HEAD
-=======
 function clonePoint(point) {
     return {
         x: point.x,
@@ -526,7 +413,6 @@ function clonePoint(point) {
     };
 }
 
->>>>>>> 70aca42 (teste)
 function arePointsEqual(first, second) {
     return Math.abs(first.x - second.x) <= geometryEpsilon
         && Math.abs(first.y - second.y) <= geometryEpsilon;

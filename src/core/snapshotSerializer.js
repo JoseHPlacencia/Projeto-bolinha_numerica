@@ -1,25 +1,3 @@
-<<<<<<< HEAD
-const { getServerTime } = require("../utils/time");
-const { serializeTerritories } = require("../state/territories");
-const { serializeTrails } = require("../systems/trailSystem");
-const numberSystem = require("../systems/numberSystem");
-
-function createSnapshot(players, territories) {
-    return {
-        time: getServerTime(),
-        players: serializePlayers(players),
-        territories: serializeTerritories(territories, players),
-        trails: serializeTrails(players, territories),
-        numbers: numberSystem.serialize()
-    };
-}
-
-function serializePlayers(players) {
-    const serializedPlayers = {};
-
-    for (const player of players.values()) {
-        serializedPlayers[player.id] = player.serialize();
-=======
 const { serializeNumbers } = require("../systems/numberSystem");
 const config = require("../config/gameConfig");
 const { getServerTime } = require("../utils/time");
@@ -101,18 +79,11 @@ function serializePlayerPositions(players, playerIds) {
             packCoordinate(player.y),
             packAngle(player.angle)
         ];
->>>>>>> 70aca42 (teste)
     }
 
     return serializedPlayers;
 }
 
-<<<<<<< HEAD
-module.exports = {
-    createSnapshot,
-    serializePlayers
-};
-=======
 function serializeChangedPlayerInfo(players, playerIds, clientState, now) {
     const serializedInfo = {};
 
@@ -894,4 +865,3 @@ function cloneTrailState(state) {
         rightSegmentLengths: [...(state.rightSegmentLengths || [])]
     };
 }
->>>>>>> 70aca42 (teste)

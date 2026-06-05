@@ -1,10 +1,7 @@
 export function createHud({ debugLevel }) {
     const debugPanel = document.getElementById("debugPanel");
     const debugFps = document.getElementById("debugFps");
-<<<<<<< HEAD
-=======
     const debugRenderFps = document.getElementById("debugRenderFps");
->>>>>>> 70aca42 (teste)
     const debugBuffer = document.getElementById("debugBuffer");
     const debugCanvas = document.getElementById("debugCanvas");
     const debugFrame = document.getElementById("debugFrame");
@@ -46,10 +43,7 @@ export function createHud({ debugLevel }) {
 
         lastUpdatedAt = now;
         setText(debugFps, frameStats.fps);
-<<<<<<< HEAD
-=======
         setText(debugRenderFps, getRenderFps(frameStats, rendererStats));
->>>>>>> 70aca42 (teste)
         setText(debugFrame, `${frameStats.frameMs.toFixed(1)}ms`);
         setText(debugBuffer, `${Math.round(snapshotStats.bufferMs)}ms`);
         setText(debugSnapshots, snapshotStats.snapshotCount);
@@ -58,8 +52,6 @@ export function createHud({ debugLevel }) {
         updateMovementDebug(playerDebug);
     }
 
-<<<<<<< HEAD
-=======
     function getRenderFps(frameStats, rendererStats) {
         if (rendererStats && rendererStats.mode === "worker") {
             return Number.isFinite(rendererStats.workerFps) ? rendererStats.workerFps : 0;
@@ -68,7 +60,6 @@ export function createHud({ debugLevel }) {
         return frameStats.fps;
     }
 
->>>>>>> 70aca42 (teste)
     function updateDebugLevelRows() {
         const debugLevelRows = debugPanel.querySelectorAll("[data-debug-level]");
 

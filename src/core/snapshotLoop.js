@@ -1,13 +1,9 @@
 const config = require("../config/gameConfig");
-<<<<<<< HEAD
-const { createSnapshot } = require("./snapshotSerializer");
-=======
 const {
     cloneClientSnapshotState,
     createClientSnapshotState,
     createSnapshot
 } = require("./snapshotSerializer");
->>>>>>> 70aca42 (teste)
 
 function startSnapshotLoop(io, players, territories) {
     const intervalMs = 1000 / config.loop.snapshotRate;
@@ -18,13 +14,6 @@ function startSnapshotLoop(io, players, territories) {
 }
 
 function sendSnapshot(io, players, territories) {
-<<<<<<< HEAD
-    io.volatile.emit("gameState", createSnapshot(players, territories));
-}
-
-module.exports = startSnapshotLoop;
-module.exports.sendSnapshot = sendSnapshot;
-=======
     for (const socket of io.sockets.sockets.values()) {
         if (!players.has(socket.id)) {
             continue;
@@ -256,4 +245,3 @@ module.exports.invalidateSnapshotCache = invalidateSnapshotCache;
 module.exports.queueReliableSnapshot = queueReliableSnapshot;
 module.exports.sendSnapshot = sendSnapshot;
 module.exports.shouldSendReliably = shouldSendReliably;
->>>>>>> 70aca42 (teste)

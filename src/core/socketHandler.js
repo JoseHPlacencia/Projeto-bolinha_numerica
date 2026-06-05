@@ -4,10 +4,7 @@ const {
     deletePlayerTerritory,
     initializePlayerTerritory
 } = require("../state/territories");
-<<<<<<< HEAD
-=======
 const { invalidateSnapshotCache } = require("./snapshotLoop");
->>>>>>> 70aca42 (teste)
 const { createRateLimiter } = require("../utils/rateLimiter");
 
 function registerSocket(io, players, territories) {
@@ -25,10 +22,7 @@ function registerSocket(io, players, territories) {
 
 function registerInputEvents(socket, players) {
     const inputGuard = createInputGuard(socket);
-<<<<<<< HEAD
-=======
     const viewportGuard = createViewportGuard(socket);
->>>>>>> 70aca42 (teste)
 
     socket.on("inputDown", rawAction => {
         if (!inputGuard.canHandleInput()) {
@@ -61,12 +55,6 @@ function registerInputEvents(socket, players) {
 
         handleInputDirectionEnd(players, socket.id);
     });
-<<<<<<< HEAD
-}
-
-function createInputGuard(socket) {
-    const rateLimiter = createRateLimiter(config.security.inputRateLimit);
-=======
 
     socket.on("viewport", rawViewport => {
         if (!viewportGuard.canHandleInput()) {
@@ -103,7 +91,6 @@ function createViewportGuard(socket) {
 
 function createSocketRateGuard(socket, rateLimitConfig) {
     const rateLimiter = createRateLimiter(rateLimitConfig);
->>>>>>> 70aca42 (teste)
     let violations = 0;
 
     return {
@@ -117,11 +104,7 @@ function createSocketRateGuard(socket, rateLimitConfig) {
 
         violations++;
 
-<<<<<<< HEAD
-        if (violations >= config.security.inputRateLimit.maxViolations) {
-=======
         if (violations >= rateLimitConfig.maxViolations) {
->>>>>>> 70aca42 (teste)
             socket.disconnect(true);
         }
 
@@ -181,8 +164,6 @@ function handleInputDirectionEnd(players, playerId) {
     }
 }
 
-<<<<<<< HEAD
-=======
 function handleViewport(players, playerId, rawViewport) {
     const viewport = normalizeViewport(rawViewport);
     const player = players.get(playerId);
@@ -192,7 +173,6 @@ function handleViewport(players, playerId, rawViewport) {
     }
 }
 
->>>>>>> 70aca42 (teste)
 function normalizeInputAction(action) {
     return String(action || "").toLowerCase();
 }
@@ -246,8 +226,6 @@ function isInputSourceValid(source) {
         || source === "gamepad-dpad";
 }
 
-<<<<<<< HEAD
-=======
 function normalizeViewport(rawViewport) {
     if (!rawViewport || typeof rawViewport !== "object") {
         return null;
@@ -276,5 +254,4 @@ function clampNumber(value, min, max) {
     return Math.min(Math.max(value, min), max);
 }
 
->>>>>>> 70aca42 (teste)
 module.exports = registerSocket;

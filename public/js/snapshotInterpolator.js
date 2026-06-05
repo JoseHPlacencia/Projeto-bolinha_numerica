@@ -1,9 +1,5 @@
 import { clamp, lerp, lerpAngle } from "./sharedMath.js";
 
-<<<<<<< HEAD
-export function createSnapshotInterpolator(networkConfig) {
-    const snapshots = [];
-=======
 const coordinatePrecision = 1000;
 const geometryEpsilon = 1e-7;
 const indexedBoundaryMaxDistanceSquared = 4;
@@ -16,15 +12,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         territoryPoints: {},
         trails: {}
     };
->>>>>>> 70aca42 (teste)
     const networkState = {
         bufferMs: networkConfig.initialBufferMs,
         serverOffset: 0,
         lastSnapshotReceivedAt: performance.now(),
-<<<<<<< HEAD
-        deltas: []
-    };
-=======
         deltas: [],
         lastSnapshotDeltaMs: 0,
         averageSnapshotDeltaMs: 0,
@@ -39,7 +30,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     const suppressedCaptureOperationResyncIds = new Set();
     let hasServerClockSync = false;
     let lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
->>>>>>> 70aca42 (teste)
 
     return {
         getDebugState,
@@ -47,12 +37,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         processSnapshot
     };
 
-<<<<<<< HEAD
-    function processSnapshot(snapshot) {
-        updateAdaptiveBuffer(performance.now());
-        syncServerClock(snapshot.time);
-        saveSnapshot(snapshot);
-=======
     function processSnapshot(rawSnapshot) {
         const now = performance.now();
         const applyResult = createApplyResult();
@@ -63,7 +47,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         saveSnapshot(snapshot);
 
         return applyResult;
->>>>>>> 70aca42 (teste)
     }
 
     function getRenderState() {
@@ -81,23 +64,16 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const interval = next.time - previous.time || 1;
         const amount = clamp((renderTime - previous.time) / interval, 0, 1);
 
-<<<<<<< HEAD
-        return createRenderState(next, interpolatePlayers(previous, next, amount));
-=======
         return createInterpolatedRenderState(
             previous,
             next,
             interpolatePlayers(previous, next, amount)
         );
->>>>>>> 70aca42 (teste)
     }
 
     function getDebugState() {
         return {
             bufferMs: networkState.bufferMs,
-<<<<<<< HEAD
-            snapshotCount: snapshots.length
-=======
             serverOffsetMs: networkState.serverOffset,
             snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
             averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
@@ -195,7 +171,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             players: snapshot.players || {},
             territories: snapshot.territories || {},
             trails: snapshot.trails || {}
->>>>>>> 70aca42 (teste)
         };
     }
 
@@ -212,12 +187,9 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const jitter = calculateStandardDeviation(networkState.deltas, average);
         const nextBuffer = average + jitter * networkConfig.jitterMultiplier;
 
-<<<<<<< HEAD
-=======
         networkState.lastSnapshotDeltaMs = delta;
         networkState.averageSnapshotDeltaMs = average;
         networkState.jitterMs = jitter;
->>>>>>> 70aca42 (teste)
         networkState.bufferMs = clamp(
             nextBuffer,
             networkConfig.minBufferMs,
@@ -227,8 +199,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     function syncServerClock(serverTime) {
         const nextOffset = Date.now() - serverTime;
-<<<<<<< HEAD
-=======
 
         if (!hasServerClockSync) {
             networkState.serverOffset = nextOffset;
@@ -236,22 +206,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             return;
         }
 
->>>>>>> 70aca42 (teste)
         networkState.serverOffset = networkState.serverOffset * 0.9 + nextOffset * 0.1;
     }
 
     function saveSnapshot(snapshot) {
-<<<<<<< HEAD
-        snapshots.push({
-            time: snapshot.time,
-            players: structuredClone(snapshot.players),
-            territories: structuredClone(snapshot.territories || {}),
-            trails: structuredClone(snapshot.trails || {}),
-            numbers: structuredClone(snapshot.numbers || null)
-        });
-=======
         snapshots.push(snapshot);
->>>>>>> 70aca42 (teste)
 
         while (snapshots.length > networkConfig.maxSnapshots) {
             snapshots.shift();
@@ -314,11 +273,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             players,
             territories: snapshot.territories,
             trails: snapshot.trails,
-<<<<<<< HEAD
-            numbers: snapshot.numbers
-        };
-    }
-=======
             numbers: snapshot.numbers || null
         };
     }
@@ -1315,7 +1269,6 @@ function getDistanceSquared(first, second) {
 
 function roundCoordinate(value) {
     return Math.round(value * coordinatePrecision) / coordinatePrecision;
->>>>>>> 70aca42 (teste)
 }
 
 function calculateAverage(values) {

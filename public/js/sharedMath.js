@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-=======
 import "/shared/math.js";
 
->>>>>>> 70aca42 (teste)
 const math = globalThis.GameMath;
 const requiredUtilities = ["clamp", "lerp", "lerpAngle"];
 

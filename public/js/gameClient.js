@@ -1,18 +1,10 @@
 import { createFrameMonitor, getDebugLevel } from "./debug.js";
 import { createHud } from "./hud.js";
-<<<<<<< HEAD
-import { createNumberHud } from "./numberHud.js";
-import { createInputControls } from "./input.js";
-import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
-import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
-import { createCanvasRenderer } from "./renderer.js";
-=======
 import { createInputControls } from "./input.js";
 import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createNumberHud } from "./numberHud.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createWorldRenderer } from "./worldRenderer.js";
->>>>>>> 70aca42 (teste)
 
 export function startClient(gameConfig) {
     const socket = io({
@@ -20,11 +12,6 @@ export function startClient(gameConfig) {
     });
     const canvas = document.getElementById("gameCanvas");
     const minimapCanvas = document.getElementById("minimapCanvas");
-<<<<<<< HEAD
-    const renderer = createCanvasRenderer(canvas, gameConfig);
-    const minimap = createMinimapRenderer(minimapCanvas, gameConfig);
-    const snapshots = createSnapshotInterpolator(gameConfig.network);
-=======
     const renderer = createWorldRenderer(canvas, gameConfig, {
         onSnapshotCacheInvalid: invalidations => socket.emit("snapshotCacheInvalid", invalidations),
         onSnapshotResync: () => socket.emit("snapshotResync")
@@ -33,28 +20,19 @@ export function startClient(gameConfig) {
     const snapshots = createSnapshotInterpolator(gameConfig.network, {
         onResyncNeeded: () => socket.emit("snapshotResync")
     });
->>>>>>> 70aca42 (teste)
     const debugLevel = getDebugLevel();
     const hud = createHud({ debugLevel });
     const numberHud = createNumberHud();
     const frameMonitor = createFrameMonitor();
     let myId = null;
-<<<<<<< HEAD
-=======
     let lastViewportSentAt = 0;
     let lastThemeData = null;
->>>>>>> 70aca42 (teste)
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
     window.addEventListener("resize", resizeCanvases);
 
     socket.on("connect", () => {
         myId = socket.id;
-<<<<<<< HEAD
-    });
-
-    socket.on("gameState", snapshots.processSnapshot);
-=======
         renderer.setPlayerId(myId);
         sendViewportState(true);
     });
@@ -83,7 +61,6 @@ export function startClient(gameConfig) {
             socket.emit("snapshotCacheInvalid", applyResult.invalidations);
         }
     });
->>>>>>> 70aca42 (teste)
 
     resizeCanvases();
     render();
@@ -105,11 +82,6 @@ export function startClient(gameConfig) {
             playerDebug: currentPlayer && currentPlayer.debug
         });
 
-<<<<<<< HEAD
-        numberHud.update(state, myId);
-
-=======
->>>>>>> 70aca42 (teste)
         if (!state || !myId) {
             minimap.clear();
             return;
@@ -122,8 +94,6 @@ export function startClient(gameConfig) {
     function resizeCanvases() {
         renderer.resizeCanvas();
         minimap.resizeCanvas();
-<<<<<<< HEAD
-=======
         sendViewportState(true);
     }
 
@@ -150,6 +120,5 @@ export function startClient(gameConfig) {
                     trails: []
                 }
         };
->>>>>>> 70aca42 (teste)
     }
 }

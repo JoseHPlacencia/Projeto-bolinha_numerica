@@ -5,8 +5,6 @@ import { drawTerritoryLayer } from "./renderers/territoryRenderer.js";
 import { drawTrailLayer } from "./renderers/trailRenderer.js";
 import { createViewportBounds } from "./renderers/viewportCulling.js";
 
-<<<<<<< HEAD
-=======
 export function createCanvasViewportLayout(gameConfig, rawWidth, rawHeight, rawPixelRatio = 1) {
     let width = Number.isFinite(rawWidth) && rawWidth > 0
         ? rawWidth
@@ -42,7 +40,6 @@ export function createCanvasViewportLayout(gameConfig, rawWidth, rawHeight, rawP
     };
 }
 
->>>>>>> 70aca42 (teste)
 export function createCanvasRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
     let viewportWidth = 0;
@@ -53,43 +50,11 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
     return {
         getDebugState,
-<<<<<<< HEAD
-=======
         getViewportState,
->>>>>>> 70aca42 (teste)
         renderWorld,
         resizeCanvas
     };
 
-<<<<<<< HEAD
-    function resizeCanvas() {
-        let width = window.innerWidth;
-        let height = window.innerHeight;
-        const aspectRatio = width / height;
-
-        if (aspectRatio < gameConfig.screen.minAspectRatio) {
-            height = width / gameConfig.screen.minAspectRatio;
-        } else if (aspectRatio > gameConfig.screen.maxAspectRatio) {
-            width = height * gameConfig.screen.maxAspectRatio;
-        }
-
-        width = Math.round(width);
-        height = Math.round(height);
-
-        viewportWidth = width;
-        viewportHeight = height;
-        pixelRatio = getPixelRatio();
-
-        canvas.width = Math.round(width * pixelRatio);
-        canvas.height = Math.round(height * pixelRatio);
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${height}px`;
-
-        canvasScale = Math.min(
-            width / gameConfig.screen.virtualWidth,
-            height / gameConfig.screen.virtualHeight
-        );
-=======
     function resizeCanvas(layout = null) {
         const nextLayout = layout || createCanvasViewportLayout(
             gameConfig,
@@ -111,7 +76,6 @@ export function createCanvasRenderer(canvas, gameConfig) {
         }
 
         canvasScale = nextLayout.scale;
->>>>>>> 70aca42 (teste)
     }
 
     function renderWorld(state, currentPlayerId) {
@@ -137,11 +101,7 @@ export function createCanvasRenderer(canvas, gameConfig) {
         drawMap(context, gameConfig.world);
         drawTerritoryLayer(context, state, gameConfig, viewportBounds);
         drawTrailLayer(context, state, gameConfig, viewportBounds);
-<<<<<<< HEAD
-        drawNumberLayer(context, state);
-=======
         drawNumberLayer(context, state.numbers && state.numbers.nums, viewportBounds);
->>>>>>> 70aca42 (teste)
         drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId, gameConfig, viewportBounds);
         context.restore();
     }
@@ -172,10 +132,6 @@ export function createCanvasRenderer(canvas, gameConfig) {
         context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     }
 
-<<<<<<< HEAD
-    function getPixelRatio() {
-        return window.devicePixelRatio || 1;
-=======
     function getWindowWidth() {
         return typeof window !== "undefined" && Number.isFinite(window.innerWidth)
             ? window.innerWidth
@@ -192,7 +148,6 @@ export function createCanvasRenderer(canvas, gameConfig) {
         return typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
             ? window.devicePixelRatio || 1
             : 1;
->>>>>>> 70aca42 (teste)
     }
 
     function getDebugState() {
@@ -205,8 +160,6 @@ export function createCanvasRenderer(canvas, gameConfig) {
             viewportWidth
         };
     }
-<<<<<<< HEAD
-=======
 
     function getViewportState() {
         return {
@@ -215,5 +168,4 @@ export function createCanvasRenderer(canvas, gameConfig) {
             scale: canvasScale
         };
     }
->>>>>>> 70aca42 (teste)
 }

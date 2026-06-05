@@ -1,11 +1,8 @@
 export function createMinimapRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
     const settings = getMinimapSettings(gameConfig);
-<<<<<<< HEAD
-=======
     let territoryPathCache = new WeakMap();
     let trailPathCache = new WeakMap();
->>>>>>> 70aca42 (teste)
     let displaySize = settings.size;
     let pixelRatio = 1;
 
@@ -22,11 +19,8 @@ export function createMinimapRenderer(canvas, gameConfig) {
         canvas.height = Math.round(displaySize * pixelRatio);
         canvas.style.width = `${displaySize}px`;
         canvas.style.height = `${displaySize}px`;
-<<<<<<< HEAD
-=======
         territoryPathCache = new WeakMap();
         trailPathCache = new WeakMap();
->>>>>>> 70aca42 (teste)
     }
 
     function render(state, currentPlayerId) {
@@ -101,34 +95,16 @@ export function createMinimapRenderer(canvas, gameConfig) {
     }
 
     function drawTerritory(territory) {
-<<<<<<< HEAD
-        const rings = getPolygonRings(territory);
-
-        if (rings.length === 0 || !territory.color) {
-=======
         const path = getTerritoryPath(territory);
 
         if (!path || !territory.color) {
->>>>>>> 70aca42 (teste)
             return;
         }
 
         context.save();
-<<<<<<< HEAD
-        context.beginPath();
-
-        for (const ring of rings) {
-            traceRing(ring);
-        }
-
-        context.fillStyle = territory.color;
-        context.globalAlpha = gameConfig.territory.fillAlpha;
-        context.fill("evenodd");
-=======
         context.fillStyle = territory.color;
         context.globalAlpha = gameConfig.territory.fillAlpha;
         context.fill(path, "evenodd");
->>>>>>> 70aca42 (teste)
         context.restore();
 
         context.save();
@@ -136,17 +112,6 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.lineCap = "round";
         context.lineJoin = "round";
         context.lineWidth = settings.territoryBorderWidth;
-<<<<<<< HEAD
-
-        for (const ring of rings) {
-            strokeRing(ring);
-        }
-
-        context.restore();
-    }
-
-    function drawTrail(trail, player) {
-=======
         context.stroke(path);
         context.restore();
     }
@@ -184,24 +149,12 @@ export function createMinimapRenderer(canvas, gameConfig) {
 
     function drawTrail(trail, player) {
         const preparedTrail = getTrailPath(trail);
->>>>>>> 70aca42 (teste)
         const color = trail.color || (player && player.color);
 
         if (!color) {
             return;
         }
 
-<<<<<<< HEAD
-        drawTrailFill(trail.fillPolygon, color);
-        drawTrailEdges(trail.leftSegments, color);
-        drawTrailEdges(trail.rightSegments, color);
-    }
-
-    function drawTrailFill(fillPolygon, color) {
-        const rings = getPolygonRings(fillPolygon);
-
-        if (rings.length === 0) {
-=======
         drawTrailFill(preparedTrail.fill, color);
         drawTrailEdges(preparedTrail.left, color);
         drawTrailEdges(preparedTrail.right, color);
@@ -246,27 +199,10 @@ export function createMinimapRenderer(canvas, gameConfig) {
 
     function drawTrailFill(fill, color) {
         if (!fill || fill.rings.length === 0) {
->>>>>>> 70aca42 (teste)
             return;
         }
 
         context.save();
-<<<<<<< HEAD
-        context.beginPath();
-
-        for (const ring of rings) {
-            traceRing(ring);
-        }
-
-        context.fillStyle = color;
-        context.globalAlpha = gameConfig.territory.fillAlpha;
-        context.fill("evenodd");
-        context.restore();
-    }
-
-    function drawTrailEdges(segments, color) {
-        if (!Array.isArray(segments)) {
-=======
         context.fillStyle = color;
         context.globalAlpha = gameConfig.territory.fillAlpha;
 
@@ -287,7 +223,6 @@ export function createMinimapRenderer(canvas, gameConfig) {
 
     function drawTrailEdges(edge, color) {
         if (!edge || edge.segments.length === 0) {
->>>>>>> 70aca42 (teste)
             return;
         }
 
@@ -297,17 +232,12 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.lineJoin = "round";
         context.lineWidth = settings.trailBorderWidth;
 
-<<<<<<< HEAD
-        for (const segment of segments) {
-            strokeTrailSegment(segment);
-=======
         if (edge.path) {
             context.stroke(edge.path);
         } else {
             for (const segment of edge.segments) {
                 strokeTrailSegment(segment);
             }
->>>>>>> 70aca42 (teste)
         }
 
         context.restore();
@@ -352,42 +282,13 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.closePath();
     }
 
-<<<<<<< HEAD
-    function strokeRing(ring) {
-=======
     function traceRingPath(path, ring) {
->>>>>>> 70aca42 (teste)
         const points = ring.map(worldToMinimap).filter(isValidPoint);
 
         if (points.length < 3) {
             return;
         }
 
-<<<<<<< HEAD
-        context.beginPath();
-        context.moveTo(points[0].x, points[0].y);
-
-        for (let index = 1; index < points.length; index++) {
-            context.lineTo(points[index].x, points[index].y);
-        }
-
-        context.closePath();
-        context.stroke();
-    }
-
-    function strokeTrailSegment(segment) {
-        if (!Array.isArray(segment)) {
-            return;
-        }
-
-        const points = segment.map(worldToMinimap).filter(isValidPoint);
-
-        if (points.length < 2) {
-            return;
-        }
-
-        strokeSmoothPath(points);
-=======
         path.moveTo(points[0].x, points[0].y);
 
         for (let index = 1; index < points.length; index++) {
@@ -403,7 +304,6 @@ export function createMinimapRenderer(canvas, gameConfig) {
         }
 
         strokeSmoothPath(segment);
->>>>>>> 70aca42 (teste)
     }
 
     function strokeSmoothPath(points) {
@@ -419,19 +319,10 @@ export function createMinimapRenderer(canvas, gameConfig) {
         for (let index = 1; index < points.length - 1; index++) {
             const current = points[index];
             const next = points[index + 1];
-<<<<<<< HEAD
-            const midpoint = {
-                x: (current.x + next.x) / 2,
-                y: (current.y + next.y) / 2
-            };
-
-            context.quadraticCurveTo(current.x, current.y, midpoint.x, midpoint.y);
-=======
             const midpointX = (current.x + next.x) / 2;
             const midpointY = (current.y + next.y) / 2;
 
             context.quadraticCurveTo(current.x, current.y, midpointX, midpointY);
->>>>>>> 70aca42 (teste)
         }
 
         const lastPoint = points[points.length - 1];
@@ -451,8 +342,6 @@ export function createMinimapRenderer(canvas, gameConfig) {
         };
     }
 
-<<<<<<< HEAD
-=======
     function getTrailSegments(segments) {
         if (!Array.isArray(segments)) {
             return [];
@@ -503,7 +392,6 @@ export function createMinimapRenderer(canvas, gameConfig) {
         path.lineTo(lastPoint.x, lastPoint.y);
     }
 
->>>>>>> 70aca42 (teste)
     function clampIconPosition(point, player) {
         const circle = getMapCircle();
         const dx = point.x - circle.x;
