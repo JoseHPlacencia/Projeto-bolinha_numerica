@@ -1,3 +1,5 @@
+import "/shared/math.js";
+
 const math = globalThis.GameMath;
 const requiredUtilities = ["clamp", "lerp", "lerpAngle"];
 

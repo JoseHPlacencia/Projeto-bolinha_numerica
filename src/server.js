@@ -5,13 +5,11 @@ const { Server } = require("socket.io");
 
 const config = require("./config/gameConfig");
 const registerSocket = require("./core/socketHandler");
-const startGameLoop = require("./core/gameLoop");
-const startSnapshotLoop = require("./core/snapshotLoop");
+const roomManager = require("./core/roomManager");
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, createSocketOptions());
-const players = new Map();
 const publicPath = path.join(__dirname, "..", "public");
 const sharedMathPath = path.join(__dirname, "utils", "math.js");
 
@@ -19,20 +17,40 @@ app.get("/game-config", (_request, response) => {
     response.json(config.client);
 });
 
+app.get("/api/rooms-list", (_request, response) => {
+    const rooms = [];
+    for (const [code, room] of roomManager.rooms) {
+        rooms.push({
+            code,
+            playerCount: room.players.size,
+            isPrivate: Boolean(room.isPrivate),
+            createdAt: room.createdAt
+        });
+    }
+    response.json({ rooms });
+});
+
 app.get("/shared/math.js", (_request, response) => {
     response.type("application/javascript");
     response.sendFile(sharedMathPath);
 });
 
+// Redirect root to tela inicial
+app.get("/", (_request, response) => {
+    response.redirect("/telainicial/index.html");
+});
+
 app.use(express.static(publicPath));
 
-registerSocket(io, players);
-startGameLoop(players);
-startSnapshotLoop(io, players);
+registerSocket(io, roomManager);
 
-server.listen(config.server.port, () => {
-    console.log(`Server running at http://localhost:${config.server.port}`);
-});
+const host = process.env.HOST;
+
+if (host) {
+    server.listen(config.server.port, host, logServerStart);
+} else {
+    server.listen(config.server.port, logServerStart);
+}
 
 module.exports = {
     app,
@@ -45,4 +63,8 @@ function createSocketOptions() {
         ...config.socket,
         transports: [...config.socket.transports]
     };
+}
+
+function logServerStart() {
+    console.log(`Server running at http://localhost:${config.server.port}`);
 }

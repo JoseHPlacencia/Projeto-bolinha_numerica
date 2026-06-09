@@ -1,13 +1,19 @@
 {
-  "name": "teoria-dos-conjuntos-game",
+  "name": "bolinha-numerica-integrado",
+  "version": "1.0.0",
   "private": true,
+  "description": "Jogo Bolinha Numérica - versão integrada (tela inicial + criação de salas + sistema de números)",
+  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "test": "node --test"
+    "start": "node --watch server.js",
+    "dev": "node --watch server.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "express": "^5.2.1",
+    "polygon-clipping": "^0.15.7",
     "socket.io": "^4.8.3"
   }
 }

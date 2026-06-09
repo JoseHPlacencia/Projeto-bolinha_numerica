@@ -1,0 +1,588 @@
+/* ─────────────────────────────────────────────────────────
+   RESET GLOBAL E VARIÁVEIS CSS
+   Zera margens/paddings padrão e define o sistema de cores
+   e espaçamentos reutilizáveis em todo o projeto
+──────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #080c14;       /* Cor de fundo principal */
+  --surface:   #0e1422;       /* Superfície de inputs e cards internos */
+  --panel:     rgba(18, 25, 41, 0.82); /* Painel semitransparente com opacidade */
+  --border:    rgba(99,210,255,0.18);  /* Cor das bordas com transparência */
+  --accent:    #63d2ff;       /* Cor de destaque principal (azul neon) */
+  --accent2:   #ff6b6b;       /* Cor de destaque secundária (vermelho) */
+  --accent3:   #a8ff78;       /* Cor de destaque terciária (verde) */
+  --text:      #e8f4ff;       /* Cor do texto principal */
+  --muted:     #6a8099;       /* Cor do texto secundário/atenuado */
+  --radius:    14px;          /* Raio padrão de bordas arredondadas */
+  --glow:      0 0 24px rgba(99,210,255,0.25); /* Sombra com brilho neon */
+}
+
+/* ─────────────────────────────────────────────────────────
+   CONFIGURAÇÃO DO HTML E BODY
+   Define altura total, cor de fundo e fonte padrão
+──────────────────────────────────────────────────────────── */
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  overflow: hidden;
+}
+
+/* ─────────────────────────────────────────────────────────
+   CANVAS DE FUNDO ANIMADO (GRADE PAPER.IO)
+   Posicionado em tela cheia atrás de todo o conteúdo,
+   sem capturar eventos do mouse. Simula o grid do paper.io
+──────────────────────────────────────────────────────────── */
+#bg-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55; /* Opacidade reduzida para efeito mais suave */
+}
+
+/* ─────────────────────────────────────────────────────────
+   LAYOUT PRINCIPAL DA APLICAÇÃO
+   Centraliza o conteúdo vertical e horizontalmente
+──────────────────────────────────────────────────────────── */
+#app {
+  position: relative;
+  z-index: 1;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* ─────────────────────────────────────────────────────────
+   CABEÇALHO / LOGO DO JOGO
+   Exibe o nome do jogo com efeito de gradiente e brilho
+──────────────────────────────────────────────────────────── */
+.logo-wrap {
+  text-align: center;
+  margin-bottom: 36px;
+  animation: fadeDown 0.7s ease both;
+}
+
+.logo-tag {
+  font-family: 'Orbitron', sans-serif;
+  font-size: clamp(2.6rem, 6vw, 4.4rem);
+  font-weight: 900;
+  letter-spacing: 4px;
+  background: linear-gradient(135deg, var(--accent) 0%, #a8d8ff 50%, var(--accent3) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 18px rgba(99,210,255,0.5));
+  line-height: 1;
+}
+
+/* Estilo do sufixo ".io" do nome do jogo */
+.logo-tag span.io {
+  font-size: 55%;
+  opacity: 0.7;
+}
+
+/* Subtítulo abaixo do logo */
+.logo-sub {
+  margin-top: 8px;
+  font-size: 0.82rem;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ─────────────────────────────────────────────────────────
+   CARD PRINCIPAL DO FORMULÁRIO
+   Contém nome do jogador, cor, dificuldade e botão jogar.
+   Usa backdrop-filter para efeito fosco/opaco sobre o fundo
+──────────────────────────────────────────────────────────── */
+.card {
+  background: var(--panel);
+  backdrop-filter: blur(16px);           /* Desfoque do fundo atrás do card */
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px 40px 32px;
+  width: min(440px, 96vw);
+  box-shadow: var(--glow), 0 24px 60px rgba(0,0,0,0.5);
+  animation: fadeUp 0.7s 0.15s ease both;
+}
+
+/* ─────────────────────────────────────────────────────────
+   GRUPOS DE CAMPOS DO FORMULÁRIO
+   Empilha label + input com espaçamento entre eles
+──────────────────────────────────────────────────────────── */
+.field-group { margin-bottom: 20px; }
+
+label {
+  display: block;
+  font-size: 0.72rem;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+input[type="text"] {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* Estado de foco do campo de texto: destaca a borda */
+input[type="text"]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99,210,255,0.12);
+}
+
+/* ─────────────────────────────────────────────────────────
+   SELETOR DE COR DA TRILHA
+   Círculos clicáveis que representam a cor da trilha do jogador
+──────────────────────────────────────────────────────────── */
+.color-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.color-swatch {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform 0.15s, border-color 0.15s;
+  position: relative;
+}
+
+.color-swatch:hover { transform: scale(1.15); }
+
+/* Estado de cor selecionada: borda branca e ícone de check */
+.color-swatch.selected {
+  border-color: #fff;
+  transform: scale(1.15);
+  box-shadow: 0 0 10px rgba(255,255,255,0.3);
+}
+
+.color-swatch.selected::after {
+  content: '✓';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  color: #fff;
+  font-weight: 700;
+}
+
+/* ─────────────────────────────────────────────────────────
+   BOTÕES DE DIFICULDADE
+   Grade de 3 colunas com estilo visual por nível de dificuldade
+──────────────────────────────────────────────────────────── */
+.diff-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.diff-btn {
+  padding: 10px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  letter-spacing: 1px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+.diff-btn:hover { color: var(--text); border-color: rgba(99,210,255,0.4); }
+
+/* Cada nível tem cor própria para diferenciação visual */
+.diff-btn.active-easy   { background: rgba(168,255,120,0.12); border-color: var(--accent3); color: var(--accent3); }
+.diff-btn.active-medium { background: rgba(255,200,80,0.12);  border-color: #ffc850;        color: #ffc850; }
+.diff-btn.active-hard   { background: rgba(255,107,107,0.12); border-color: var(--accent2); color: var(--accent2); }
+
+/* ─────────────────────────────────────────────────────────
+   BOTÃO PRINCIPAL "JOGAR"
+   Gradiente chamativo, fonte do jogo, efeito hover com brilho
+──────────────────────────────────────────────────────────── */
+.btn-play {
+  width: 100%;
+  margin-top: 26px;
+  padding: 16px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent) 0%, #38b4e8 100%);
+  color: #060d1a;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  cursor: pointer;
+  transition: filter 0.2s, transform 0.15s;
+  text-transform: uppercase;
+}
+
+.btn-play:hover { filter: brightness(1.15); transform: translateY(-2px); }
+.btn-play:active { transform: translateY(0); }
+
+/* ─────────────────────────────────────────────────────────
+   LINKS INFERIORES (AJUDA, SOBRE, GITHUB)
+   Botões/links discretos abaixo do card principal
+──────────────────────────────────────────────────────────── */
+.bottom-links {
+  display: flex;
+  gap: 14px;
+  margin-top: 20px;
+  justify-content: center;
+  animation: fadeUp 0.7s 0.3s ease both;
+}
+
+.icon-btn {
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  padding: 10px 18px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+
+.icon-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 14px rgba(99,210,255,0.15);
+}
+
+.icon-btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+/* ─────────────────────────────────────────────────────────
+   BASE DOS POPUPS (OVERLAY + CARD)
+   Tela de sobreposição escura com desfoque.
+   Classe .open ativa o display do overlay
+──────────────────────────────────────────────────────────── */
+.overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(4,8,18,0.82);
+  backdrop-filter: blur(6px);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.overlay.open { display: flex; }
+
+.popup {
+  background: rgba(18, 25, 41, 0.95);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  width: min(660px, 96vw);
+  max-height: 82vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 0 60px rgba(0,0,0,0.6);
+  animation: popIn 0.3s ease;
+}
+
+/* Cabeçalho do popup com título e botão fechar */
+.popup-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.popup-header h2 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.95rem;
+  letter-spacing: 3px;
+  color: var(--accent);
+}
+
+/* Botão de fechar (X) no canto superior direito do popup */
+.popup-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1.3rem;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.popup-close:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+
+/* Área de conteúdo scrollável dentro do popup */
+.popup-body {
+  padding: 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ─────────────────────────────────────────────────────────
+   NAVEGAÇÃO POR ABAS (TABS) DENTRO DO POPUP DE AJUDA
+   Pills clicáveis que alternam entre painéis de conteúdo
+──────────────────────────────────────────────────────────── */
+.tabs-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 22px;
+  background: var(--surface);
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.tab-pill {
+  flex: 1;
+  padding: 8px 6px;
+  border-radius: 7px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+}
+
+/* Aba ativa tem fundo escuro e cor de destaque */
+.tab-pill.active {
+  background: var(--panel);
+  color: var(--accent);
+  box-shadow: 0 1px 6px rgba(0,0,0,0.3);
+}
+
+/* Painéis de aba: ocultos por padrão, visível quando .active */
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ─────────────────────────────────────────────────────────
+   ESTILOS DO CONTEÚDO DE AJUDA
+   Seções, listas, tabelas e badges dentro dos popups
+──────────────────────────────────────────────────────────── */
+.help-section { margin-bottom: 24px; }
+
+.help-section h3 {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.75rem;
+  letter-spacing: 2px;
+  color: var(--accent);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+}
+
+.help-section p, .help-section li {
+  font-size: 0.88rem;
+  color: #b0c8df;
+  line-height: 1.65;
+}
+
+.help-section ul { padding-left: 18px; }
+.help-section ul li { margin-bottom: 6px; }
+
+/* Linha de badges de tecnologias ou dificuldades */
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.badge {
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+}
+
+/* Cores de badge por nível de dificuldade */
+.badge-easy   { background: rgba(168,255,120,0.12); color: var(--accent3); border: 1px solid rgba(168,255,120,0.3); }
+.badge-medium { background: rgba(255,200,80,0.12);  color: #ffc850;        border: 1px solid rgba(255,200,80,0.3); }
+.badge-hard   { background: rgba(255,107,107,0.12); color: var(--accent2); border: 1px solid rgba(255,107,107,0.3); }
+
+/* Tabela de conjuntos numéricos */
+.set-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+  margin-top: 10px;
+}
+
+.set-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
+}
+
+.set-table td {
+  padding: 9px 12px;
+  color: #b0c8df;
+  border-bottom: 1px solid rgba(99,210,255,0.06);
+}
+
+.set-table td:first-child {
+  color: var(--accent);
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.8rem;
+}
+
+/* ─────────────────────────────────────────────────────────
+   GALERIA DE RECURSOS DO JOGO
+   Grid de cards visuais exibindo as mecânicas principais
+──────────────────────────────────────────────────────────── */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.gallery-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  text-align: center;
+}
+
+.gallery-card .glyph {
+  font-size: 2rem;
+  margin-bottom: 8px;
+}
+
+.gallery-card .gc-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 2px;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.gallery-card p {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* ─────────────────────────────────────────────────────────
+   POPUP "SOBRE" — GRID DOS MEMBROS DA EQUIPE
+   Exibe avatar, nome e função de cada integrante
+──────────────────────────────────────────────────────────── */
+.sobre-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.sobre-member {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.member-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.member-info h4 {
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin-bottom: 3px;
+}
+
+.member-info span {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.sobre-desc {
+  font-size: 0.88rem;
+  color: #b0c8df;
+  line-height: 1.65;
+  margin-bottom: 20px;
+}
+
+/* ─────────────────────────────────────────────────────────
+   ANIMAÇÕES KEYFRAME
+   Usadas na entrada dos elementos principais da tela
+──────────────────────────────────────────────────────────── */
+@keyframes fadeDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Animação de entrada do popup com efeito de escala */
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ─────────────────────────────────────────────────────────
+   PERSONALIZAÇÃO DA BARRA DE SCROLL
+   Estilo minimalista para a scrollbar nos popups
+──────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
