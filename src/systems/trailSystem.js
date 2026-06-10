@@ -7,8 +7,8 @@ const {
     findSegmentPolygonBoundaryContact,
     isPointInPolygon
 } = require("../utils/geometry");
-const { returnPlayerToSpawn } = require("../entities/player");
 const { distanceBetween } = require("../utils/math");
+const { handlePlayerLifeLoss } = require("./catchModeSystem");
 const { captureClosedTrail } = require("./dominationSystem");
 
 const geometryEpsilon = 1e-7;
@@ -28,13 +28,13 @@ const trailSides = Object.freeze({
     })
 });
 
-function updateTrails(players, territories) {
+function updateTrails(players, territories, context = {}) {
     for (const player of players.values()) {
-        updatePlayerTrail(player, territories, players);
+        updatePlayerTrail(player, territories, players, context);
     }
 }
 
-function updatePlayerTrail(player, territories, players = new Map([[player.id, player]])) {
+function updatePlayerTrail(player, territories, players = new Map([[player.id, player]]), context = {}) {
     const territoryPolygon = getPlayerTerritoryPolygon(territories, player.id);
     const sample = createTrailSample(player);
     const previousSample = {
@@ -50,14 +50,19 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
     player.lastRightTrailPoint = clonePoint(sample.rightPoint);
 
     if (!(leftInside && rightInside) && hasSelfTrailCollision(player, previousSample, sample)) {
-        returnPlayerToSpawn(player);
+        handlePlayerLifeLoss(players, territories, player, context, {
+            reason: "selfTrail"
+        });
         return;
     }
 
-    resetCollidedTrailOwners(player, players, previousSample, sample);
+    markCrossedTrailOwners(player, players, previousSample, sample);
 
     if (leftInside && rightInside && hasAnyTrailSegment(player)) {
-        captureClosedTrail(player, territories, players);
+        if (canCaptureClosedTrail(player)) {
+            captureClosedTrail(player, territories, players);
+        }
+        player.resetCatchProgress();
         clearTrail(player);
         return;
     }
@@ -254,7 +259,7 @@ function hasSelfTrailCollision(player, previousSample, sample) {
     );
 }
 
-function resetCollidedTrailOwners(player, players, previousSample, sample) {
+function markCrossedTrailOwners(player, players, previousSample, sample) {
     if (!previousSample.leftPoint || !previousSample.rightPoint) {
         return;
     }
@@ -265,9 +270,13 @@ function resetCollidedTrailOwners(player, players, previousSample, sample) {
         }
 
         if (doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner)) {
-            returnPlayerToSpawn(trailOwner);
+            player.queueCatchEliminationTarget(trailOwner.id);
         }
     }
+}
+
+function canCaptureClosedTrail(player) {
+    return config.gameMode.mode !== "catch" || player.catchBalance > 0;
 }
 
 function doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner) {

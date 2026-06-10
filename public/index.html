@@ -93,9 +93,9 @@
                         <h3>Mecânica de Trilha</h3>
                         <ul>
                             <li>Trilha ativa — ao sair do seu território, você deixa uma linha colorida no mapa e fica vulnerável.</li>
-                            <li>Fechar o loop — retorne à sua área colorida para capturar tudo que ficou dentro do caminho traçado.</li>
-                            <li>Eliminar rivais — passe por cima da trilha aberta de outro jogador para eliminá-lo e roubar parte do território.</li>
-                            <li>Cuidado — se um inimigo cruzar sua trilha antes de você fechar o loop, você é eliminado.</li>
+                            <li>Fechar o loop — retorne à sua área colorida com saldo positivo de acertos do tema para capturar o caminho traçado.</li>
+                            <li>Marcar rivais — cruze a trilha aberta de outro jogador para preparar uma eliminação.</li>
+                            <li>Eliminar rivais — após cruzar uma trilha inimiga, acerte um número do tema para eliminar aquele jogador.</li>
                         </ul>
                     </div>
                     <div class="help-section">
@@ -109,18 +109,18 @@
                     <div class="help-section">
                         <h3>Dificuldades</h3>
                         <div class="badge-row">
-                            <span class="badge badge-easy">Fácil — arena menor e mais tempo para fechar loops</span>
-                            <span class="badge badge-medium">Médio — arena padrão e velocidade equilibrada</span>
-                            <span class="badge badge-hard">Difícil — arena dinâmica e loops mais rápidos</span>
+                            <span class="badge badge-easy">Fácil — 3 vidas</span>
+                            <span class="badge badge-medium">Médio — 2 vidas</span>
+                            <span class="badge badge-hard">Difícil — 1 vida</span>
                         </div>
                     </div>
                     <div class="help-section">
                         <h3>Pontuação</h3>
                         <ul>
-                            <li>+10 pts por célula de território capturada.</li>
-                            <li>+50 pts ao eliminar um rival cortando sua trilha.</li>
-                            <li>Bônus de combo ao capturar grandes áreas de uma vez.</li>
-                            <li>Vence quem dominar mais território ao final da rodada.</li>
+                            <li>O ranking ordena jogadores por porcentagem de território dominado.</li>
+                            <li>Eliminações aparecem como critério competitivo secundário.</li>
+                            <li>Capturas só acontecem com saldo positivo de números corretos do tema.</li>
+                            <li>Números dentro do seu próprio território não podem ser coletados.</li>
                         </ul>
                     </div>
                 </div>
@@ -181,7 +181,7 @@
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">✂</div>
                             <div class="gc-title">Cortar Trilha</div>
-                            <p>Passe pela trilha aberta de um inimigo para eliminá-lo e roubar seu território.</p>
+                            <p>Cruze uma trilha inimiga e depois acerte um número do tema para confirmar a eliminação.</p>
                         </div>
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">∑</div>
@@ -250,6 +250,11 @@
 <section id="gameLayer" class="game-layer" aria-label="Jogo" aria-hidden="true">
     <canvas id="gameCanvas"></canvas>
     <div id="hud" class="hud">
+        <div id="lifePanel" class="life-panel" aria-label="Vidas">
+            <span class="life-panel__label">Vidas</span>
+            <div id="lifePips" class="life-panel__pips"></div>
+            <strong id="lifeCount" class="life-panel__count">-</strong>
+        </div>
         <div id="debugPanel" class="debug-panel" hidden>
             <div data-debug-level="1"><span>FPS</span><strong id="debugFps">0</strong></div>
             <div data-debug-level="1"><span>Render FPS</span><strong id="debugRenderFps">0</strong></div>
@@ -279,8 +284,24 @@
         </div>
     </div>
 
-    <button id="roomMenuButton" class="room-menu-button" type="button">Sala</button>
-    <button id="exitGameButton" class="exit-game-button" type="button">Sair</button>
+    <div id="rankPanel" class="rank-panel" aria-label="Ranking">
+        <div class="rank-panel__header">
+            <span>Nome</span>
+            <span>Área</span>
+            <span>Elim.</span>
+            <span>Pos.</span>
+        </div>
+        <div id="rankRows" class="rank-panel__rows"></div>
+    </div>
+
+    <div id="gameOverPanel" class="game-over-panel" aria-hidden="true">
+        <div class="game-over-panel__content" role="dialog" aria-modal="true" aria-labelledby="gameOverTitle">
+            <p class="game-over-panel__eyebrow">Fim de jogo</p>
+            <h2 id="gameOverTitle">Fim de jogo</h2>
+            <p id="gameOverMessage" class="game-over-panel__message">Suas vidas acabaram.</p>
+            <button id="gameOverReturnButton" class="game-over-panel__button" type="button">Voltar ao menu</button>
+        </div>
+    </div>
 
     <div id="roomModal" class="room-modal" aria-hidden="true">
         <div class="room-modal__content" role="dialog" aria-modal="true" aria-label="Menu de salas">

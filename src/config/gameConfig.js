@@ -74,10 +74,26 @@ const movement = Object.freeze({
 const player = Object.freeze({
     blinkDurationMs: 250,
     blinkMaxIntervalMs: 5000,
-    blinkMinIntervalMs: 2500
+    blinkMinIntervalMs: 2500,
+    doubleBlinkChance: 0.1,
+    doubleBlinkGapMs: 90
+});
+
+const gameMode = Object.freeze({
+    mode: "catch",
+    catch: Object.freeze({
+        defaultDifficulty: "medium",
+        gameOverDisconnectDelayMs: 250,
+        livesByDifficulty: Object.freeze({
+            easy: 3,
+            medium: 2,
+            hard: 1
+        })
+    })
 });
 
 const minimap = Object.freeze({
+    frameRate: 0,
     mapBorderWidth: 3,
     minSize: 96,
     playerIconBorderWidth: 1,
@@ -153,6 +169,7 @@ const client = Object.freeze({
     world,
     territory,
     player,
+    gameMode,
     minimap,
     screen,
     network,
@@ -178,6 +195,7 @@ module.exports = Object.freeze({
     territory,
     movement,
     player,
+    gameMode,
     minimap,
     network,
     spawn,

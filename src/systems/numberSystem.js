@@ -1,5 +1,7 @@
 "use strict";
 
+const { isPointOwnedByPlayer } = require("../state/territories");
+
 const NUMBER_CONFIG = Object.freeze({
     radius: 40,
     minDistanceBetween: 180,
@@ -122,7 +124,7 @@ const THEMES = Object.freeze([
     }
 ]);
 
-function createNumberSystem(mapRadius, players) {
+function createNumberSystem(mapRadius, players, territories) {
     const state = createNumberState();
 
     initNumbers(state, mapRadius, players);
@@ -130,7 +132,7 @@ function createNumberSystem(mapRadius, players) {
     return {
         getNumbersMap: () => state.numbers,
         serialize: () => serializeNumbers(state),
-        update: nowMs => updateNumbers(state, players, mapRadius, nowMs)
+        update: nowMs => updateNumbers(state, players, territories, mapRadius, nowMs)
     };
 }
 
@@ -311,7 +313,7 @@ function initTheme(state) {
     state.themeNextSwitch = Date.now() + NUMBER_CONFIG.themeIntervalSec * 1000;
 }
 
-function updateNumbers(state, players, mapRadius, nowMs) {
+function updateNumbers(state, players, territories, mapRadius, nowMs) {
     let themeChanged = false;
 
     if (nowMs >= state.themeNextSwitch) {
@@ -339,6 +341,10 @@ function updateNumbers(state, players, mapRadius, nowMs) {
 
     for (const [nid, num] of state.numbers) {
         for (const player of players.values()) {
+            if (territories && isPointOwnedByPlayer(territories, player.id, num.x, num.y)) {
+                continue;
+            }
+
             const dx = player.x - num.x;
             const dy = player.y - num.y;
             if (dx * dx + dy * dy < cr2) {

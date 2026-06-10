@@ -1,5 +1,9 @@
 export function createHud({ debugLevel }) {
     const debugPanel = document.getElementById("debugPanel");
+    const lifePanel = document.getElementById("lifePanel");
+    const lifePips = document.getElementById("lifePips");
+    const lifeCount = document.getElementById("lifeCount");
+    const rankRows = document.getElementById("rankRows");
     const debugFps = document.getElementById("debugFps");
     const debugRenderFps = document.getElementById("debugRenderFps");
     const debugBuffer = document.getElementById("debugBuffer");
@@ -20,6 +24,8 @@ export function createHud({ debugLevel }) {
     const debugInputAccepted = document.getElementById("debugInputAccepted");
     const debugBoundaryDecision = document.getElementById("debugBoundaryDecision");
     let lastUpdatedAt = 0;
+    let lastRankUpdatedAt = 0;
+    let lastLifeSignature = null;
 
     if (debugPanel) {
         debugPanel.hidden = debugLevel <= 0;
@@ -30,7 +36,10 @@ export function createHud({ debugLevel }) {
         update
     };
 
-    function update({ frameStats, rendererStats, snapshotStats, playerDebug }) {
+    function update({ frameStats, rendererStats, snapshotStats, currentPlayer, currentPlayerId, leaderboard, playerDebug }) {
+        updateLives(currentPlayer);
+        updateLeaderboard(leaderboard, currentPlayerId);
+
         if (debugLevel <= 0) {
             return;
         }
@@ -50,6 +59,93 @@ export function createHud({ debugLevel }) {
         setText(debugPixelRatio, rendererStats.pixelRatio.toFixed(2));
         setText(debugCanvas, `${rendererStats.canvasWidth}x${rendererStats.canvasHeight}`);
         updateMovementDebug(playerDebug);
+    }
+
+    function updateLives(player) {
+        if (!lifePanel || !lifePips || !lifeCount) {
+            return;
+        }
+
+        const lives = Number(player && player.lives);
+        const maxLives = Number(player && player.maxLives);
+
+        if (!Number.isFinite(lives) || !Number.isFinite(maxLives) || maxLives <= 0) {
+            lifePanel.hidden = true;
+            lastLifeSignature = null;
+            return;
+        }
+
+        const safeLives = Math.max(0, Math.min(maxLives, Math.round(lives)));
+        const safeMaxLives = Math.max(1, Math.round(maxLives));
+        const signature = `${safeLives}/${safeMaxLives}`;
+
+        lifePanel.hidden = false;
+
+        if (signature === lastLifeSignature) {
+            return;
+        }
+
+        lastLifeSignature = signature;
+        lifeCount.textContent = signature;
+        lifePips.replaceChildren(...createLifePips(safeLives, safeMaxLives));
+    }
+
+    function createLifePips(lives, maxLives) {
+        const pips = [];
+
+        for (let index = 0; index < maxLives; index++) {
+            const pip = document.createElement("span");
+            pip.className = "life-panel__pip";
+            pip.classList.toggle("is-filled", index < lives);
+            pips.push(pip);
+        }
+
+        return pips;
+    }
+
+    function updateLeaderboard(leaderboard, currentPlayerId) {
+        if (!rankRows) {
+            return;
+        }
+
+        const now = performance.now();
+
+        if (now - lastRankUpdatedAt < 250) {
+            return;
+        }
+
+        lastRankUpdatedAt = now;
+        rankRows.replaceChildren(...createRankRows(leaderboard, currentPlayerId));
+    }
+
+    function createRankRows(leaderboard, currentPlayerId) {
+        const entries = Array.isArray(leaderboard) ? leaderboard.slice(0, 8) : [];
+
+        if (entries.length === 0) {
+            const row = document.createElement("div");
+            row.className = "rank-panel__empty";
+            row.textContent = "Aguardando jogadores";
+            return [row];
+        }
+
+        return entries.map(entry => {
+            const row = document.createElement("div");
+            row.className = "rank-panel__row";
+            row.classList.toggle("is-current", entry.id === currentPlayerId);
+            row.append(
+                createRankCell(entry.name || "Jogador"),
+                createRankCell(formatPercent(entry.areaPercent)),
+                createRankCell(Number.isFinite(entry.eliminations) ? entry.eliminations : 0),
+                createRankCell(entry.rank || "-")
+            );
+            return row;
+        });
+    }
+
+    function createRankCell(value) {
+        const cell = document.createElement("span");
+        cell.textContent = String(value);
+        return cell;
     }
 
     function getRenderFps(frameStats, rendererStats) {
@@ -86,6 +182,10 @@ export function createHud({ debugLevel }) {
         setText(debugInputAccepted, formatBoolean(debug && debug.inputAccepted));
         setText(debugBoundaryDecision, formatText(debug && debug.boundarySlideDecision));
     }
+}
+
+function formatPercent(value) {
+    return Number.isFinite(value) ? `${value.toFixed(1)}%` : "0.0%";
 }
 
 function setText(element, value) {

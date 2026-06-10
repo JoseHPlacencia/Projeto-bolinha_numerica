@@ -20,7 +20,7 @@ function createRoom(io, options = {}) {
     const isPrivate = Boolean(options.isPrivate);
     const territories = createTerritories();
     const players = new Map();
-    const numberSystem = createNumberSystem(config.world.mapRadius, players);
+    const numberSystem = createNumberSystem(config.world.mapRadius, players, territories);
 
     const room = {
         code: roomCode,

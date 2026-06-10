@@ -631,7 +631,9 @@ body.is-game-active .main-menu {
 }
 
 body.is-menu-active #themePanel,
-body.is-menu-active #collectNotif {
+body.is-menu-active #collectNotif,
+body.is-menu-active #lifePanel,
+body.is-menu-active #rankPanel {
     display: none;
 }
 
@@ -693,6 +695,189 @@ body.is-menu-active #collectNotif {
     display: none;
 }
 
+.life-panel {
+    align-items: center;
+    background: var(--hud-panel-background);
+    border: 1px solid var(--hud-panel-border);
+    border-radius: 8px;
+    box-shadow: var(--hud-panel-shadow);
+    color: #fff;
+    display: inline-grid;
+    gap: 8px;
+    grid-template-columns: auto auto auto;
+    min-height: 40px;
+    padding: 8px 10px;
+}
+
+.life-panel[hidden] {
+    display: none;
+}
+
+.life-panel__label {
+    color: #b9c2d0;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.life-panel__pips {
+    display: flex;
+    gap: 5px;
+}
+
+.life-panel__pip {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+    height: 12px;
+    width: 22px;
+}
+
+.life-panel__pip.is-filled {
+    background: linear-gradient(135deg, #ff5b6e, #ffd166);
+    border-color: rgba(255, 255, 255, 0.42);
+    box-shadow: 0 0 12px rgba(255, 91, 110, 0.35);
+}
+
+.life-panel__count {
+    color: #fff;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.rank-panel {
+    background: var(--hud-panel-background);
+    border: 1px solid var(--hud-panel-border);
+    border-radius: 8px;
+    box-shadow: var(--hud-panel-shadow);
+    color: #fff;
+    display: grid;
+    gap: 6px;
+    max-width: min(420px, calc(100vw - 32px));
+    min-width: 320px;
+    padding: 10px;
+    pointer-events: none;
+    position: fixed;
+    right: 16px;
+    top: 16px;
+    z-index: 5;
+}
+
+.rank-panel__header,
+.rank-panel__row {
+    align-items: center;
+    display: grid;
+    gap: 8px;
+    grid-template-columns: minmax(112px, 1fr) 68px 54px 42px;
+}
+
+.rank-panel__header {
+    color: #b9c2d0;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+    text-transform: uppercase;
+}
+
+.rank-panel__rows {
+    display: grid;
+    gap: 4px;
+}
+
+.rank-panel__row {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    min-height: 28px;
+    padding: 5px 7px;
+}
+
+.rank-panel__row.is-current {
+    background: rgba(99, 210, 255, 0.16);
+    border-color: rgba(99, 210, 255, 0.38);
+}
+
+.rank-panel__row span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rank-panel__empty {
+    color: #b9c2d0;
+    font-size: 12px;
+    padding: 6px 2px 2px;
+}
+
+.game-over-panel {
+    align-items: center;
+    background: rgba(3, 7, 14, 0.72);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    opacity: 0;
+    padding: 24px;
+    pointer-events: none;
+    position: fixed;
+    transition: opacity 180ms ease, visibility 180ms ease;
+    visibility: hidden;
+    z-index: 30;
+}
+
+.game-over-panel.is-open {
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
+}
+
+.game-over-panel__content {
+    background: rgba(10, 14, 24, 0.94);
+    border: 1px solid rgba(255, 91, 110, 0.42);
+    border-radius: 8px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55), 0 0 32px rgba(255, 91, 110, 0.18);
+    color: #fff;
+    max-width: min(420px, 100%);
+    padding: 30px 28px 28px;
+    text-align: center;
+}
+
+.game-over-panel__eyebrow {
+    color: #ff8a98;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0;
+    margin: 0 0 8px;
+    text-transform: uppercase;
+}
+
+.game-over-panel h2 {
+    font-size: clamp(2rem, 8vw, 3rem);
+    line-height: 1;
+    margin: 0;
+}
+
+.game-over-panel__message {
+    color: #b9c2d0;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    margin: 14px 0 24px;
+}
+
+.game-over-panel__button {
+    background: linear-gradient(135deg, #ff5b6e, #ffd166);
+    border: none;
+    border-radius: 8px;
+    color: #14070a;
+    font-weight: 800;
+    padding: 12px 18px;
+    text-transform: uppercase;
+    width: 100%;
+}
+
 .minimap {
     border-radius: 50%;
     bottom: 16px;
@@ -748,45 +933,6 @@ body.is-menu-active #collectNotif {
     height: clamp(40px, 7.5vmin, 58px);
     transform: translate(0, 0);
     width: clamp(40px, 7.5vmin, 58px);
-}
-
-.room-menu-button,
-.exit-game-button {
-    border-radius: 999px;
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
-    color: #fff;
-    font-size: 14px;
-    min-width: 96px;
-    padding: 10px 16px;
-    pointer-events: auto;
-    position: fixed;
-    top: 16px;
-    transition: background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
-    z-index: 5;
-}
-
-.room-menu-button {
-    background: rgba(8, 12, 24, 0.92);
-    border: 1px solid rgba(255, 255, 255, 0.32);
-    right: 16px;
-}
-
-.exit-game-button {
-    background: rgba(60, 12, 12, 0.92);
-    border: 1px solid rgba(255, 100, 100, 0.5);
-    right: 120px;
-}
-
-.room-menu-button:hover {
-    background: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 16px 28px rgba(0, 0, 0, 0.32);
-    transform: translateY(-1px);
-}
-
-.exit-game-button:hover {
-    background: rgba(220, 50, 50, 0.32);
-    box-shadow: 0 16px 28px rgba(0, 0, 0, 0.32);
-    transform: translateY(-1px);
 }
 
 .room-modal {
@@ -1124,8 +1270,25 @@ body.is-menu-active #collectNotif {
     }
 
     .hud {
+        bottom: 10px;
         gap: 8px;
+        right: auto;
         padding: 10px;
+        top: auto;
+    }
+
+    .life-panel {
+        grid-template-columns: auto auto;
+        padding: 7px 8px;
+    }
+
+    .life-panel__label {
+        display: none;
+    }
+
+    .life-panel__pip {
+        height: 10px;
+        width: 18px;
     }
 
     .debug-panel div {
@@ -1137,13 +1300,24 @@ body.is-menu-active #collectNotif {
         right: 10px;
     }
 
-    .room-menu-button,
-    .exit-game-button {
-        min-width: 78px;
-        padding: 9px 12px;
+    .rank-panel {
+        max-width: calc(100vw - 20px);
+        min-width: min(320px, calc(100vw - 20px));
+        right: 10px;
+        top: 10px;
     }
 
-    .exit-game-button {
-        right: 100px;
+    .rank-panel__header,
+    .rank-panel__row {
+        grid-template-columns: minmax(76px, 1fr) 54px 42px 38px;
+    }
+
+    .rank-panel__row {
+        font-size: 11px;
+        min-height: 26px;
+    }
+
+    .game-over-panel__content {
+        padding: 26px 22px 24px;
     }
 }

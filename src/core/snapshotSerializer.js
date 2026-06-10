@@ -1,6 +1,6 @@
 const config = require("../config/gameConfig");
 const { getServerTime } = require("../utils/time");
-const { getPolygonBounds } = require("../utils/geometry");
+const { calculatePolygonArea, getPolygonBounds } = require("../utils/geometry");
 
 function createClientSnapshotState() {
     return {
@@ -50,6 +50,8 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         territoryOps: territoryChanges.operations,
         trailIds,
         trails: trailUpdates,
+        mode: config.gameMode.mode,
+        leaderboard: createLeaderboard(players, territories),
         numbers: numberSystem ? numberSystem.serialize() : null
     };
 
@@ -103,7 +105,12 @@ function serializeChangedPlayerInfo(players, playerIds, clientState, now) {
             player.color,
             packCoordinate(player.territoryX),
             packCoordinate(player.territoryY),
-            version
+            version,
+            player.name,
+            player.eliminations,
+            player.lives,
+            player.maxLives,
+            player.catchBalance
         ];
         clientState.playerInfo.set(player.id, {
             version,
@@ -112,6 +119,34 @@ function serializeChangedPlayerInfo(players, playerIds, clientState, now) {
     }
 
     return serializedInfo;
+}
+
+function createLeaderboard(players, territories) {
+    const totalArea = Math.PI * config.world.mapRadius * config.world.mapRadius;
+
+    return [...players.values()]
+        .map(player => {
+            const territory = territories.get(player.id);
+            const area = territory ? Math.max(0, calculatePolygonArea(territory.polygon)) : 0;
+
+            return {
+                id: player.id,
+                name: player.name,
+                areaPercent: totalArea > 0 ? area / totalArea * 100 : 0,
+                eliminations: player.eliminations || 0
+            };
+        })
+        .sort((first, second) => {
+            if (Math.abs(second.areaPercent - first.areaPercent) > 0.001) {
+                return second.areaPercent - first.areaPercent;
+            }
+
+            return second.eliminations - first.eliminations;
+        })
+        .map((entry, index) => ({
+            ...entry,
+            rank: index + 1
+        }));
 }
 
 function serializeTerritoryVersions(territories, territoryIds) {

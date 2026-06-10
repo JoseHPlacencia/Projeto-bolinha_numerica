@@ -15,6 +15,9 @@ const playButton = document.getElementById("btn-play");
 const createRoomMenuButton = document.getElementById("btn-criar-sala");
 const mainMenu = document.getElementById("mainMenu");
 const gameLayer = document.getElementById("gameLayer");
+const gameOverPanel = document.getElementById("gameOverPanel");
+const gameOverMessage = document.getElementById("gameOverMessage");
+const gameOverReturnButton = document.getElementById("gameOverReturnButton");
 const statusMessage = createStatusMessage();
 const AUTO_START_TIMEOUT_MS = 10000;
 
@@ -34,6 +37,7 @@ async function initializeClient() {
         gameClient = startClient(gameConfig, {
             getPlayerOptions,
             onExitGame: showMenu,
+            onGameOver: showGameOver,
             onJoinFailure: handleJoinFailure,
             onJoinSuccess: handleJoinSuccess
         });
@@ -99,6 +103,11 @@ function attachCreateRoomButton() {
 }
 
 function attachOverlayButtons() {
+    gameOverReturnButton?.addEventListener("click", () => {
+        hideGameOver();
+        showMenu();
+    });
+
     document.querySelectorAll("[data-close]").forEach(button => {
         button.addEventListener("click", () => {
             closeOverlay(button.dataset.close);
@@ -147,6 +156,7 @@ function selectColor(color) {
 function getPlayerOptions() {
     return {
         color: selectedColor || DEFAULT_PLAYER_COLOR,
+        difficulty: selectedDifficulty || "medium",
         name: playerNameInput.value.trim() || "Jogador"
     };
 }
@@ -311,6 +321,7 @@ function clearPendingSocketConnectWait() {
 }
 
 function showGame() {
+    hideGameOver();
     closeAllOverlays();
     document.body.classList.remove("is-menu-active");
     document.body.classList.add("is-game-active");
@@ -319,6 +330,7 @@ function showGame() {
 }
 
 function showMenu() {
+    hideGameOver();
     closeAllOverlays();
     document.body.classList.remove("is-game-active");
     document.body.classList.add("is-menu-active");
@@ -326,6 +338,39 @@ function showMenu() {
     gameLayer.setAttribute("aria-hidden", "true");
     statusMessage.hide();
     setMenuBusy(false);
+}
+
+function showGameOver(data = {}) {
+    cancelAutoStartAttempt();
+    setMenuBusy(false);
+    statusMessage.hide();
+    gameClient.roomUi.clearRoomInfo();
+
+    const eliminatedBy = typeof data.eliminatedBy === "string" ? data.eliminatedBy.trim() : "";
+    if (data.reason === "selfTrail") {
+        gameOverMessage.textContent = "Você cruzou seu próprio rastro e perdeu a última vida.";
+    } else if (eliminatedBy) {
+        gameOverMessage.textContent = `Suas vidas acabaram. Você foi eliminado por ${eliminatedBy}.`;
+    } else {
+        gameOverMessage.textContent = "Suas vidas acabaram.";
+    }
+
+    document.body.classList.remove("is-menu-active");
+    document.body.classList.add("is-game-active");
+    mainMenu.setAttribute("aria-hidden", "true");
+    gameLayer.setAttribute("aria-hidden", "false");
+    gameOverPanel?.classList.add("is-open");
+    gameOverPanel?.setAttribute("aria-hidden", "false");
+    gameOverReturnButton?.focus();
+}
+
+function hideGameOver() {
+    if (!gameOverPanel) {
+        return;
+    }
+
+    gameOverPanel.classList.remove("is-open");
+    gameOverPanel.setAttribute("aria-hidden", "true");
 }
 
 function setMenuBusy(isBusy, label = "Jogar") {

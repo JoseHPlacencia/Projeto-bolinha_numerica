@@ -1,6 +1,8 @@
+const config = require("../config/gameConfig");
 const { createSpawn } = require("../systems/spawnSystem");
 
 const INPUT_ANGLE_CHANGE_EPSILON = 0.025;
+const DEFAULT_PLAYER_NAME = "Jogador";
 
 function createRandomColor() {
     const hue = Math.floor(Math.random() * 360);
@@ -11,6 +13,27 @@ function normalizePlayerColor(color) {
     const normalizedColor = String(color || "").trim().toLowerCase();
 
     return /^#[0-9a-f]{6}$/.test(normalizedColor) ? normalizedColor : null;
+}
+
+function normalizePlayerName(name) {
+    const normalizedName = String(name || "").trim().slice(0, 20);
+
+    return normalizedName || DEFAULT_PLAYER_NAME;
+}
+
+function normalizeDifficulty(difficulty) {
+    const normalizedDifficulty = String(difficulty || "").trim().toLowerCase();
+    const livesByDifficulty = config.gameMode.catch.livesByDifficulty;
+
+    return Object.prototype.hasOwnProperty.call(livesByDifficulty, normalizedDifficulty)
+        ? normalizedDifficulty
+        : config.gameMode.catch.defaultDifficulty;
+}
+
+function getLivesForDifficulty(difficulty) {
+    const lives = config.gameMode.catch.livesByDifficulty[difficulty];
+
+    return Number.isInteger(lives) && lives > 0 ? lives : 1;
 }
 
 function getRandomAngle() {
@@ -31,6 +54,15 @@ class Player {
     constructor(id, spawn, options = {}) {
         this.id = id;
         this.color = normalizePlayerColor(options.color) || createRandomColor();
+        this.name = normalizePlayerName(options.name);
+        this.difficulty = normalizeDifficulty(options.difficulty);
+        this.maxLives = getLivesForDifficulty(this.difficulty);
+        this.lives = this.maxLives;
+        this.eliminations = 0;
+        this.catchHits = 0;
+        this.catchMisses = 0;
+        this.catchBalance = 0;
+        this.pendingCatchEliminationTargets = new Set();
         this.pressedActions = new Set();
         this.lastAction = null;
         this.directionAngle = null;
@@ -62,6 +94,7 @@ class Player {
         this.y = this.territoryY;
         this.angle = getRandomAngle();
         this.boundarySlideDirection = null;
+        this.resetCatchProgress();
         this.clearTrailState();
     }
 
@@ -97,6 +130,78 @@ class Player {
         this.isRightTrailActive = false;
         this.lastLeftTrailPoint = null;
         this.lastRightTrailPoint = null;
+    }
+
+    recordCatchNumber(belongsToTheme) {
+        if (belongsToTheme) {
+            this.catchHits++;
+            this.catchBalance++;
+        } else {
+            this.catchMisses++;
+            this.catchBalance--;
+        }
+
+        this.markInfoChanged();
+    }
+
+    resetCatchProgress() {
+        if (
+            this.catchHits === 0
+            && this.catchMisses === 0
+            && this.catchBalance === 0
+            && this.pendingCatchEliminationTargets.size === 0
+        ) {
+            return;
+        }
+
+        this.catchHits = 0;
+        this.catchMisses = 0;
+        this.catchBalance = 0;
+        this.pendingCatchEliminationTargets.clear();
+        this.markInfoChanged();
+    }
+
+    queueCatchEliminationTarget(playerId) {
+        if (!playerId || playerId === this.id || this.pendingCatchEliminationTargets.has(playerId)) {
+            return;
+        }
+
+        this.pendingCatchEliminationTargets.add(playerId);
+        this.markInfoChanged();
+    }
+
+    clearCatchEliminationTarget(playerId) {
+        if (this.pendingCatchEliminationTargets.delete(playerId)) {
+            this.markInfoChanged();
+        }
+    }
+
+    consumeCatchEliminationTargets() {
+        const targets = [...this.pendingCatchEliminationTargets];
+
+        if (targets.length > 0) {
+            this.pendingCatchEliminationTargets.clear();
+            this.markInfoChanged();
+        }
+
+        return targets;
+    }
+
+    addElimination() {
+        this.eliminations++;
+        this.markInfoChanged();
+    }
+
+    loseLife() {
+        this.lives = Math.max(0, this.lives - 1);
+        this.markInfoChanged();
+
+        return this.lives;
+    }
+
+    resetLives() {
+        this.lives = this.maxLives;
+        this.markInfoChanged();
     }
 
     pressAction(action) {
@@ -175,6 +280,11 @@ class Player {
             y: this.y,
             angle: this.angle,
             color: this.color,
+            name: this.name,
+            eliminations: this.eliminations,
+            lives: this.lives,
+            maxLives: this.maxLives,
+            catchBalance: this.catchBalance,
             territoryX: this.territoryX,
             territoryY: this.territoryY
         };

@@ -104,7 +104,9 @@ function normalizePlayerOptions(rawPlayer) {
     }
 
     return {
-        color: String(rawPlayer.color || "").trim()
+        color: String(rawPlayer.color || "").trim(),
+        difficulty: String(rawPlayer.difficulty || "").trim(),
+        name: String(rawPlayer.name || "").trim()
     };
 }
 

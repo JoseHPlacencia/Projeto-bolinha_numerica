@@ -175,6 +175,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             players,
             territories,
             trails,
+            leaderboard: rawSnapshot.leaderboard || [],
+            mode: rawSnapshot.mode || null,
             numbers: rawSnapshot.numbers || null
         };
     }
@@ -196,6 +198,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             players: snapshot.players || {},
             territories: snapshot.territories || {},
             trails: snapshot.trails || {},
+            leaderboard: snapshot.leaderboard || [],
+            mode: snapshot.mode || null,
             numbers: snapshot.numbers || null
         };
     }
@@ -302,6 +306,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createRenderState(snapshot, players) {
         return {
             players,
+            leaderboard: snapshot.leaderboard || [],
+            mode: snapshot.mode || null,
             numbers: snapshot.numbers || null,
             territories: snapshot.territories,
             trails: snapshot.trails
@@ -311,6 +317,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createInterpolatedRenderState(previous, next, players) {
         return {
             players,
+            leaderboard: next.leaderboard || previous.leaderboard || [],
+            mode: next.mode || previous.mode || null,
             numbers: next.numbers || previous.numbers || null,
             territories: next.territories,
             trails: previous.trails
@@ -323,7 +331,12 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 color: info[0],
                 territoryX: info[1],
                 territoryY: info[2],
-                version: info[3]
+                version: info[3],
+                name: info[4],
+                eliminations: info[5],
+                lives: info[6],
+                maxLives: info[7],
+                catchBalance: info[8]
             };
         }
     }
@@ -922,6 +935,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 y: player[1],
                 angle: player[2],
                 color: info.color || "#f5f7fb",
+                name: info.name || "Jogador",
+                eliminations: Number.isFinite(info.eliminations) ? info.eliminations : 0,
+                lives: Number.isFinite(info.lives) ? info.lives : 0,
+                maxLives: Number.isFinite(info.maxLives) ? info.maxLives : 0,
+                catchBalance: Number.isFinite(info.catchBalance) ? info.catchBalance : 0,
                 territoryX: Number.isFinite(info.territoryX) ? info.territoryX : player[0],
                 territoryY: Number.isFinite(info.territoryY) ? info.territoryY : player[1]
             };

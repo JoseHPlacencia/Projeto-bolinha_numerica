@@ -7,7 +7,7 @@ import { createRoomUi } from "./roomUi.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createWorldRenderer } from "./worldRenderer.js";
 
-const WORKER_MAIN_UPDATE_INTERVAL_MS = 1000 / 15;
+const DEFAULT_MINIMAP_FRAME_RATE = 15;
 
 export function startClient(gameConfig, options = {}) {
     const socket = io({
@@ -30,6 +30,7 @@ export function startClient(gameConfig, options = {}) {
     });
     const frameMonitor = createFrameMonitor();
     const isWorkerRenderer = renderer.getDebugState().mode === "worker";
+    const workerMainUpdateIntervalMs = getMinimapUpdateIntervalMs(gameConfig);
     let myId = null;
     let lastViewportSentAt = 0;
     let lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
@@ -56,6 +57,14 @@ export function startClient(gameConfig, options = {}) {
 
     socket.on("numberCollected", data => {
         numberHud.showCollection(data);
+    });
+
+    socket.on("gameOver", data => {
+        resetSessionState();
+        if (typeof options.onGameOver === "function") {
+            options.onGameOver(data);
+        }
+        socket.disconnect();
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
@@ -104,6 +113,9 @@ export function startClient(gameConfig, options = {}) {
             },
             rendererStats: renderer.getDebugState(),
             snapshotStats: snapshots.getDebugState(),
+            currentPlayer,
+            currentPlayerId: myId,
+            leaderboard: state && state.leaderboard,
             playerDebug: currentPlayer && currentPlayer.debug
         });
 
@@ -120,7 +132,7 @@ export function startClient(gameConfig, options = {}) {
     }
 
     function shouldUpdateWorkerMainViews(now) {
-        if (now - lastWorkerMainUpdateAt < WORKER_MAIN_UPDATE_INTERVAL_MS) {
+        if (now - lastWorkerMainUpdateAt < workerMainUpdateIntervalMs) {
             return false;
         }
 
@@ -174,5 +186,19 @@ export function startClient(gameConfig, options = {}) {
                     trails: []
                 }
         };
+    }
+
+    function getMinimapUpdateIntervalMs(config) {
+        const frameRate = Number(config && config.minimap && config.minimap.frameRate);
+
+        if (frameRate === 0) {
+            return 0;
+        }
+
+        const safeFrameRate = Number.isFinite(frameRate) && frameRate > 0
+            ? frameRate
+            : DEFAULT_MINIMAP_FRAME_RATE;
+
+        return 1000 / safeFrameRate;
     }
 }

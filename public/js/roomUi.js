@@ -1,7 +1,7 @@
 export function createRoomUi(socket, options = {}) {
     const elements = getRoomElements();
 
-    if (!elements.roomMenuButton || !elements.roomModal) {
+    if (!elements.roomModal) {
         return createEmptyRoomUi();
     }
 
@@ -100,13 +100,17 @@ function getRoomElements() {
 }
 
 function bindRoomModal(elements) {
-    elements.roomMenuButton.addEventListener("click", () => {
-        openModal(elements);
-    });
+    if (elements.roomMenuButton) {
+        elements.roomMenuButton.addEventListener("click", () => {
+            openModal(elements);
+        });
+    }
 
-    elements.closeRoomMenuButton.addEventListener("click", () => {
-        closeModal(elements);
-    });
+    if (elements.closeRoomMenuButton) {
+        elements.closeRoomMenuButton.addEventListener("click", () => {
+            closeModal(elements);
+        });
+    }
 
     elements.roomModal.addEventListener("click", event => {
         if (event.target === elements.roomModal) {
@@ -287,6 +291,10 @@ function createPlayerPayload(options = {}) {
 
     if (typeof rawPlayer.name === "string") {
         player.name = rawPlayer.name.trim();
+    }
+
+    if (typeof rawPlayer.difficulty === "string") {
+        player.difficulty = rawPlayer.difficulty.trim();
     }
 
     return Object.keys(player).length > 0 ? { player } : {};
