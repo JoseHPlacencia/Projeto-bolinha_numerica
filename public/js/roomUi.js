@@ -11,17 +11,17 @@ export function createRoomUi(socket, options = {}) {
     bindRoomModal(elements);
     bindExitButton(socket, elements, options);
     bindPrivateRoomToggle(elements);
-    bindCreateRoom(socket, elements);
-    bindJoinRoom(socket, elements);
+    bindCreateRoom(socket, elements, options);
+    bindJoinRoom(socket, elements, options);
     bindLeaveRoom(socket, elements);
     bindRoomFilters(elements, filter => {
         currentFilter = filter;
-        renderRoomsList(socket, elements, allRooms, currentFilter);
+        renderRoomsList(socket, elements, allRooms, currentFilter, options);
     });
 
     socket.on("roomsList", rooms => {
         allRooms = Array.isArray(rooms) ? rooms : [];
-        renderRoomsList(socket, elements, allRooms, currentFilter);
+        renderRoomsList(socket, elements, allRooms, currentFilter, options);
         if (typeof options.onRoomsList === "function") {
             options.onRoomsList(allRooms);
         }
@@ -53,9 +53,9 @@ export function createRoomUi(socket, options = {}) {
     return {
         clearRoomInfo: () => clearRoomInfo(elements),
         closeModal: () => closeModal(elements),
-        createRoom: roomOptions => createRoom(socket, elements, roomOptions),
+        createRoom: roomOptions => createRoom(socket, elements, roomOptions, options),
         getRooms: () => [...allRooms],
-        joinRoom: roomOptions => joinRoom(socket, elements, roomOptions),
+        joinRoom: roomOptions => joinRoom(socket, elements, roomOptions, options),
         openModal: () => openModal(elements),
         resetActions: () => resetActions(elements)
     };
@@ -141,21 +141,21 @@ function bindPrivateRoomToggle(elements) {
     });
 }
 
-function bindCreateRoom(socket, elements) {
+function bindCreateRoom(socket, elements, options) {
     elements.createRoomButton.addEventListener("click", () => {
         createRoom(socket, elements, {
             isPrivate: elements.privateRoomCheckbox.checked,
             password: elements.roomCreatePasswordInput.value.trim()
-        });
+        }, options);
     });
 }
 
-function bindJoinRoom(socket, elements) {
+function bindJoinRoom(socket, elements, options) {
     elements.joinRoomButton.addEventListener("click", () => {
         joinRoom(socket, elements, {
             password: elements.roomJoinPasswordInput.value.trim(),
             roomCode: elements.roomCodeInput.value.trim().toUpperCase()
-        });
+        }, options);
     });
 }
 
@@ -184,7 +184,7 @@ function bindRoomFilters(elements, onFilterChange) {
     });
 }
 
-function createRoom(socket, elements, roomOptions = {}) {
+function createRoom(socket, elements, roomOptions = {}, options = {}) {
     const isPrivate = Boolean(roomOptions.isPrivate);
     const password = typeof roomOptions.password === "string"
         ? roomOptions.password.trim()
@@ -200,11 +200,12 @@ function createRoom(socket, elements, roomOptions = {}) {
     socket.emit("joinRoom", {
         createNewRoom: true,
         isPrivate,
-        password
+        password,
+        ...createPlayerPayload(options)
     });
 }
 
-function joinRoom(socket, elements, roomOptions = {}) {
+function joinRoom(socket, elements, roomOptions = {}, options = {}) {
     const roomCode = typeof roomOptions.roomCode === "string"
         ? roomOptions.roomCode.trim().toUpperCase()
         : "";
@@ -221,11 +222,12 @@ function joinRoom(socket, elements, roomOptions = {}) {
     elements.joinRoomButton.disabled = true;
     socket.emit("joinRoom", {
         roomCode,
-        password
+        password,
+        ...createPlayerPayload(options)
     });
 }
 
-function renderRoomsList(socket, elements, rooms, currentFilter) {
+function renderRoomsList(socket, elements, rooms, currentFilter, options = {}) {
     const filteredRooms = rooms.filter(room => {
         if (currentFilter === "public") return !room.isPrivate;
         if (currentFilter === "private") return room.isPrivate;
@@ -261,9 +263,33 @@ function renderRoomsList(socket, elements, rooms, currentFilter) {
             joinRoom(socket, elements, {
                 roomCode: button.dataset.code,
                 password: ""
-            });
+            }, options);
         });
     });
+}
+
+function createPlayerPayload(options = {}) {
+    if (typeof options.getPlayerOptions !== "function") {
+        return {};
+    }
+
+    const rawPlayer = options.getPlayerOptions();
+
+    if (!rawPlayer || typeof rawPlayer !== "object") {
+        return {};
+    }
+
+    const player = {};
+
+    if (typeof rawPlayer.color === "string") {
+        player.color = rawPlayer.color.trim();
+    }
+
+    if (typeof rawPlayer.name === "string") {
+        player.name = rawPlayer.name.trim();
+    }
+
+    return Object.keys(player).length > 0 ? { player } : {};
 }
 
 function resetRoomForm(elements) {

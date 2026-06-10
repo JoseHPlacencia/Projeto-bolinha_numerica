@@ -40,6 +40,7 @@ export function startClient(gameConfig, options = {}) {
             : () => document.body.classList.contains("is-game-active")
     });
     const roomUi = createRoomUi(socket, {
+        getPlayerOptions: options.getPlayerOptions,
         onExitGame: options.onExitGame,
         onJoinFailure: options.onJoinFailure,
         onJoinSuccess: handleRoomJoinSuccess,

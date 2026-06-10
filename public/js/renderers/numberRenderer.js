@@ -53,7 +53,7 @@ export function drawNumberLayer(ctx, numbers, viewportBounds) {
 
         const textLength = String(display).length;
         const fontSize = textLength > 5 ? 13 : textLength > 4 ? 15 : textLength > 3 ? 17 : textLength > 2 ? 19 : 22;
-        ctx.font      = `900 ${fontSize}px Arial,sans-serif`;
+        ctx.font      = `900 ${fontSize}px Play,sans-serif`;
         ctx.fillStyle = foregroundColor;
         ctx.fillText(display, x, y);
     }

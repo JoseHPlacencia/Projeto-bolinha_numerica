@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Play:wght@400;700&display=swap");
+
 *, *::before, *::after {
     box-sizing: border-box;
 }
@@ -29,7 +31,8 @@ body {
 body {
     background: var(--bg);
     color: var(--text);
-    font-family: "Segoe UI", Arial, Helvetica, sans-serif;
+    font-family: "Play", sans-serif;
+    font-weight: 500;
 }
 
 button,
@@ -128,6 +131,7 @@ label {
     color: var(--muted);
     display: block;
     font-size: 0.72rem;
+    font-weight: 600;
     letter-spacing: 2px;
     margin-bottom: 8px;
     text-transform: uppercase;
@@ -139,6 +143,7 @@ input[type="password"] {
     border: 1px solid var(--border);
     border-radius: 8px;
     color: var(--text);
+    font-weight: 600;
     outline: none;
     padding: 12px 14px;
     transition: border-color 0.2s, box-shadow 0.2s;
@@ -198,6 +203,7 @@ input[type="password"]:focus {
     border-radius: 8px;
     color: var(--muted);
     font-size: 0.82rem;
+    font-weight: 700;
     letter-spacing: 1px;
     padding: 10px 6px;
     text-align: center;

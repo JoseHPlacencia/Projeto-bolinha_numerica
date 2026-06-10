@@ -7,6 +7,12 @@ function createRandomColor() {
     return `hsl(${hue},80%,50%)`;
 }
 
+function normalizePlayerColor(color) {
+    const normalizedColor = String(color || "").trim().toLowerCase();
+
+    return /^#[0-9a-f]{6}$/.test(normalizedColor) ? normalizedColor : null;
+}
+
 function getRandomAngle() {
     return Math.random() * Math.PI * 2;
 }
@@ -22,8 +28,9 @@ function getLastSetValue(values) {
 }
 
 class Player {
-    constructor(id, spawn) {
+    constructor(id, spawn, options = {}) {
         this.id = id;
+        this.color = normalizePlayerColor(options.color) || createRandomColor();
         this.pressedActions = new Set();
         this.lastAction = null;
         this.directionAngle = null;
@@ -42,7 +49,7 @@ class Player {
         this.x = spawn.x;
         this.y = spawn.y;
         this.angle = getRandomAngle();
-        this.color = createRandomColor();
+        this.color ||= createRandomColor();
         this.territoryX = spawn.x;
         this.territoryY = spawn.y;
         this.markInfoChanged();
@@ -180,8 +187,8 @@ class Player {
     }
 }
 
-function createPlayer(players, id, territories = null) {
-    const player = new Player(id, createSpawn(players, territories));
+function createPlayer(players, id, territories = null, options = {}) {
+    const player = new Player(id, createSpawn(players, territories), options);
     players.set(id, player);
     return player;
 }

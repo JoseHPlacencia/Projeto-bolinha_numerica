@@ -91,25 +91,26 @@ function injectThemeStyles() {
             letter-spacing: 1.2px;
             text-transform: uppercase;
             color: rgba(255,255,255,0.45);
-            font-family: 'Segoe UI', sans-serif;
+            font-family: 'Play', sans-serif;
         }
         .theme-label {
             font-size: 17px;
             font-weight: 800;
             color: #fff;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: 'Play', sans-serif;
             line-height: 1.1;
         }
         .theme-desc {
             font-size: 11px;
+            font-weight: 500;
             color: rgba(255,255,255,0.55);
-            font-family: 'Segoe UI', sans-serif;
+            font-family: 'Play', sans-serif;
         }
         .theme-timer {
             font-size: 13px;
             font-weight: 700;
             color: rgba(255,220,80,0.9);
-            font-family: 'Segoe UI', monospace;
+            font-family: 'Play', sans-serif;
             min-width: 30px;
             text-align: right;
         }
@@ -123,7 +124,8 @@ function injectThemeStyles() {
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.25s ease, transform 0.25s ease;
-            font-family: 'Segoe UI', sans-serif;
+            font-family: 'Play', sans-serif;
+            font-weight: 600;
         }
         #collectNotif.visible {
             opacity: 1;

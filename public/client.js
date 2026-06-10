@@ -7,6 +7,7 @@ const STORAGE_KEYS = {
     name: "bolinhaJogadorNome"
 };
 
+const DEFAULT_PLAYER_COLOR = "#ff2626";
 const playerNameInput = document.getElementById("player-name");
 const colorPicker = document.getElementById("color-picker");
 const difficultyRow = document.querySelector(".diff-row");
@@ -17,7 +18,7 @@ const gameLayer = document.getElementById("gameLayer");
 const statusMessage = createStatusMessage();
 const AUTO_START_TIMEOUT_MS = 10000;
 
-let selectedColor = "#4a90e2";
+let selectedColor = DEFAULT_PLAYER_COLOR;
 let selectedDifficulty = "medium";
 let gameClient = null;
 let pendingAutoStart = null;
@@ -31,6 +32,7 @@ async function initializeClient() {
     try {
         const gameConfig = await loadGameConfig();
         gameClient = startClient(gameConfig, {
+            getPlayerOptions,
             onExitGame: showMenu,
             onJoinFailure: handleJoinFailure,
             onJoinSuccess: handleJoinSuccess
@@ -124,7 +126,7 @@ function attachOverlayButtons() {
 
 function savePreferences() {
     const name = playerNameInput.value.trim() || "Jogador";
-    selectedColor ||= "#63d2ff";
+    selectedColor ||= DEFAULT_PLAYER_COLOR;
     selectedDifficulty ||= "medium";
 
     localStorage.setItem(STORAGE_KEYS.name, name);
@@ -133,10 +135,20 @@ function savePreferences() {
 }
 
 function selectColor(color) {
-    selectedColor = color;
-    colorPicker.querySelectorAll(".color-swatch").forEach(swatch => {
-        swatch.classList.toggle("selected", swatch.dataset.color === color);
+    const swatches = [...colorPicker.querySelectorAll(".color-swatch")];
+    const selectedSwatch = swatches.find(swatch => swatch.dataset.color === color);
+    selectedColor = selectedSwatch ? selectedSwatch.dataset.color : DEFAULT_PLAYER_COLOR;
+
+    swatches.forEach(swatch => {
+        swatch.classList.toggle("selected", swatch.dataset.color === selectedColor);
     });
+}
+
+function getPlayerOptions() {
+    return {
+        color: selectedColor || DEFAULT_PLAYER_COLOR,
+        name: playerNameInput.value.trim() || "Jogador"
+    };
 }
 
 function selectDifficulty(difficulty) {

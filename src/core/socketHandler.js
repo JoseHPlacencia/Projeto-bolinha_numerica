@@ -37,6 +37,7 @@ function registerRoomEvents(socket, io, roomManager) {
         const requestedCode = String(payload && payload.roomCode || "").trim().toUpperCase();
         const password = String(payload && payload.password || "");
         const isPrivate = Boolean(payload && payload.isPrivate);
+        const playerOptions = normalizePlayerOptions(payload && payload.player);
 
         if (createNewRoom) {
             const createResult = roomManager.createRoom(io, { isPrivate, password });
@@ -54,7 +55,7 @@ function registerRoomEvents(socket, io, roomManager) {
                 return;
             }
 
-            initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined);
+            initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined, playerOptions);
 
             socket.emit("joinRoomResult", { success: true, roomCode: joinResult.room.code });
             io.emit("roomsList", buildRoomsList(roomManager));
@@ -73,7 +74,7 @@ function registerRoomEvents(socket, io, roomManager) {
             return;
         }
 
-        initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined);
+        initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined, playerOptions);
 
         socket.emit("joinRoomResult", { success: true, roomCode: joinResult.room.code });
         io.emit("roomsList", buildRoomsList(roomManager));
@@ -90,11 +91,21 @@ function registerRoomEvents(socket, io, roomManager) {
     });
 }
 
-function initializeSocketPlayer(room, socket, alreadyJoined) {
+function initializeSocketPlayer(room, socket, alreadyJoined, playerOptions = {}) {
     if (alreadyJoined) return;
 
-    const player = createPlayer(room.players, socket.id, room.territories);
+    const player = createPlayer(room.players, socket.id, room.territories, playerOptions);
     initializePlayerTerritory(room.territories, player);
+}
+
+function normalizePlayerOptions(rawPlayer) {
+    if (!rawPlayer || typeof rawPlayer !== "object") {
+        return {};
+    }
+
+    return {
+        color: String(rawPlayer.color || "").trim()
+    };
 }
 
 function registerInputEvents(socket, roomManager) {
