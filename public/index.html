@@ -51,7 +51,8 @@
                 </div>
             </div>
 
-            <button class="btn-play" id="btn-play" type="button">▶ Jogar</button>
+            <button class="btn-play" id="btn-play" type="button">Partida rápida</button>
+            <button class="btn-encontrar-sala" id="btn-encontrar-sala" type="button">Encontrar sala</button>
             <button class="btn-criar-sala" id="btn-criar-sala" type="button">⚙ Criar sala</button>
         </div>
 
@@ -70,6 +71,72 @@
             </a>
         </div>
     </section>
+
+    <div id="roomCreateModal" class="room-modal menu-room-modal" aria-hidden="true">
+        <div class="room-modal__content" role="dialog" aria-modal="true" aria-label="Criar sala">
+            <div class="room-modal__header">
+                <div>
+                    <p class="room-modal__eyebrow">Sala personalizada</p>
+                    <h1>Criar sala</h1>
+                </div>
+                <button id="closeCreateRoomButton" class="room-modal__close" type="button">×</button>
+            </div>
+
+            <div class="room-modal__section room-modal__form room-modal__private-card">
+                <label class="room-toggle">
+                    <input id="privateRoomCheckbox" type="checkbox">
+                    <span class="room-toggle__track"><span class="room-toggle__thumb"></span></span>
+                    <span class="room-toggle__label">Sala privada</span>
+                </label>
+                <p class="room-modal__hint">Proteja a sala com senha e compartilhe o código apenas com quem você quiser.</p>
+                <label for="roomCreatePasswordInput" class="room-modal__input-label hidden">Senha da sala</label>
+                <input id="roomCreatePasswordInput" class="room-modal__input hidden" type="password" maxlength="20" autocomplete="new-password" placeholder="Senha para sala privada">
+                <button id="createRoomButton" class="room-button room-button--accent" type="button">Criar nova sala</button>
+            </div>
+
+            <p id="roomCreateStatus" class="room-status" aria-live="polite"></p>
+        </div>
+    </div>
+
+    <div id="roomFindModal" class="room-modal menu-room-modal" aria-hidden="true">
+        <div class="room-modal__content room-modal__content--wide" role="dialog" aria-modal="true" aria-label="Encontrar sala">
+            <div class="room-modal__header">
+                <div>
+                    <p class="room-modal__eyebrow">Salas ativas</p>
+                    <h1>Encontrar sala</h1>
+                </div>
+                <button id="closeFindRoomButton" class="room-modal__close" type="button">×</button>
+            </div>
+
+            <div class="room-modal__section room-modal__form">
+                <label for="roomCodeInput">Código da sala</label>
+                <input id="roomCodeInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
+                <label for="roomJoinPasswordInput">Senha da sala</label>
+                <input id="roomJoinPasswordInput" type="password" maxlength="20" autocomplete="current-password" placeholder="Senha da sala privada">
+                <button id="joinRoomButton" class="room-button" type="button">Entrar</button>
+            </div>
+
+            <div class="room-modal__section">
+                <div class="rooms-filter">
+                    <span>Filtrar salas:</span>
+                    <div class="rooms-filter__badges">
+                        <button id="filterAllBtn" class="rooms-filter__badge rooms-filter__badge--active" data-filter="all" type="button">Todas</button>
+                        <button id="filterPublicBtn" class="rooms-filter__badge" data-filter="public" type="button">Públicas</button>
+                        <button id="filterPrivateBtn" class="rooms-filter__badge" data-filter="private" type="button">Privadas</button>
+                    </div>
+                </div>
+                <ul id="roomsList" class="rooms-list"></ul>
+            </div>
+
+            <p id="roomFindStatus" class="room-status" aria-live="polite"></p>
+
+            <div id="roomInfo" class="room-info hidden">
+                <span>Sala atual:</span>
+                <strong id="roomCodeDisplay"></strong>
+                <button id="leaveRoomButton" class="room-link" type="button">Sair da sala</button>
+            </div>
+        </div>
+    </div>
 
     <div class="overlay" id="overlay-help" aria-hidden="true">
         <div class="popup" role="dialog" aria-modal="true" aria-label="Central de ajuda">
@@ -303,56 +370,6 @@
         </div>
     </div>
 
-    <div id="roomModal" class="room-modal" aria-hidden="true">
-        <div class="room-modal__content" role="dialog" aria-modal="true" aria-label="Menu de salas">
-            <div class="room-modal__header">
-                <h1>Menu de salas</h1>
-                <button id="closeRoomMenuButton" class="room-modal__close" type="button">×</button>
-            </div>
-
-            <div class="room-modal__section room-modal__form room-modal__private-card">
-                <label class="room-toggle">
-                    <input id="privateRoomCheckbox" type="checkbox">
-                    <span class="room-toggle__track"><span class="room-toggle__thumb"></span></span>
-                    <span class="room-toggle__label">Sala privada</span>
-                </label>
-                <p class="room-modal__hint">Proteja a sala com senha e compartilhe o código apenas com quem você quiser.</p>
-                <label for="roomCreatePasswordInput" class="room-modal__input-label hidden">Senha da sala</label>
-                <input id="roomCreatePasswordInput" class="room-modal__input hidden" type="password" maxlength="20" autocomplete="new-password" placeholder="Senha para sala privada">
-                <button id="createRoomButton" class="room-button room-button--accent" type="button">Criar nova sala</button>
-            </div>
-
-            <div class="room-modal__divider"><span>ou</span></div>
-
-            <div class="room-modal__section room-modal__form">
-                <label for="roomCodeInput">Código da sala</label>
-                <input id="roomCodeInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
-                <label for="roomJoinPasswordInput">Senha da sala</label>
-                <input id="roomJoinPasswordInput" type="password" maxlength="20" autocomplete="current-password" placeholder="Senha da sala privada">
-                <button id="joinRoomButton" class="room-button" type="button">Entrar</button>
-            </div>
-
-            <div class="room-modal__section">
-                <div class="rooms-filter">
-                    <span>Salas ativas:</span>
-                    <div class="rooms-filter__badges">
-                        <button id="filterAllBtn" class="rooms-filter__badge rooms-filter__badge--active" data-filter="all" type="button">Todas</button>
-                        <button id="filterPublicBtn" class="rooms-filter__badge" data-filter="public" type="button">Públicas</button>
-                        <button id="filterPrivateBtn" class="rooms-filter__badge" data-filter="private" type="button">Privadas</button>
-                    </div>
-                </div>
-                <ul id="roomsList" class="rooms-list"></ul>
-            </div>
-
-            <p id="roomStatus" class="room-status" aria-live="polite"></p>
-
-            <div id="roomInfo" class="room-info hidden">
-                <span>Sala atual:</span>
-                <strong id="roomCodeDisplay"></strong>
-                <button id="leaveRoomButton" class="room-link" type="button">Sair da sala</button>
-            </div>
-        </div>
-    </div>
 </section>
 
 <script src="/socket.io/socket.io.js"></script>

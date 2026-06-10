@@ -53,6 +53,7 @@ function getLastSetValue(values) {
 class Player {
     constructor(id, spawn, options = {}) {
         this.id = id;
+        this.isBot = Boolean(options.isBot);
         this.color = normalizePlayerColor(options.color) || createRandomColor();
         this.name = normalizePlayerName(options.name);
         this.difficulty = normalizeDifficulty(options.difficulty);

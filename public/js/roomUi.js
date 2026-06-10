@@ -1,7 +1,7 @@
 export function createRoomUi(socket, options = {}) {
     const elements = getRoomElements();
 
-    if (!elements.roomModal) {
+    if (!elements.roomCreateModal && !elements.roomFindModal) {
         return createEmptyRoomUi();
     }
 
@@ -56,7 +56,9 @@ export function createRoomUi(socket, options = {}) {
         createRoom: roomOptions => createRoom(socket, elements, roomOptions, options),
         getRooms: () => [...allRooms],
         joinRoom: roomOptions => joinRoom(socket, elements, roomOptions, options),
-        openModal: () => openModal(elements),
+        openCreateModal: () => openCreateModal(elements),
+        openFindModal: () => openFindModal(elements),
+        openModal: () => openFindModal(elements),
         resetActions: () => resetActions(elements)
     };
 }
@@ -70,6 +72,8 @@ function createEmptyRoomUi() {
             return [];
         },
         joinRoom() {},
+        openCreateModal() {},
+        openFindModal() {},
         openModal() {},
         resetActions() {}
     };
@@ -77,7 +81,8 @@ function createEmptyRoomUi() {
 
 function getRoomElements() {
     return {
-        closeRoomMenuButton: document.getElementById("closeRoomMenuButton"),
+        closeCreateRoomButton: document.getElementById("closeCreateRoomButton"),
+        closeFindRoomButton: document.getElementById("closeFindRoomButton"),
         createPasswordLabel: document.querySelector("label[for='roomCreatePasswordInput']"),
         createRoomButton: document.getElementById("createRoomButton"),
         exitGameButton: document.getElementById("exitGameButton"),
@@ -90,12 +95,14 @@ function getRoomElements() {
         roomCodeDisplay: document.getElementById("roomCodeDisplay"),
         roomCodeInput: document.getElementById("roomCodeInput"),
         roomCreatePasswordInput: document.getElementById("roomCreatePasswordInput"),
+        roomCreateModal: document.getElementById("roomCreateModal"),
+        roomCreateStatus: document.getElementById("roomCreateStatus"),
+        roomFindModal: document.getElementById("roomFindModal"),
+        roomFindStatus: document.getElementById("roomFindStatus"),
         roomInfo: document.getElementById("roomInfo"),
         roomJoinPasswordInput: document.getElementById("roomJoinPasswordInput"),
         roomMenuButton: document.getElementById("roomMenuButton"),
-        roomModal: document.getElementById("roomModal"),
-        roomsList: document.getElementById("roomsList"),
-        roomStatus: document.getElementById("roomStatus")
+        roomsList: document.getElementById("roomsList")
     };
 }
 
@@ -106,17 +113,25 @@ function bindRoomModal(elements) {
         });
     }
 
-    if (elements.closeRoomMenuButton) {
-        elements.closeRoomMenuButton.addEventListener("click", () => {
+    if (elements.closeCreateRoomButton) {
+        elements.closeCreateRoomButton.addEventListener("click", () => {
             closeModal(elements);
         });
     }
 
-    elements.roomModal.addEventListener("click", event => {
-        if (event.target === elements.roomModal) {
+    if (elements.closeFindRoomButton) {
+        elements.closeFindRoomButton.addEventListener("click", () => {
             closeModal(elements);
-        }
-    });
+        });
+    }
+
+    for (const modal of getRoomModals(elements)) {
+        modal.addEventListener("click", event => {
+            if (event.target === modal) {
+                closeModal(elements);
+            }
+        });
+    }
 }
 
 function bindExitButton(socket, elements, options) {
@@ -140,12 +155,16 @@ function bindExitButton(socket, elements, options) {
 }
 
 function bindPrivateRoomToggle(elements) {
+    if (!elements.privateRoomCheckbox) return;
+
     elements.privateRoomCheckbox.addEventListener("change", () => {
         togglePrivatePassword(elements, elements.privateRoomCheckbox.checked);
     });
 }
 
 function bindCreateRoom(socket, elements, options) {
+    if (!elements.createRoomButton) return;
+
     elements.createRoomButton.addEventListener("click", () => {
         createRoom(socket, elements, {
             isPrivate: elements.privateRoomCheckbox.checked,
@@ -155,6 +174,8 @@ function bindCreateRoom(socket, elements, options) {
 }
 
 function bindJoinRoom(socket, elements, options) {
+    if (!elements.joinRoomButton) return;
+
     elements.joinRoomButton.addEventListener("click", () => {
         joinRoom(socket, elements, {
             password: elements.roomJoinPasswordInput.value.trim(),
@@ -164,6 +185,8 @@ function bindJoinRoom(socket, elements, options) {
 }
 
 function bindLeaveRoom(socket, elements) {
+    if (!elements.leaveRoomButton) return;
+
     elements.leaveRoomButton.addEventListener("click", () => {
         socket.emit("leaveRoom");
         elements.roomInfo.classList.add("hidden");
@@ -177,7 +200,7 @@ function bindRoomFilters(elements, onFilterChange) {
         elements.filterAllBtn,
         elements.filterPublicBtn,
         elements.filterPrivateBtn
-    ];
+    ].filter(Boolean);
 
     buttons.forEach(button => {
         button.addEventListener("click", () => {
@@ -201,6 +224,7 @@ function createRoom(socket, elements, roomOptions = {}, options = {}) {
 
     setStatus(elements, "Criando sala...");
     elements.createRoomButton.disabled = true;
+    notifyJoinStart(options);
     socket.emit("joinRoom", {
         createNewRoom: true,
         isPrivate,
@@ -224,6 +248,7 @@ function joinRoom(socket, elements, roomOptions = {}, options = {}) {
 
     setStatus(elements, "Entrando na sala...");
     elements.joinRoomButton.disabled = true;
+    notifyJoinStart(options);
     socket.emit("joinRoom", {
         roomCode,
         password,
@@ -232,6 +257,10 @@ function joinRoom(socket, elements, roomOptions = {}, options = {}) {
 }
 
 function renderRoomsList(socket, elements, rooms, currentFilter, options = {}) {
+    if (!elements.roomsList) {
+        return;
+    }
+
     const filteredRooms = rooms.filter(room => {
         if (currentFilter === "public") return !room.isPrivate;
         if (currentFilter === "private") return room.isPrivate;
@@ -249,6 +278,7 @@ function renderRoomsList(socket, elements, rooms, currentFilter, options = {}) {
                 ${room.code}
                 ${room.isPrivate ? '<span class="rooms-list__lock" aria-label="Sala privada">🔒</span>' : ""}
                 &mdash; ${room.playerCount} jogador${room.playerCount !== 1 ? "es" : ""}
+                ${room.botCount ? ` + ${room.botCount} bot${room.botCount !== 1 ? "s" : ""}` : ""}
             </span>
             <button class="room-button rooms-list__join" data-code="${room.code}" data-private="${room.isPrivate ? "1" : "0"}" type="button">Entrar</button>
         </li>
@@ -301,41 +331,84 @@ function createPlayerPayload(options = {}) {
 }
 
 function resetRoomForm(elements) {
-    elements.roomCodeInput.value = "";
-    elements.roomJoinPasswordInput.value = "";
-    elements.roomCreatePasswordInput.value = "";
-    elements.privateRoomCheckbox.checked = false;
+    if (elements.roomCodeInput) elements.roomCodeInput.value = "";
+    if (elements.roomJoinPasswordInput) elements.roomJoinPasswordInput.value = "";
+    if (elements.roomCreatePasswordInput) elements.roomCreatePasswordInput.value = "";
+    if (elements.privateRoomCheckbox) elements.privateRoomCheckbox.checked = false;
     togglePrivatePassword(elements, false);
 }
 
 function togglePrivatePassword(elements, isPrivate) {
-    elements.roomCreatePasswordInput.classList.toggle("hidden", !isPrivate);
-    elements.createPasswordLabel.classList.toggle("hidden", !isPrivate);
+    if (elements.roomCreatePasswordInput) {
+        elements.roomCreatePasswordInput.classList.toggle("hidden", !isPrivate);
+    }
+
+    if (elements.createPasswordLabel) {
+        elements.createPasswordLabel.classList.toggle("hidden", !isPrivate);
+    }
 }
 
 function setStatus(elements, message, isError = false) {
-    elements.roomStatus.textContent = message;
-    elements.roomStatus.classList.toggle("is-error", isError);
+    for (const statusElement of getStatusElements(elements)) {
+        statusElement.textContent = message;
+        statusElement.classList.toggle("is-error", isError);
+    }
 }
 
 function resetActions(elements) {
-    elements.createRoomButton.disabled = false;
-    elements.joinRoomButton.disabled = false;
+    if (elements.createRoomButton) elements.createRoomButton.disabled = false;
+    if (elements.joinRoomButton) elements.joinRoomButton.disabled = false;
 }
 
 function clearRoomInfo(elements) {
-    elements.roomInfo.classList.add("hidden");
-    elements.roomCodeDisplay.textContent = "";
+    if (elements.roomInfo) elements.roomInfo.classList.add("hidden");
+    if (elements.roomCodeDisplay) elements.roomCodeDisplay.textContent = "";
     setStatus(elements, "");
     resetActions(elements);
 }
 
-function openModal(elements) {
-    elements.roomModal.classList.add("is-open");
-    elements.roomModal.setAttribute("aria-hidden", "false");
+function openCreateModal(elements) {
+    closeModal(elements);
+    openRoomModal(elements.roomCreateModal);
+}
+
+function openFindModal(elements) {
+    closeModal(elements);
+    openRoomModal(elements.roomFindModal);
 }
 
 function closeModal(elements) {
-    elements.roomModal.classList.remove("is-open");
-    elements.roomModal.setAttribute("aria-hidden", "true");
+    for (const modal of getRoomModals(elements)) {
+        modal.classList.remove("is-open");
+        modal.setAttribute("aria-hidden", "true");
+    }
+}
+
+function openRoomModal(modal) {
+    if (!modal) {
+        return;
+    }
+
+    modal.classList.add("is-open");
+    modal.setAttribute("aria-hidden", "false");
+}
+
+function getRoomModals(elements) {
+    return [
+        elements.roomCreateModal,
+        elements.roomFindModal
+    ].filter(Boolean);
+}
+
+function getStatusElements(elements) {
+    return [
+        elements.roomCreateStatus,
+        elements.roomFindStatus
+    ].filter(Boolean);
+}
+
+function notifyJoinStart(options) {
+    if (typeof options.onJoinStart === "function") {
+        options.onJoinStart();
+    }
 }

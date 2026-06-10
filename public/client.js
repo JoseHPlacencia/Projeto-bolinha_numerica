@@ -12,6 +12,7 @@ const playerNameInput = document.getElementById("player-name");
 const colorPicker = document.getElementById("color-picker");
 const difficultyRow = document.querySelector(".diff-row");
 const playButton = document.getElementById("btn-play");
+const findRoomMenuButton = document.getElementById("btn-encontrar-sala");
 const createRoomMenuButton = document.getElementById("btn-criar-sala");
 const mainMenu = document.getElementById("mainMenu");
 const gameLayer = document.getElementById("gameLayer");
@@ -27,6 +28,7 @@ let gameClient = null;
 let pendingAutoStart = null;
 let pendingAutoStartTimer = null;
 let pendingSocketConnectCleanup = null;
+let pendingMenuRoomJoin = false;
 let nextAutoStartId = 0;
 
 initializeClient();
@@ -39,6 +41,7 @@ async function initializeClient() {
             onExitGame: showMenu,
             onGameOver: showGameOver,
             onJoinFailure: handleJoinFailure,
+            onJoinStart: handleRoomJoinStart,
             onJoinSuccess: handleJoinSuccess
         });
 
@@ -54,6 +57,7 @@ function initializeMenu() {
     attachColorPicker();
     attachDifficultyButtons();
     attachPlayButton();
+    attachFindRoomButton();
     attachCreateRoomButton();
     attachOverlayButtons();
     showMenu();
@@ -97,8 +101,18 @@ function attachCreateRoomButton() {
 
     createRoomMenuButton.addEventListener("click", () => {
         savePreferences();
-        showGame();
-        gameClient.roomUi.openModal();
+        ensureSocketConnection();
+        gameClient.roomUi.openCreateModal();
+    });
+}
+
+function attachFindRoomButton() {
+    if (!findRoomMenuButton) return;
+
+    findRoomMenuButton.addEventListener("click", () => {
+        savePreferences();
+        ensureSocketConnection();
+        gameClient.roomUi.openFindModal();
     });
 }
 
@@ -266,6 +280,14 @@ function handleJoinSuccess() {
         return;
     }
 
+    if (pendingMenuRoomJoin) {
+        pendingMenuRoomJoin = false;
+        showGame();
+        statusMessage.hide();
+        setMenuBusy(false);
+        return;
+    }
+
     if (!document.body.classList.contains("is-game-active")) {
         gameClient.socket.emit("leaveRoom");
         gameClient.roomUi.clearRoomInfo();
@@ -276,6 +298,8 @@ function handleJoinSuccess() {
 }
 
 function handleJoinFailure(result) {
+    pendingMenuRoomJoin = false;
+
     if (!pendingAutoStart) {
         return;
     }
@@ -299,8 +323,13 @@ function finishAutoStartAttempt() {
 
 function cancelAutoStartAttempt() {
     pendingAutoStart = null;
+    pendingMenuRoomJoin = false;
     clearAutoStartTimer();
     clearPendingSocketConnectWait();
+}
+
+function handleRoomJoinStart() {
+    pendingMenuRoomJoin = !pendingAutoStart && document.body.classList.contains("is-menu-active");
 }
 
 function clearAutoStartTimer() {
@@ -318,6 +347,14 @@ function clearPendingSocketConnectWait() {
     }
 
     pendingSocketConnectCleanup();
+}
+
+function ensureSocketConnection() {
+    if (!gameClient || gameClient.socket.connected) {
+        return;
+    }
+
+    gameClient.socket.connect();
 }
 
 function showGame() {
@@ -373,13 +410,15 @@ function hideGameOver() {
     gameOverPanel.setAttribute("aria-hidden", "true");
 }
 
-function setMenuBusy(isBusy, label = "Jogar") {
+function setMenuBusy(isBusy, label = "Partida rápida") {
     playButton.disabled = isBusy;
+    if (findRoomMenuButton) findRoomMenuButton.disabled = isBusy;
     if (createRoomMenuButton) createRoomMenuButton.disabled = isBusy;
-    playButton.textContent = isBusy ? label : "▶ Jogar";
+    playButton.textContent = isBusy ? label : "Partida rápida";
 }
 
 function openOverlay(overlayId) {
+    gameClient?.roomUi.closeModal();
     const overlay = document.getElementById(overlayId);
     if (!overlay) return;
     overlay.classList.add("open");
@@ -394,6 +433,7 @@ function closeOverlay(overlayId) {
 }
 
 function closeAllOverlays() {
+    gameClient?.roomUi.closeModal();
     document.querySelectorAll(".overlay.open").forEach(overlay => {
         overlay.classList.remove("open");
         overlay.setAttribute("aria-hidden", "true");

@@ -131,6 +131,7 @@ function createNumberSystem(mapRadius, players, territories) {
 
     return {
         getNumbersMap: () => state.numbers,
+        getTheme: () => state.theme,
         serialize: () => serializeNumbers(state),
         update: nowMs => updateNumbers(state, players, territories, mapRadius, nowMs)
     };

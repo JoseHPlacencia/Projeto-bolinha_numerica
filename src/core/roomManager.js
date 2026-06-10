@@ -6,6 +6,11 @@ const {
     createTerritories,
     deletePlayerTerritory
 } = require("../state/territories");
+const {
+    createBotManager,
+    getBotPlayerCount,
+    getHumanPlayerCount
+} = require("../systems/botSystem");
 const { createNumberSystem } = require("../systems/numberSystem");
 
 const rooms = new Map();
@@ -27,6 +32,7 @@ function createRoom(io, options = {}) {
         players,
         territories,
         numberSystem,
+        botManager: null,
         createdAt: Date.now(),
         lastActivity: Date.now(),
         gameLoopInterval: null,
@@ -52,7 +58,9 @@ function createRoom(io, options = {}) {
         room.passwordSalt = salt;
     }
 
-    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem);
+    room.botManager = createBotManager({ roomCode, players, territories, numberSystem });
+    room.botManager.ensureBots();
+    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem, room.botManager);
     room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem);
 
     rooms.set(roomCode, room);
@@ -80,7 +88,7 @@ function joinRoom(roomCode, socket, password = "") {
         }
     }
 
-    if (room.players.size >= config.rooms.maxPlayersPerRoom) {
+    if (getHumanPlayerCount(room.players) >= config.rooms.maxPlayersPerRoom) {
         return { success: false, message: "Room is full." };
     }
 
@@ -144,7 +152,7 @@ function leaveRoom(socket) {
     delete socket.data.roomCode;
     room.lastActivity = Date.now();
 
-    const destroyed = room.players.size === 0;
+    const destroyed = getHumanPlayerCount(room.players) === 0;
     if (destroyed) {
         destroyRoom(roomCode);
     }
@@ -169,7 +177,8 @@ function getRoomBySocketId(socketId) {
 function listRooms() {
     return Array.from(rooms.values()).map(room => ({
         code: room.code,
-        playerCount: room.players.size,
+        botCount: getBotPlayerCount(room.players),
+        playerCount: getHumanPlayerCount(room.players),
         isPrivate: Boolean(room.isPrivate),
         createdAt: room.createdAt
     }));

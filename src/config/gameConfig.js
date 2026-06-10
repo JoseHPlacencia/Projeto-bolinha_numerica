@@ -92,6 +92,34 @@ const gameMode = Object.freeze({
     })
 });
 
+const bots = Object.freeze({
+    enabled: true,
+    count: 2,
+    decisionIntervalMs: 180,
+    difficulty: "easy",
+    mistakeChance: 0.08,
+    angleNoiseRadians: 0.04,
+    dangerRadius: 1100,
+    huntRadius: 1400,
+    safetyMarginSec: 0.65,
+    expandMarginSec: 1.6,
+    huntMarginSec: 0.75,
+    captureLoopRadius: 620,
+    selfTrailAvoidDistance: world.playerSize * 1.35,
+    names: Object.freeze([
+        "Bot Atlas",
+        "Bot Euclides",
+        "Bot Noether",
+        "Bot Cantor"
+    ]),
+    colors: Object.freeze([
+        "#26ffff",
+        "#ff26e5",
+        "#a8ff78",
+        "#ffd166"
+    ])
+});
+
 const minimap = Object.freeze({
     frameRate: 0,
     mapBorderWidth: 3,
@@ -196,6 +224,7 @@ module.exports = Object.freeze({
     movement,
     player,
     gameMode,
+    bots,
     minimap,
     network,
     spawn,

@@ -235,6 +235,7 @@ input[type="password"]:focus {
 }
 
 .btn-play,
+.btn-encontrar-sala,
 .btn-criar-sala {
     border-radius: 8px;
     font-weight: 800;
@@ -259,13 +260,22 @@ input[type="password"]:focus {
     margin-top: 10px;
 }
 
+.btn-encontrar-sala {
+    background: rgba(99, 210, 255, 0.1);
+    border: 1px solid rgba(99, 210, 255, 0.38);
+    color: var(--text);
+    margin-top: 10px;
+}
+
 .btn-play:hover,
+.btn-encontrar-sala:hover,
 .btn-criar-sala:hover {
     filter: brightness(1.12);
     transform: translateY(-2px);
 }
 
 .btn-play:disabled,
+.btn-encontrar-sala:disabled,
 .btn-criar-sala:disabled {
     opacity: 0.55;
     transform: none;
@@ -937,7 +947,7 @@ body.is-menu-active #rankPanel {
 
 .room-modal {
     align-items: center;
-    background: rgba(0, 0, 0, 0.84);
+    background: rgba(4, 8, 15, 0.76);
     display: flex;
     inset: 0;
     justify-content: center;
@@ -946,7 +956,7 @@ body.is-menu-active #rankPanel {
     position: fixed;
     transition: opacity 180ms ease, visibility 180ms ease;
     visibility: hidden;
-    z-index: 10;
+    z-index: 25;
 }
 
 .room-modal.is-open {
@@ -956,14 +966,18 @@ body.is-menu-active #rankPanel {
 }
 
 .room-modal__content {
-    background: linear-gradient(180deg, rgba(18, 22, 38, 0.98), rgba(10, 12, 24, 0.98));
-    border: 1px solid rgba(124, 58, 237, 0.16);
+    background: var(--panel);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    box-shadow: 0 28px 90px rgba(7, 9, 16, 0.45);
+    box-shadow: var(--glow), 0 24px 60px rgba(0, 0, 0, 0.45);
     max-height: calc(100vh - 32px);
     overflow: auto;
     padding: 28px;
     width: min(420px, calc(100vw - 32px));
+}
+
+.room-modal__content--wide {
+    width: min(620px, calc(100vw - 32px));
 }
 
 .room-modal__header {
@@ -977,6 +991,16 @@ body.is-menu-active #rankPanel {
 .room-modal__header h1 {
     font-size: 18px;
     margin: 0;
+    text-transform: uppercase;
+}
+
+.room-modal__eyebrow {
+    color: var(--muted);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    margin: 0 0 5px;
+    text-transform: uppercase;
 }
 
 .room-modal__close {
@@ -1004,7 +1028,7 @@ body.is-menu-active #rankPanel {
 }
 
 .room-modal__divider span {
-    background: rgba(124, 58, 237, 0.14);
+    background: rgba(99, 210, 255, 0.12);
     border-radius: 999px;
     display: inline-block;
     padding: 0 14px;
@@ -1027,15 +1051,15 @@ body.is-menu-active #rankPanel {
 }
 
 .room-modal__hint {
-    color: rgba(205, 200, 255, 0.75);
+    color: var(--muted);
     font-size: 13px;
     line-height: 1.4;
     margin: 0;
 }
 
 .room-modal__private-card {
-    background: rgba(80, 56, 154, 0.12);
-    border: 1px solid rgba(124, 58, 237, 0.22);
+    background: rgba(99, 210, 255, 0.07);
+    border: 1px solid rgba(99, 210, 255, 0.18);
     border-radius: 8px;
     padding: 18px;
 }
@@ -1079,7 +1103,7 @@ body.is-menu-active #rankPanel {
 }
 
 .room-toggle input:checked + .room-toggle__track {
-    background: rgba(124, 58, 237, 0.94);
+    background: var(--accent);
 }
 
 .room-toggle input:checked + .room-toggle__track .room-toggle__thumb {
@@ -1105,12 +1129,13 @@ body.is-menu-active #rankPanel {
 }
 
 .room-button--accent {
-    background: rgba(124, 58, 237, 0.94);
-    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: linear-gradient(135deg, var(--accent) 0%, #38b4e8 100%);
+    border: none;
+    color: #060d1a;
 }
 
 .room-button--accent:hover {
-    background: rgba(124, 58, 237, 1);
+    filter: brightness(1.12);
 }
 
 .room-button:disabled,
@@ -1155,8 +1180,8 @@ body.is-menu-active #rankPanel {
 }
 
 .rooms-filter__badge {
-    background: rgba(124, 58, 237, 0.08);
-    border: 1px solid rgba(124, 58, 237, 0.24);
+    background: rgba(99, 210, 255, 0.08);
+    border: 1px solid rgba(99, 210, 255, 0.24);
     border-radius: 999px;
     color: rgba(255, 255, 255, 0.78);
     font-size: 12px;
@@ -1165,13 +1190,13 @@ body.is-menu-active #rankPanel {
 }
 
 .rooms-filter__badge:hover {
-    background: rgba(124, 58, 237, 0.16);
-    border-color: rgba(124, 58, 237, 0.35);
+    background: rgba(99, 210, 255, 0.14);
+    border-color: rgba(99, 210, 255, 0.38);
 }
 
 .rooms-filter__badge--active {
-    background: rgba(124, 58, 237, 0.3);
-    border-color: rgba(124, 58, 237, 0.5);
+    background: rgba(99, 210, 255, 0.24);
+    border-color: rgba(99, 210, 255, 0.5);
     color: #fff;
     font-weight: 600;
 }
@@ -1187,8 +1212,8 @@ body.is-menu-active #rankPanel {
 
 .rooms-list__item {
     align-items: center;
-    background: rgba(65, 46, 135, 0.14);
-    border: 1px solid rgba(124, 58, 237, 0.16);
+    background: rgba(99, 210, 255, 0.07);
+    border: 1px solid rgba(99, 210, 255, 0.16);
     border-radius: 8px;
     display: flex;
     gap: 10px;
