@@ -170,6 +170,8 @@ function selectColor(color) {
     swatches.forEach(swatch => {
         swatch.classList.toggle("selected", swatch.dataset.color === selectedColor);
     });
+
+    localStorage.setItem(STORAGE_KEYS.color, selectedColor);
 }
 
 function getPlayerOptions() {

@@ -232,36 +232,39 @@
                 <div class="tab-panel active" id="tab-mecanicas">
                     <div class="help-section">
                         <h3>Objetivo</h3>
-                        <p>Mova sua bolinha pela arena e conquiste território. Ao sair da sua área e traçar um caminho pela região neutra ou inimiga, uma trilha colorida fica atrás de você. Feche o loop voltando à sua área para capturar o território delimitado pela trilha.</p>
+                        <p>Mova-se pela arena e conquiste todo o território. Ao sair da sua área e traçar um caminho pela região neutra ou inimiga, uma trilha colorida fica atrás de você. Vá atrás dos números do tema e feche o loop voltando à sua área para capturar o território delimitado pela trilha.</p>
                     </div>
                     <div class="help-section">
-                        <h3>Mecânica de Trilha</h3>
+                        <h3>Mecânicas</h3>
                         <ul>
-                            <li>Trilha ativa — ao sair do seu território, você deixa uma linha colorida no mapa e fica vulnerável.</li>
-                            <li>Fechar o loop — retorne à sua área colorida com saldo positivo de acertos do tema para capturar o caminho traçado.</li>
+                            <li>Trilha ativa — ao sair do seu território, você deixa uma trilha colorida no mapa e fica vulnerável.</li>
+                            <li>Conjunto tema — dita quais números distribuidos pela arena você deve buscar.</li>
+                            <li>Saldo de acertos — indica quantos números do tema você acertou ou errou.</li>
+                            <li>Fechar o loop — retorne à sua área colorida com saldo positivo de acertos do tema para capturar o caminho traçado ao custo de um ponto.</li>
                             <li>Marcar rivais — cruze a trilha aberta de outro jogador para preparar uma eliminação.</li>
-                            <li>Eliminar rivais — após cruzar uma trilha inimiga, acerte um número do tema para eliminar aquele jogador.</li>
+                            <li>Eliminar rivais — após cruzar uma trilha inimiga, acerte um número do tema ou domine o território para eliminar aquele jogador.</li>
                         </ul>
                     </div>
                     <div class="help-section">
                         <h3>Controles</h3>
                         <ul>
-                            <li>Mouse ou toque — mova o cursor para guiar a bolinha pela arena.</li>
+                            <li>Mouse — mova o cursor para guiar o personagem pela arena.</li>
+                            <li>Toque na tela — pressione a tela e arraste para guiar o personagem.</li>
                             <li>WASD ou setas — movimento alternativo por teclado.</li>
-                            <li>Espaço — acelerar com turbo e recarga.</li>
+                            <li>Controle — conecte um controle e use o analógico ou direcional para se mover.</li>
                         </ul>
                     </div>
                     <div class="help-section">
                         <h3>Dificuldades</h3>
-                        <p>A dificuldade define quantas vidas você tem, quais números aparecem na arena e quão exigentes são os conjuntos do tema. Em todos os modos, capturar território exige saldo positivo de acertos do tema.</p>
+                        <p>A dificuldade define quantas vidas você tem, quais números aparecem na arena e quão exigentes são os conjuntos do tema.</p>
                         <div class="badge-row">
                             <span class="badge badge-easy">Fácil — 3 vidas</span>
                             <span class="badge badge-medium">Médio — 2 vidas</span>
                             <span class="badge badge-hard">Difícil — 1 vida</span>
                         </div>
                         <ul>
-                            <li>Fácil — usa números naturais, pares, ímpares, primos e múltiplos. Não aparecem raízes; os temas são mais amplos e dão mais margem para erro.</li>
-                            <li>Médio — adiciona negativos e frações, com uniões como Frações ∪ Negativos e Naturais ∪ Frações. Também não usa raízes, mas exige mais atenção ao tipo do número.</li>
+                            <li>Fácil — usa números naturais, pares, ímpares, primos e múltiplos. Os temas são mais amplos e dão mais margem para erro.</li>
+                            <li>Médio — adiciona negativos e frações, com uniões como Frações ∪ Negativos e Naturais ∪ Frações. Exige mais atenção ao tipo do número.</li>
                             <li>Difícil — inclui irracionais e raízes, mistura uniões e interseções e troca o tema mais rápido. Como há só 1 vida, errar ou ficar sem saldo positivo é muito mais arriscado.</li>
                         </ul>
                     </div>
@@ -270,8 +273,6 @@
                         <ul>
                             <li>O ranking ordena jogadores por porcentagem de território dominado.</li>
                             <li>Eliminações aparecem como critério competitivo secundário.</li>
-                            <li>Capturas só acontecem com saldo positivo de números corretos do tema.</li>
-                            <li>Números dentro do seu próprio território não podem ser coletados.</li>
                         </ul>
                     </div>
                 </div>
@@ -301,7 +302,6 @@
                         <ul>
                             <li>União (A ∪ B) — capture território com elementos de A ou de B.</li>
                             <li>Interseção (A ∩ B) — capture somente o que está nos dois conjuntos.</li>
-                            <li>Diferença (A − B) — capture o que está em A mas não em B.</li>
                             <li>Complemento (Aᶜ) — capture tudo que não pertence ao conjunto A.</li>
                         </ul>
                     </div>
@@ -312,12 +312,12 @@
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">◯</div>
                             <div class="gc-title">Território</div>
-                            <p>Feche loops ao voltar para sua área para anexar a região contornada pela trilha.</p>
+                            <p>É sua zona segura e condição de vitória, expanda se movimentando pelo mapa.</p>
                         </div>
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">#</div>
                             <div class="gc-title">Números</div>
-                            <p>Números aparecem pela arena. Pegue os que pertencem ao tema para manter saldo positivo e liberar capturas.</p>
+                            <p>Números aparecem pela arena. Pegue os que pertencem ao tema para manter saldo positivo e expandir seu território.</p>
                         </div>
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">∩</div>
@@ -325,19 +325,19 @@
                             <p>O tema pode pedir conjuntos simples, uniões ou interseções. Leia o alvo antes de arriscar a coleta.</p>
                         </div>
                         <div class="gallery-card">
-                            <div class="glyph" aria-hidden="true">★</div>
-                            <div class="gc-title">Placar</div>
-                            <p>O ranking mostra território dominado, eliminações e posição em tempo real.</p>
+                            <div class="glyph" aria-hidden="true">∑</div>
+                            <div class="gc-title">Desafio</div>
+                            <p>O conjunto-alvo muda periodicamente. Adapte sua estratégia ao novo conjunto anunciado.</p>
                         </div>
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">✂</div>
                             <div class="gc-title">Cortar Trilha</div>
-                            <p>Cruze uma trilha inimiga e depois acerte um número do tema para confirmar a eliminação.</p>
+                            <p>Cruze uma trilha inimiga e depois acerte um número do tema ou domine um território para confirmar a eliminação.</p>
                         </div>
                         <div class="gallery-card">
-                            <div class="glyph" aria-hidden="true">∑</div>
-                            <div class="gc-title">Desafio</div>
-                            <p>O conjunto-alvo muda periodicamente. Adapte sua estratégia ao novo conjunto anunciado.</p>
+                            <div class="glyph" aria-hidden="true">★</div>
+                            <div class="gc-title">Placar</div>
+                            <p>O ranking mostra território dominado, eliminações e posição em tempo real.</p>
                         </div>
                     </div>
                 </div>
