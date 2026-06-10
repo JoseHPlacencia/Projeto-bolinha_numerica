@@ -64,13 +64,24 @@ button:disabled {
 
 .main-menu::before {
     background:
-        radial-gradient(circle at 18% 18%, rgba(99, 210, 255, 0.12), transparent 28%),
-        radial-gradient(circle at 82% 78%, rgba(168, 255, 120, 0.12), transparent 30%),
-        linear-gradient(135deg, #07101d 0%, #0c1524 48%, #111827 100%);
+        radial-gradient(circle at 18% 18%, rgba(99, 210, 255, 0.18), transparent 28%),
+        radial-gradient(circle at 82% 78%, rgba(168, 255, 120, 0.16), transparent 30%),
+        linear-gradient(135deg, rgba(7, 16, 29, 0.88) 0%, rgba(12, 21, 36, 0.72) 48%, rgba(17, 24, 39, 0.84) 100%);
     content: "";
     inset: 0;
     pointer-events: none;
     position: fixed;
+    z-index: 1;
+}
+
+.menu-background-canvas {
+    height: 100vh;
+    inset: 0;
+    opacity: 0.46;
+    pointer-events: none;
+    position: fixed;
+    width: 100vw;
+    z-index: 0;
 }
 
 .menu-shell {
@@ -83,7 +94,7 @@ button:disabled {
     padding: 18px 0;
     position: relative;
     width: min(480px, 100%);
-    z-index: 1;
+    z-index: 2;
 }
 
 .logo-wrap {

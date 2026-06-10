@@ -1,5 +1,6 @@
 import { loadGameConfig } from "./js/config.js";
 import { startClient } from "./js/gameClient.js";
+import { createMenuBackground } from "./js/menuBackground.js";
 
 const STORAGE_KEYS = {
     color: "bolinhaJogadorCor",
@@ -26,6 +27,7 @@ const PLAY_BUTTON_IDLE_LABEL = "▶ Partida rápida";
 let selectedColor = DEFAULT_PLAYER_COLOR;
 let selectedDifficulty = "medium";
 let gameClient = null;
+let menuBackground = null;
 let pendingAutoStart = null;
 let pendingAutoStartTimer = null;
 let pendingSocketConnectCleanup = null;
@@ -37,6 +39,7 @@ initializeClient();
 async function initializeClient() {
     try {
         const gameConfig = await loadGameConfig();
+        menuBackground = createMenuBackground(gameConfig);
         gameClient = startClient(gameConfig, {
             getPlayerOptions,
             onExitGame: showMenu,
@@ -359,6 +362,7 @@ function ensureSocketConnection() {
 }
 
 function showGame() {
+    menuBackground?.stop();
     hideGameOver();
     closeAllOverlays();
     document.body.classList.remove("is-menu-active");
@@ -376,10 +380,12 @@ function showMenu() {
     gameLayer.setAttribute("aria-hidden", "true");
     statusMessage.hide();
     setMenuBusy(false);
+    menuBackground?.start();
 }
 
 function showGameOver(data = {}) {
     cancelAutoStartAttempt();
+    menuBackground?.stop();
     setMenuBusy(false);
     statusMessage.hide();
     gameClient.roomUi.clearRoomInfo();

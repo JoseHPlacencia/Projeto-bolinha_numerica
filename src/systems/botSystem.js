@@ -1,12 +1,15 @@
 const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
 const { initializePlayerTerritory, isPointOwnedByPlayer } = require("../state/territories");
-const { distanceBetween } = require("../utils/math");
+const { clamp, distanceBetween, lerpAngle } = require("../utils/math");
 
 const BOT_ID_PREFIX = "bot:";
+const geometryEpsilon = 1e-7;
 
-function createBotManager({ roomCode, players, territories, numberSystem }) {
+function createBotManager({ roomCode, players, territories, numberSystem, botCount = null, botDifficulty = null }) {
     const state = {
+        botCount,
+        botDifficulty,
         botIds: new Set(),
         lastDecisionAt: Number.NEGATIVE_INFINITY,
         nextBotNumber: 1
@@ -24,8 +27,8 @@ function createBotManager({ roomCode, players, territories, numberSystem }) {
             return;
         }
 
-        while (state.botIds.size < getTargetBotCount()) {
-            const bot = createBot(roomCode, players, territories, state.nextBotNumber++);
+        while (state.botIds.size < getTargetBotCount(state)) {
+            const bot = createBot(roomCode, players, territories, state.nextBotNumber++, state.botDifficulty);
             state.botIds.add(bot.id);
         }
     }
@@ -51,18 +54,20 @@ function createBotManager({ roomCode, players, territories, numberSystem }) {
     }
 }
 
-function createBot(roomCode, players, territories, botNumber) {
+function createBot(roomCode, players, territories, botNumber, botDifficulty = null) {
     const botConfig = config.bots;
-    const nameIndex = (botNumber - 1) % botConfig.names.length;
+    const botNames = getBotNames(botConfig);
+    const nameIndex = (botNumber - 1) % botNames.length;
     const colorIndex = (botNumber - 1) % botConfig.colors.length;
     const bot = createPlayer(players, `${BOT_ID_PREFIX}${roomCode}:${botNumber}`, territories, {
         color: botConfig.colors[colorIndex],
-        difficulty: botConfig.difficulty,
+        difficulty: botDifficulty || botConfig.difficulty,
         isBot: true,
-        name: botConfig.names[nameIndex]
+        name: botNames[nameIndex]
     });
 
     bot.botAi = {
+        expansionPlan: null,
         orbitDirection: Math.random() < 0.5 ? -1 : 1,
         orbitPhase: Math.random() * Math.PI * 2
     };
@@ -79,7 +84,16 @@ function updateBotDecision(bot, players, territories, numberSystem) {
         return;
     }
 
-    const angle = applyDecisionNoise(Math.atan2(target.y - bot.y, target.x - bot.x));
+    const targetAngle = Math.atan2(target.y - bot.y, target.x - bot.x);
+    const targetDistance = distanceBetween(bot.x, bot.y, target.x, target.y);
+    const decision = chooseSelfTrailSafeAngle(bot, targetAngle, {
+        allowReverse: isReturnTarget(bot, target),
+        targetDistance
+    });
+    const angle = applyDecisionNoise(decision.angle, {
+        avoidingSelfTrail: decision.avoidingSelfTrail
+    });
+
     bot.setDirectionAngle(angle, "bot");
 }
 
@@ -90,10 +104,6 @@ function chooseBotTarget(bot, players, territories, numberSystem) {
 
     if (pendingTarget) {
         return pendingTarget;
-    }
-
-    if (shouldAvoidOwnTrail(bot)) {
-        return getReturnTarget(bot);
     }
 
     const threat = evaluateThreat(bot, players, correctNumbers);
@@ -255,39 +265,97 @@ function chooseHuntTarget(bot, players, correctNumbers) {
     return bestHunt && bestHunt.target;
 }
 
-function shouldAvoidOwnTrail(bot) {
-    const trailPoints = getTrailPoints(bot, { skipRecent: 10 });
-
-    if (trailPoints.length === 0) {
-        return false;
-    }
-
-    const projectedPoint = {
-        x: bot.x + Math.cos(bot.angle) * config.world.playerSize * 2,
-        y: bot.y + Math.sin(bot.angle) * config.world.playerSize * 2
-    };
-
-    return getNearestDistance(projectedPoint, trailPoints) < config.bots.selfTrailAvoidDistance;
-}
-
 function getExpansionTarget(bot) {
     const ai = getBotAi(bot);
     const distanceFromBase = distanceBetween(bot.x, bot.y, bot.territoryX, bot.territoryY);
 
-    if (distanceFromBase > config.bots.captureLoopRadius * 1.65) {
+    if (!hasAnyTrail(bot) && !bot.isLeftTrailActive && !bot.isRightTrailActive) {
+        ai.expansionPlan = null;
+    }
+
+    const plan = getExpansionPlan(bot, ai, distanceFromBase);
+
+    if (distanceFromBase > plan.radius * 1.28) {
+        plan.phase = "return";
+    }
+
+    if (plan.phase === "outbound") {
+        if (distanceFromBase >= plan.radius * 0.96) {
+            plan.phase = "arc";
+            plan.arcStartAngle = getBaseRelativeAngle(bot, distanceFromBase);
+        } else {
+            return getExpansionPlanPoint(bot, plan.startAngle, plan.radius);
+        }
+    }
+
+    if (plan.phase === "arc") {
+        const currentAngle = getBaseRelativeAngle(bot, distanceFromBase);
+        const arcStartAngle = Number.isFinite(plan.arcStartAngle)
+            ? plan.arcStartAngle
+            : plan.startAngle;
+        const arcTargetAngle = arcStartAngle + plan.direction * plan.arcRadians;
+        const arcProgress = Math.abs(getAngleDelta(arcStartAngle, currentAngle));
+        const arcTarget = getExpansionPlanPoint(bot, arcTargetAngle, plan.radius);
+
+        if (arcProgress >= Math.abs(plan.arcRadians) * 0.92
+            || distanceBetween(bot.x, bot.y, arcTarget.x, arcTarget.y) < config.world.playerSize * 2) {
+            plan.phase = "return";
+        } else {
+            return arcTarget;
+        }
+    }
+
+    if (plan.phase === "return") {
         return getReturnTarget(bot);
     }
 
-    const baseAngle = distanceFromBase > 1
-        ? Math.atan2(bot.y - bot.territoryY, bot.x - bot.territoryX)
-        : ai.orbitPhase;
-    const radius = config.bots.captureLoopRadius * (bot.catchBalance > 1 ? 1.15 : 1);
-    const targetAngle = baseAngle + ai.orbitDirection * 1.15;
+    return getReturnTarget(bot);
+}
 
+function getExpansionPlan(bot, ai, distanceFromBase) {
+    if (ai.expansionPlan) {
+        return ai.expansionPlan;
+    }
+
+    ai.expansionPlan = {
+        arcRadians: getExpansionArcRadians(bot),
+        direction: ai.orbitDirection,
+        phase: "outbound",
+        radius: getExpansionRadius(bot),
+        startAngle: getBaseRelativeAngle(bot, distanceFromBase)
+    };
+
+    ai.orbitDirection *= Math.random() < 0.28 ? -1 : 1;
+    return ai.expansionPlan;
+}
+
+function getExpansionPlanPoint(bot, angle, radius) {
     return clampPointToMap({
-        x: bot.territoryX + Math.cos(targetAngle) * radius,
-        y: bot.territoryY + Math.sin(targetAngle) * radius
+        x: bot.territoryX + Math.cos(angle) * radius,
+        y: bot.territoryY + Math.sin(angle) * radius
     });
+}
+
+function getExpansionRadius(bot) {
+    const balanceBonus = Math.min(Math.max(bot.catchBalance - 1, 0), 4) * 0.09;
+    const radius = config.bots.captureLoopRadius * (1.24 + balanceBonus);
+    const maxRadius = config.world.mapRadius * 0.52;
+
+    return Math.min(radius, maxRadius);
+}
+
+function getExpansionArcRadians(bot) {
+    const balanceBonus = Math.min(Math.max(bot.catchBalance - 1, 0), 3) * 0.08;
+
+    return 1.65 + balanceBonus;
+}
+
+function getBaseRelativeAngle(bot, distanceFromBase) {
+    if (distanceFromBase > 1) {
+        return Math.atan2(bot.y - bot.territoryY, bot.x - bot.territoryX);
+    }
+
+    return getBotAi(bot).orbitPhase;
 }
 
 function getWanderTarget(bot) {
@@ -308,6 +376,11 @@ function getReturnTarget(player) {
     };
 }
 
+function isReturnTarget(bot, target) {
+    return Boolean(target)
+        && distanceBetween(target.x, target.y, bot.territoryX, bot.territoryY) <= config.world.playerSize;
+}
+
 function findNearestPoint(origin, points) {
     let nearest = null;
     let nearestDistance = Infinity;
@@ -324,22 +397,313 @@ function findNearestPoint(origin, points) {
     return nearest;
 }
 
-function getNearestDistance(origin, points) {
-    const nearest = findNearestPoint(origin, points);
+function getNearestDistanceSquared(origin, points) {
+    let nearestDistanceSquared = Infinity;
 
-    return nearest ? distanceBetween(origin.x, origin.y, nearest.x, nearest.y) : Infinity;
+    for (const point of points || []) {
+        const deltaX = origin.x - point.x;
+        const deltaY = origin.y - point.y;
+        const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+
+        if (distanceSquared < nearestDistanceSquared) {
+            nearestDistanceSquared = distanceSquared;
+        }
+    }
+
+    return nearestDistanceSquared;
+}
+
+function getAngleDelta(fromAngle, toAngle) {
+    return Math.atan2(
+        Math.sin(toAngle - fromAngle),
+        Math.cos(toAngle - fromAngle)
+    );
+}
+
+function normalizeAngle(angle) {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 function estimateTravelTime(player, target) {
     return distanceBetween(player.x, player.y, target.x, target.y) / config.movement.speed;
 }
 
-function applyDecisionNoise(angle) {
-    if (Math.random() < config.bots.mistakeChance) {
+function applyDecisionNoise(angle, options = {}) {
+    if (!options.avoidingSelfTrail && Math.random() < config.bots.mistakeChance) {
         return angle + (Math.random() * 2 - 1) * Math.PI * 0.65;
     }
 
-    return angle + (Math.random() * 2 - 1) * config.bots.angleNoiseRadians;
+    const noiseScale = options.avoidingSelfTrail ? 0.25 : 1;
+
+    return angle + (Math.random() * 2 - 1) * config.bots.angleNoiseRadians * noiseScale;
+}
+
+function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}) {
+    const trailPoints = getTrailPoints(bot, { skipRecent: getSelfTrailClearanceRecentPointSkip() });
+    const trailSegments = getSelfTrailSegments(bot, { skipRecent: getSelfTrailCollisionRecentPointSkip() });
+
+    if ((trailPoints.length === 0 && trailSegments.length === 0) || !Number.isFinite(targetAngle)) {
+        return {
+            angle: targetAngle,
+            avoidingSelfTrail: false
+        };
+    }
+
+    const targetSafety = getSelfTrailPathSafety(bot, targetAngle, trailPoints, trailSegments, options);
+
+    if (!isSelfTrailPathUnsafe(targetSafety)) {
+        return {
+            angle: targetAngle,
+            avoidingSelfTrail: false
+        };
+    }
+
+    const candidates = createSelfTrailAvoidanceCandidates(bot, targetAngle, options);
+    let bestAnyCandidate = {
+        angle: targetAngle,
+        safety: targetSafety,
+        score: scoreSelfTrailCandidate(targetAngle, targetAngle, targetSafety, options)
+    };
+    let bestNonCrossingCandidate = targetSafety.crossesTrail
+        ? null
+        : bestAnyCandidate;
+
+    for (const angle of candidates) {
+        const safety = getSelfTrailPathSafety(bot, angle, trailPoints, trailSegments, options);
+        const score = scoreSelfTrailCandidate(angle, targetAngle, safety, options);
+
+        if (score > bestAnyCandidate.score) {
+            bestAnyCandidate = {
+                angle,
+                safety,
+                score
+            };
+        }
+
+        if (!safety.crossesTrail && (!bestNonCrossingCandidate || score > bestNonCrossingCandidate.score)) {
+            bestNonCrossingCandidate = {
+                angle,
+                safety,
+                score
+            };
+        }
+    }
+
+    const bestCandidate = bestNonCrossingCandidate
+        || chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, trailPoints, trailSegments, candidates, options)
+        || bestAnyCandidate;
+
+    return {
+        angle: bestCandidate.angle,
+        avoidingSelfTrail: true
+    };
+}
+
+function scoreSelfTrailCandidate(angle, targetAngle, safety, options = {}) {
+    const targetPenaltyScale = options.allowReverse ? 0.35 : 0.85;
+    const targetPenalty = Math.abs(getAngleDelta(angle, targetAngle))
+        * config.bots.selfTrailAvoidDistance
+        * targetPenaltyScale;
+    const crossPenalty = safety.crossesTrail ? config.world.mapRadius * 10 : 0;
+    const clearanceScore = Number.isFinite(safety.clearance)
+        ? safety.clearance * 4
+        : config.bots.selfTrailAvoidDistance * 4;
+
+    return clearanceScore - targetPenalty - crossPenalty;
+}
+
+function createSelfTrailAvoidanceCandidates(bot, targetAngle, options = {}) {
+    const returnTarget = getReturnTarget(bot);
+    const returnAngle = Math.atan2(returnTarget.y - bot.y, returnTarget.x - bot.x);
+    const baseAngles = options.allowReverse
+        ? [targetAngle, bot.angle, returnAngle].filter(Number.isFinite)
+        : [targetAngle, bot.angle].filter(Number.isFinite);
+    const offsets = options.allowReverse
+        ? [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.45, -1.45, 1.9, -1.9, 2.45, -2.45, Math.PI]
+        : [0, 0.3, -0.3, 0.6, -0.6, 0.95, -0.95, 1.3, -1.3, 1.75, -1.75, 2.35, -2.35, Math.PI];
+    const candidates = [];
+    const seen = new Set();
+
+    for (const baseAngle of baseAngles) {
+        for (const offset of offsets) {
+            addSelfTrailCandidate(candidates, seen, baseAngle + offset);
+        }
+    }
+
+    const fullCircleSteps = options.allowReverse ? 32 : 24;
+
+    for (let index = 0; index < fullCircleSteps; index++) {
+        addSelfTrailCandidate(candidates, seen, targetAngle + (Math.PI * 2 * index) / fullCircleSteps);
+    }
+
+    return candidates;
+}
+
+function chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, trailPoints, trailSegments, candidates, options = {}) {
+    const localOptions = {
+        ...options,
+        targetDistance: Math.max(config.world.playerSize * 4, config.bots.selfTrailAvoidDistance)
+    };
+    let bestCandidate = null;
+
+    for (const angle of candidates) {
+        const safety = getSelfTrailPathSafety(bot, angle, trailPoints, trailSegments, localOptions);
+
+        if (safety.crossesTrail) {
+            continue;
+        }
+
+        const score = scoreSelfTrailCandidate(angle, targetAngle, safety, options);
+
+        if (!bestCandidate || score > bestCandidate.score) {
+            bestCandidate = {
+                angle,
+                safety,
+                score
+            };
+        }
+    }
+
+    return bestCandidate;
+}
+
+function addSelfTrailCandidate(candidates, seen, rawAngle) {
+    const angle = normalizeAngle(rawAngle);
+    const key = Math.round(angle * 1000);
+
+    if (seen.has(key)) {
+        return;
+    }
+
+    seen.add(key);
+    candidates.push(angle);
+}
+
+function isSelfTrailPathUnsafe(safety, thresholdScale = 1) {
+    return safety.crossesTrail
+        || safety.clearance < config.bots.selfTrailAvoidDistance * thresholdScale;
+}
+
+function getSelfTrailPathSafety(bot, targetAngle, trailPoints, trailSegments, options = {}) {
+    let position = {
+        x: bot.x,
+        y: bot.y
+    };
+    let angle = bot.angle;
+    let nearestDistanceSquared = Infinity;
+    let crossesTrail = false;
+    const lookaheadDistance = getSelfTrailLookaheadDistance(options);
+    const sampleCount = getSelfTrailLookaheadSampleCount(lookaheadDistance);
+    const stepDistance = lookaheadDistance / sampleCount;
+    const stepDeltaTime = stepDistance / config.movement.speed;
+    let previousSamples = createSelfTrailAvoidanceSamplePoints(position, angle);
+
+    for (let index = 0; index < sampleCount; index++) {
+        angle = lerpAngle(angle, targetAngle, getSelfTrailSimulationRotationBlend(stepDeltaTime));
+        position = clampPointToMap({
+            x: position.x + Math.cos(angle) * stepDistance,
+            y: position.y + Math.sin(angle) * stepDistance
+        });
+
+        const currentSamples = createSelfTrailAvoidanceSamplePoints(position, angle);
+
+        if (!crossesTrail && doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegments)) {
+            crossesTrail = true;
+        }
+
+        for (const samplePoint of currentSamples) {
+            nearestDistanceSquared = Math.min(
+                nearestDistanceSquared,
+                getNearestDistanceSquared(samplePoint, trailPoints)
+            );
+        }
+
+        previousSamples = currentSamples;
+    }
+
+    return {
+        clearance: Math.sqrt(nearestDistanceSquared),
+        crossesTrail
+    };
+}
+
+function doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegments) {
+    if (!Array.isArray(trailSegments) || trailSegments.length === 0) {
+        return false;
+    }
+
+    for (let index = 0; index < previousSamples.length; index++) {
+        if (doesSegmentCrossSelfTrail(previousSamples[index], currentSamples[index], trailSegments)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function doesSegmentCrossSelfTrail(startPoint, endPoint, trailSegments) {
+    if (arePointsEqual(startPoint, endPoint)) {
+        return false;
+    }
+
+    for (const trailSegment of trailSegments) {
+        if (segmentsCross(startPoint, endPoint, trailSegment.start, trailSegment.end)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function createSelfTrailAvoidanceSamplePoints(position, angle) {
+    const halfWidth = config.world.playerSize / 2;
+    const normal = {
+        x: -Math.sin(angle),
+        y: Math.cos(angle)
+    };
+
+    return [
+        position,
+        {
+            x: position.x + normal.x * halfWidth,
+            y: position.y + normal.y * halfWidth
+        },
+        {
+            x: position.x - normal.x * halfWidth,
+            y: position.y - normal.y * halfWidth
+        }
+    ];
+}
+
+function getSelfTrailSimulationRotationBlend(deltaTime) {
+    const elapsedTicks = deltaTime * config.loop.tickRate;
+
+    return clamp(1 - Math.pow(1 - config.movement.rotationStrength, elapsedTicks), 0, 1);
+}
+
+function getSelfTrailLookaheadDistance(options = {}) {
+    const decisionDistance = config.movement.speed * (config.bots.decisionIntervalMs / 1000) * 2.5;
+    const targetDistance = Number.isFinite(options.targetDistance)
+        ? Math.min(options.targetDistance, config.world.mapRadius)
+        : 0;
+
+    return Math.max(config.world.playerSize * 3.5, decisionDistance, targetDistance);
+}
+
+function getSelfTrailLookaheadSampleCount(lookaheadDistance) {
+    const distance = Number.isFinite(lookaheadDistance)
+        ? lookaheadDistance
+        : getSelfTrailLookaheadDistance();
+
+    return Math.max(6, Math.ceil(distance / config.world.playerSize));
+}
+
+function getSelfTrailClearanceRecentPointSkip() {
+    return Math.max(10, Math.ceil((config.world.playerSize * 4) / config.territory.trailPointSpacing));
+}
+
+function getSelfTrailCollisionRecentPointSkip() {
+    return Math.max(4, Math.ceil((config.world.playerSize * 1.2) / config.territory.trailPointSpacing));
 }
 
 function getTrailPoints(player, options = {}) {
@@ -355,6 +719,15 @@ function getTrailPoints(player, options = {}) {
     return points.slice(0, points.length - options.skipRecent);
 }
 
+function getSelfTrailSegments(player, options = {}) {
+    const segments = [];
+
+    appendSelfTrailSegments(segments, player.trailLeftSegments, options.skipRecent);
+    appendSelfTrailSegments(segments, player.trailRightSegments, options.skipRecent);
+
+    return segments;
+}
+
 function appendTrailPoints(target, segments) {
     for (const segment of segments || []) {
         for (const point of segment || []) {
@@ -365,8 +738,88 @@ function appendTrailPoints(target, segments) {
     }
 }
 
+function appendSelfTrailSegments(target, segments, skipRecent = 0) {
+    if (!Array.isArray(segments)) {
+        return;
+    }
+
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+        const segment = segments[segmentIndex];
+
+        if (!Array.isArray(segment) || segment.length < 2) {
+            continue;
+        }
+
+        const isLastSegment = segmentIndex === segments.length - 1;
+        const usablePointCount = isLastSegment
+            ? Math.max(0, segment.length - skipRecent)
+            : segment.length;
+
+        for (let pointIndex = 0; pointIndex < usablePointCount - 1; pointIndex++) {
+            const start = segment[pointIndex];
+            const end = segment[pointIndex + 1];
+
+            if (isFinitePoint(start) && isFinitePoint(end)) {
+                target.push({ start, end });
+            }
+        }
+    }
+}
+
+function isFinitePoint(point) {
+    return point
+        && Number.isFinite(point.x)
+        && Number.isFinite(point.y);
+}
+
 function hasAnyTrail(player) {
     return getTrailPoints(player).length >= 2;
+}
+
+function segmentsCross(firstStart, firstEnd, secondStart, secondEnd) {
+    if (!doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd)) {
+        return false;
+    }
+
+    const firstDirection = subtractPoints(firstEnd, firstStart);
+    const secondDirection = subtractPoints(secondEnd, secondStart);
+    const denominator = crossProduct(firstDirection, secondDirection);
+
+    if (Math.abs(denominator) <= geometryEpsilon) {
+        return false;
+    }
+
+    const startDelta = subtractPoints(secondStart, firstStart);
+    const firstT = crossProduct(startDelta, secondDirection) / denominator;
+    const secondT = crossProduct(startDelta, firstDirection) / denominator;
+
+    return firstT > geometryEpsilon
+        && firstT <= 1 + geometryEpsilon
+        && secondT > geometryEpsilon
+        && secondT < 1 - geometryEpsilon;
+}
+
+function doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
+    return Math.max(Math.min(firstStart.x, firstEnd.x), Math.min(secondStart.x, secondEnd.x))
+        <= Math.min(Math.max(firstStart.x, firstEnd.x), Math.max(secondStart.x, secondEnd.x)) + geometryEpsilon
+        && Math.max(Math.min(firstStart.y, firstEnd.y), Math.min(secondStart.y, secondEnd.y))
+        <= Math.min(Math.max(firstStart.y, firstEnd.y), Math.max(secondStart.y, secondEnd.y)) + geometryEpsilon;
+}
+
+function subtractPoints(first, second) {
+    return {
+        x: first.x - second.x,
+        y: first.y - second.y
+    };
+}
+
+function crossProduct(first, second) {
+    return first.x * second.y - first.y * second.x;
+}
+
+function arePointsEqual(first, second) {
+    return Math.abs(first.x - second.x) <= geometryEpsilon
+        && Math.abs(first.y - second.y) <= geometryEpsilon;
 }
 
 function clampPointToMap(point) {
@@ -388,6 +841,7 @@ function clampPointToMap(point) {
 function getBotAi(bot) {
     if (!bot.botAi) {
         bot.botAi = {
+            expansionPlan: null,
             orbitDirection: Math.random() < 0.5 ? -1 : 1,
             orbitPhase: Math.random() * Math.PI * 2
         };
@@ -404,10 +858,20 @@ function pruneMissingBotIds(state, players) {
     }
 }
 
-function getTargetBotCount() {
-    const count = Number(config.bots.count);
+function getTargetBotCount(state = {}) {
+    const count = state.botCount === null || state.botCount === undefined
+        ? Number(config.bots.count)
+        : Number(state.botCount);
 
     return Number.isInteger(count) && count > 0 ? count : 0;
+}
+
+function getBotNames(botConfig) {
+    const names = Array.isArray(botConfig.reservedNames) && botConfig.reservedNames.length > 0
+        ? botConfig.reservedNames
+        : botConfig.names;
+
+    return Array.isArray(names) && names.length > 0 ? names : ["Atlas"];
 }
 
 function isBotPlayer(player) {

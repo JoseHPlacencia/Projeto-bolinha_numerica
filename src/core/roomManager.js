@@ -21,7 +21,13 @@ function createRoom(io, options = {}) {
         return { success: false, message: "Maximum number of rooms reached." };
     }
 
-    const roomCode = generateRoomCode();
+    const roomCode = String(options.roomCode || "").trim().toUpperCase() || generateRoomCode();
+    const isSystemRoom = Boolean(options.isSystemRoom);
+
+    if (rooms.has(roomCode)) {
+        return { success: false, message: "Room code already exists." };
+    }
+
     const isPrivate = Boolean(options.isPrivate);
     const territories = createTerritories();
     const players = new Map();
@@ -38,13 +44,15 @@ function createRoom(io, options = {}) {
         lastActivity: Date.now(),
         difficulty: normalizeRoomDifficulty(options.difficulty),
         gameLoopInterval: null,
+        hiddenFromList: Boolean(options.hiddenFromList),
         snapshotLoopInterval: null,
         isPrivate,
+        isSystemRoom,
         passwordHash: null,
         passwordSalt: null
     };
 
-    if (isPrivate) {
+    if (isPrivate && !isSystemRoom) {
         const password = String(options.password || "").trim();
         if (!password) {
             return { success: false, message: "A senha é obrigatória para salas privadas." };
@@ -60,13 +68,44 @@ function createRoom(io, options = {}) {
         room.passwordSalt = salt;
     }
 
-    room.botManager = createBotManager({ roomCode, players, territories, numberSystem });
+    room.botManager = createBotManager({
+        roomCode,
+        players,
+        territories,
+        numberSystem,
+        botCount: options.botCount,
+        botDifficulty: options.botDifficulty || difficultyKey
+    });
     room.botManager.ensureBots();
     room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem, room.botManager);
     room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem);
 
     rooms.set(roomCode, room);
     return { success: true, room };
+}
+
+function createBackgroundRoom(io) {
+    const backgroundConfig = config.menuBackground || {};
+
+    if (backgroundConfig.enabled === false) {
+        return { success: false, message: "Menu background room is disabled." };
+    }
+
+    const roomCode = String(backgroundConfig.roomCode || "BOTS").trim().toUpperCase();
+
+    if (rooms.has(roomCode)) {
+        return { success: true, room: rooms.get(roomCode) };
+    }
+
+    return createRoom(io, {
+        botCount: backgroundConfig.botCount,
+        botDifficulty: backgroundConfig.difficulty,
+        difficulty: backgroundConfig.difficulty,
+        hiddenFromList: true,
+        isPrivate: true,
+        isSystemRoom: true,
+        roomCode
+    });
 }
 
 function joinRoom(roomCode, socket, password = "") {
@@ -79,6 +118,10 @@ function joinRoom(roomCode, socket, password = "") {
     const room = rooms.get(normalizedRoomCode);
     if (!room) {
         return { success: false, message: "Room not found." };
+    }
+
+    if (room.isSystemRoom) {
+        return { success: false, message: "Room not available." };
     }
 
     if (room.isPrivate) {
@@ -177,14 +220,16 @@ function getRoomBySocketId(socketId) {
 }
 
 function listRooms() {
-    return Array.from(rooms.values()).map(room => ({
-        code: room.code,
-        botCount: getBotPlayerCount(room.players),
-        playerCount: getHumanPlayerCount(room.players),
-        difficulty: room.difficulty || "medium",
-        isPrivate: Boolean(room.isPrivate),
-        createdAt: room.createdAt
-    }));
+    return Array.from(rooms.values())
+        .filter(room => !room.hiddenFromList && !room.isSystemRoom)
+        .map(room => ({
+            code: room.code,
+            botCount: getBotPlayerCount(room.players),
+            playerCount: getHumanPlayerCount(room.players),
+            difficulty: room.difficulty || "medium",
+            isPrivate: Boolean(room.isPrivate),
+            createdAt: room.createdAt
+        }));
 }
 
 function resetSocketSnapshotState(socket) {
@@ -216,6 +261,7 @@ function normalizeRoomDifficulty(raw) {
 
 
 module.exports = {
+    createBackgroundRoom,
     createRoom,
     joinRoom,
     leaveRoom,

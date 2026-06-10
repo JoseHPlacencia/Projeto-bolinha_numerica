@@ -15,11 +15,10 @@ function startSnapshotLoop(io, players, territories, roomCode, numberSystem) {
 
 function sendSnapshot(io, players, territories, roomCode, numberSystem) {
     for (const socket of io.sockets.sockets.values()) {
-        if (roomCode && socket.data.roomCode !== roomCode) {
-            continue;
-        }
+        const isPlayerSocket = roomCode && socket.data.roomCode === roomCode && players.has(socket.id);
+        const isSpectatorSocket = roomCode && socket.data.spectatorRoomCode === roomCode;
 
-        if (!players.has(socket.id)) {
+        if (!isPlayerSocket && !isSpectatorSocket) {
             continue;
         }
 
@@ -27,13 +26,25 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem) {
             socket.data.snapshotState = createClientSnapshotState();
         }
 
+        const viewerId = isSpectatorSocket
+            ? pickSpectatorFollowId(socket, players)
+            : socket.id;
+
+        if (!viewerId) {
+            continue;
+        }
+
         if (retryPendingReliableSnapshot(socket)) {
-            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem);
+            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId);
             continue;
         }
 
         const nextSnapshotState = cloneClientSnapshotState(socket.data.snapshotState);
-        const snapshot = createSnapshot(players, territories, socket.id, nextSnapshotState, numberSystem);
+        const snapshot = createSnapshot(players, territories, viewerId, nextSnapshotState, numberSystem);
+
+        if (isSpectatorSocket) {
+            snapshot.spectator = { followId: viewerId };
+        }
 
         if (shouldSendReliably(snapshot)) {
             queueReliableSnapshot(socket, snapshot, nextSnapshotState);
@@ -45,6 +56,23 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem) {
     }
 }
 
+function pickSpectatorFollowId(socket, players) {
+    const currentFollowId = socket.data && socket.data.spectatorFollowId;
+
+    if (currentFollowId && players.has(currentFollowId)) {
+        return currentFollowId;
+    }
+
+    for (const player of players.values()) {
+        if (player && player.isBot) {
+            socket.data.spectatorFollowId = player.id;
+            return player.id;
+        }
+    }
+
+    return null;
+}
+
 function retryPendingReliableSnapshot(socket) {
     const pending = socket.data.pendingReliableSnapshot;
     if (!pending) return false;
@@ -54,11 +82,14 @@ function retryPendingReliableSnapshot(socket) {
     return true;
 }
 
-function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem) {
+function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId) {
     if (config.network.volatileSnapshotsWhileReliablePendingEnabled === false) return;
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
-    const snapshot = createSnapshot(players, territories, socket.id, temporaryState, numberSystem);
+    const snapshot = createSnapshot(players, territories, viewerId, temporaryState, numberSystem);
+    if (socket.data && socket.data.spectatorRoomCode) {
+        snapshot.spectator = { followId: viewerId };
+    }
     const volatileSnapshot = createVolatileSnapshotForPendingReliableState(snapshot, clientState);
     socket.volatile.emit("gameState", volatileSnapshot);
 }

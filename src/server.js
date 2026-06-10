@@ -29,6 +29,7 @@ app.get("/", (_request, response) => {
 app.use(express.static(publicPath));
 
 registerSocket(io, roomManager);
+roomManager.createBackgroundRoom(io);
 
 const host = process.env.HOST;
 

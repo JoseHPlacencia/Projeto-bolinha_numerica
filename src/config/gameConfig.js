@@ -92,6 +92,13 @@ const gameMode = Object.freeze({
     })
 });
 
+const botReservedNames = Object.freeze([
+    "Atlas",
+    "Euclides",
+    "Noether",
+    "Cantor"
+]);
+
 const bots = Object.freeze({
     enabled: true,
     count: 2,
@@ -104,14 +111,10 @@ const bots = Object.freeze({
     safetyMarginSec: 0.65,
     expandMarginSec: 1.6,
     huntMarginSec: 0.75,
-    captureLoopRadius: 620,
+    captureLoopRadius: 1200,
     selfTrailAvoidDistance: world.playerSize * 1.35,
-    names: Object.freeze([
-        "Bot Atlas",
-        "Bot Euclides",
-        "Bot Noether",
-        "Bot Cantor"
-    ]),
+    reservedNames: botReservedNames,
+    names: botReservedNames,
     colors: Object.freeze([
         "#26ffff",
         "#ff26e5",
@@ -215,6 +218,13 @@ const rooms = Object.freeze({
     privateRoomPasswordMinLength: 4
 });
 
+const menuBackground = Object.freeze({
+    enabled: true,
+    roomCode: "BOTS",
+    difficulty: "hard",
+    botCount: 5
+});
+
 module.exports = Object.freeze({
     server,
     socket,
@@ -233,5 +243,6 @@ module.exports = Object.freeze({
     inputBindings,
     security,
     client,
-    rooms
+    rooms,
+    menuBackground
 });

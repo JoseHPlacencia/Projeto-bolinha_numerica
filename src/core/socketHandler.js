@@ -12,8 +12,11 @@ function registerSocket(io, roomManager) {
 
         registerRoomEvents(socket, io, roomManager);
         registerInputEvents(socket, roomManager);
+        registerMenuBackgroundEvents(socket, io, roomManager);
 
         socket.on("disconnect", () => {
+            leaveMenuBackground(socket);
+
             const leaveResult = roomManager.leaveRoom(socket);
 
             if (leaveResult && leaveResult.room && !leaveResult.destroyed) {
@@ -33,6 +36,8 @@ function buildRoomsList(roomManager) {
 
 function registerRoomEvents(socket, io, roomManager) {
     socket.on("joinRoom", payload => {
+        leaveMenuBackground(socket);
+
         const createNewRoom = Boolean(payload && payload.createNewRoom);
         const requestedCode = String(payload && payload.roomCode || "").trim().toUpperCase();
         const password = String(payload && payload.password || "");
@@ -92,6 +97,58 @@ function registerRoomEvents(socket, io, roomManager) {
     });
 }
 
+function registerMenuBackgroundEvents(socket, io, roomManager) {
+    socket.on("watchMenuBackground", () => {
+        const createResult = roomManager.createBackgroundRoom(io);
+
+        if (!createResult.success || !createResult.room) {
+            socket.emit("menuBackgroundReady", {
+                success: false,
+                message: createResult.message || "Background room unavailable."
+            });
+            return;
+        }
+
+        const roomCode = createResult.room.code;
+
+        if (socket.data.spectatorRoomCode && socket.data.spectatorRoomCode !== roomCode) {
+            socket.leave(socket.data.spectatorRoomCode);
+        }
+
+        socket.join(roomCode);
+        socket.data.spectatorRoomCode = roomCode;
+        socket.data.spectatorFollowId = null;
+        resetSpectatorSnapshotState(socket);
+        socket.emit("menuBackgroundReady", {
+            success: true,
+            roomCode
+        });
+    });
+
+    socket.on("unwatchMenuBackground", () => {
+        leaveMenuBackground(socket);
+    });
+}
+
+function leaveMenuBackground(socket) {
+    const roomCode = socket.data && socket.data.spectatorRoomCode;
+
+    if (!roomCode) {
+        return;
+    }
+
+    socket.leave(roomCode);
+    delete socket.data.spectatorRoomCode;
+    delete socket.data.spectatorFollowId;
+    resetSpectatorSnapshotState(socket);
+}
+
+function resetSpectatorSnapshotState(socket) {
+    socket.data.snapshotState = null;
+    socket.data.pendingReliableSnapshot = null;
+    socket.data.nextReliableSnapshotId = 0;
+}
+
 function initializeSocketPlayer(room, socket, alreadyJoined, playerOptions = {}) {
     if (alreadyJoined) return;
 
@@ -114,6 +171,7 @@ function normalizePlayerOptions(rawPlayer) {
 function registerInputEvents(socket, roomManager) {
     const inputGuard = createInputGuard(socket);
     const viewportGuard = createViewportGuard(socket);
+    const snapshotGuard = createSnapshotGuard(socket);
 
     socket.on("inputDown", rawAction => {
         if (!inputGuard.canHandleInput()) return;
@@ -151,12 +209,12 @@ function registerInputEvents(socket, roomManager) {
     });
 
     socket.on("snapshotResync", () => {
-        if (!viewportGuard.canHandleInput()) return;
+        if (!snapshotGuard.canHandleInput()) return;
         socket.data.snapshotState = null;
     });
 
     socket.on("snapshotCacheInvalid", rawInvalidations => {
-        if (!viewportGuard.canHandleInput()) return;
+        if (!snapshotGuard.canHandleInput()) return;
         invalidateSnapshotCache(socket, rawInvalidations);
     });
 }
@@ -177,14 +235,18 @@ function createViewportGuard(socket) {
     return createSocketRateGuard(socket, config.security.viewportRateLimit);
 }
 
-function createSocketRateGuard(socket, rateLimitConfig) {
+function createSnapshotGuard(socket) {
+    return createSocketRateGuard(socket, config.security.viewportRateLimit, hasSnapshotContext);
+}
+
+function createSocketRateGuard(socket, rateLimitConfig, hasContext = hasPlayerRoomContext) {
     const rateLimiter = createRateLimiter(rateLimitConfig);
     let violations = 0;
 
     return { canHandleInput };
 
     function canHandleInput() {
-        if (!socket.data || !socket.data.roomCode) {
+        if (!hasContext(socket)) {
             return false;
         }
 
@@ -195,6 +257,14 @@ function createSocketRateGuard(socket, rateLimitConfig) {
         }
         return false;
     }
+}
+
+function hasPlayerRoomContext(socket) {
+    return Boolean(socket.data && socket.data.roomCode);
+}
+
+function hasSnapshotContext(socket) {
+    return Boolean(socket.data && (socket.data.roomCode || socket.data.spectatorRoomCode));
 }
 
 function handleInputDown(players, playerId, rawAction) {

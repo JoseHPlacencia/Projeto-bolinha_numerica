@@ -15,10 +15,29 @@ function normalizePlayerColor(color) {
     return /^#[0-9a-f]{6}$/.test(normalizedColor) ? normalizedColor : null;
 }
 
-function normalizePlayerName(name) {
+function normalizePlayerName(name, options = {}) {
     const normalizedName = String(name || "").trim().slice(0, 20);
 
-    return normalizedName || DEFAULT_PLAYER_NAME;
+    if (!normalizedName) {
+        return DEFAULT_PLAYER_NAME;
+    }
+
+    if (!options.isBot && isReservedBotName(normalizedName)) {
+        return DEFAULT_PLAYER_NAME;
+    }
+
+    return normalizedName;
+}
+
+function isReservedBotName(name) {
+    const normalizedName = String(name || "").trim().toLowerCase();
+    const reservedNames = config.bots && Array.isArray(config.bots.reservedNames)
+        ? config.bots.reservedNames
+        : [];
+
+    return reservedNames.some(reservedName => (
+        String(reservedName || "").trim().toLowerCase() === normalizedName
+    ));
 }
 
 function normalizeDifficulty(difficulty) {
@@ -55,7 +74,7 @@ class Player {
         this.id = id;
         this.isBot = Boolean(options.isBot);
         this.color = normalizePlayerColor(options.color) || createRandomColor();
-        this.name = normalizePlayerName(options.name);
+        this.name = normalizePlayerName(options.name, { isBot: this.isBot });
         this.difficulty = normalizeDifficulty(options.difficulty);
         this.maxLives = getLivesForDifficulty(this.difficulty);
         this.lives = this.maxLives;
