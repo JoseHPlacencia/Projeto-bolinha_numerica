@@ -2,13 +2,29 @@ const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
 const { createRateLimiter } = require("../utils/rateLimiter");
 
-function registerSocket(io, players) {
+/**
+ * Registra todos os eventos de socket (input do jogo + salas)
+ * 
+ * @param {Object} io - Socket.IO Server instance
+ * @param {Map} players - Mapa global de jogadores
+ * @param {Object} sistemaRooms - Sistema de gerenciamento de salas
+ */
+function registerSocket(io, players, sistemaRooms) {
     io.on("connection", socket => {
+        // Criar jogador no mapa global
         createPlayer(players, socket.id);
+        
+        // Registrar eventos de input
         registerInputEvents(socket, players);
 
+        // Ao desconectar, remover jogador e salas
         socket.on("disconnect", () => {
             players.delete(socket.id);
+            
+            // Remover da sala (se estiver em uma)
+            if (sistemaRooms) {
+                sistemaRooms.sairSala(socket.id);
+            }
         });
     });
 }

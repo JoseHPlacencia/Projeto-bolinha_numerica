@@ -1,0 +1,641 @@
+/**
+ * ============================================================================
+ * ESTILOS DO MODAL DE SALAS
+ * ============================================================================
+ * 
+ * Defines styling for the rooms management modal interface.
+ * Includes responsive design and dark theme matching the game aesthetic.
+ */
+
+/* =====================================================================
+   MODAL CONTAINER
+   ===================================================================== */
+
+.rooms-modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+}
+
+.rooms-modal.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* Overlay de fundo */
+.rooms-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(2px);
+    cursor: pointer;
+}
+
+/* Janela modal */
+.rooms-window {
+    position: relative;
+    background: linear-gradient(135deg, #1a1f2e 0%, #16212b 100%);
+    border: 2px solid rgba(100, 150, 255, 0.3);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8), 
+                inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    width: 90%;
+    max-width: 800px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* =====================================================================
+   HEADER
+   ===================================================================== */
+
+.rooms-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px;
+    border-bottom: 2px solid rgba(100, 150, 255, 0.2);
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.rooms-header h2 {
+    margin: 0;
+    font-size: 24px;
+    color: #6496ff;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.5px;
+}
+
+.rooms-close-btn {
+    background: transparent;
+    border: none;
+    color: #aaa;
+    font-size: 24px;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+}
+
+.rooms-close-btn:hover {
+    color: #fff;
+    background: rgba(255, 100, 100, 0.2);
+}
+
+/* =====================================================================
+   CONTEÚDO
+   ===================================================================== */
+
+.rooms-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* =====================================================================
+   ABAS
+   ===================================================================== */
+
+.rooms-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid rgba(100, 150, 255, 0.1);
+    background: rgba(0, 0, 0, 0.2);
+    flex-shrink: 0;
+}
+
+.rooms-tab-btn {
+    flex: 1;
+    padding: 12px 16px;
+    background: transparent;
+    border: none;
+    color: #888;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-bottom: 2px solid transparent;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.rooms-tab-btn:hover {
+    color: #aaa;
+    background: rgba(100, 150, 255, 0.05);
+}
+
+.rooms-tab-btn.active {
+    color: #6496ff;
+    border-bottom-color: #6496ff;
+}
+
+/* =====================================================================
+   CONTEÚDO DAS ABAS
+   ===================================================================== */
+
+.rooms-tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.rooms-tab-content.active {
+    display: block;
+}
+
+/* Barra de scroll customizada */
+.rooms-tab-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.rooms-tab-content::-webkit-scrollbar-track {
+    background: rgba(100, 150, 255, 0.05);
+}
+
+.rooms-tab-content::-webkit-scrollbar-thumb {
+    background: rgba(100, 150, 255, 0.3);
+    border-radius: 4px;
+}
+
+.rooms-tab-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(100, 150, 255, 0.5);
+}
+
+/* =====================================================================
+   SEÇÕES E FORMULÁRIOS
+   ===================================================================== */
+
+.rooms-section h3 {
+    margin: 0 0 20px 0;
+    font-size: 18px;
+    color: #6496ff;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.rooms-section h4 {
+    margin: 15px 0 10px 0;
+    font-size: 14px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.rooms-form-group {
+    margin-bottom: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rooms-form-group label {
+    font-size: 13px;
+    color: #aaa;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.rooms-form-group input,
+.rooms-form-group select {
+    padding: 10px 12px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(100, 150, 255, 0.3);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 13px;
+    font-family: inherit;
+    transition: all 0.2s ease;
+}
+
+.rooms-form-group input::placeholder {
+    color: #666;
+}
+
+.rooms-form-group input:focus,
+.rooms-form-group select:focus {
+    outline: none;
+    border-color: #6496ff;
+    box-shadow: 0 0 0 2px rgba(100, 150, 255, 0.2);
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.rooms-form-group input[type="range"] {
+    cursor: pointer;
+    height: 6px;
+    padding: 0;
+}
+
+.rooms-form-group input[type="range"]::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: #6496ff;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(100, 150, 255, 0.5);
+}
+
+.rooms-form-group input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #6496ff;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(100, 150, 255, 0.5);
+}
+
+.rooms-form-group span {
+    font-size: 12px;
+    color: #6496ff;
+    font-weight: bold;
+}
+
+/* =====================================================================
+   DIVISOR
+   ===================================================================== */
+
+.rooms-divider {
+    text-align: center;
+    margin: 20px 0;
+    color: #666;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    position: relative;
+}
+
+.rooms-divider::before,
+.rooms-divider::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    width: 40%;
+    height: 1px;
+    background: rgba(100, 150, 255, 0.1);
+}
+
+.rooms-divider::before {
+    left: 0;
+}
+
+.rooms-divider::after {
+    right: 0;
+}
+
+/* =====================================================================
+   LISTA DE SALAS
+   ===================================================================== */
+
+.rooms-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.rooms-empty {
+    text-align: center;
+    color: #666;
+    padding: 20px;
+    font-size: 13px;
+    margin: 0;
+}
+
+.rooms-sala-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px;
+    background: rgba(100, 150, 255, 0.05);
+    border: 1px solid rgba(100, 150, 255, 0.15);
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    gap: 12px;
+}
+
+.rooms-sala-item:hover {
+    background: rgba(100, 150, 255, 0.1);
+    border-color: rgba(100, 150, 255, 0.3);
+}
+
+.rooms-sala-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.rooms-sala-info h4 {
+    margin: 0 0 4px 0;
+    color: #fff;
+    font-size: 14px;
+}
+
+.rooms-sala-info p {
+    margin: 2px 0;
+    font-size: 12px;
+    color: #999;
+}
+
+.rooms-sala-info strong {
+    color: #6496ff;
+}
+
+/* =====================================================================
+   DETALHES DE SALA
+   ===================================================================== */
+
+.rooms-sala-detalhes {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.rooms-info-grid,
+.rooms-config-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+@media (max-width: 600px) {
+    .rooms-info-grid,
+    .rooms-config-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.rooms-info-grid > div,
+.rooms-config-grid > div {
+    padding: 12px;
+    background: rgba(100, 150, 255, 0.05);
+    border: 1px solid rgba(100, 150, 255, 0.15);
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.rooms-info-grid strong,
+.rooms-config-grid strong {
+    color: #6496ff;
+    display: block;
+    margin-bottom: 4px;
+}
+
+.rooms-code {
+    font-family: monospace;
+    font-size: 14px;
+    color: #fff;
+    letter-spacing: 1px;
+}
+
+.rooms-btn-copy {
+    background: none;
+    border: none;
+    color: #6496ff;
+    cursor: pointer;
+    font-size: 16px;
+    margin-left: 8px;
+    transition: all 0.2s ease;
+    padding: 2px 6px;
+}
+
+.rooms-btn-copy:hover {
+    transform: scale(1.2);
+}
+
+/* =====================================================================
+   AÇÕES (BOTÕES)
+   ===================================================================== */
+
+.rooms-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* =====================================================================
+   BOTÕES
+   ===================================================================== */
+
+.rooms-btn {
+    padding: 10px 16px;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.rooms-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.rooms-btn-primary {
+    background: linear-gradient(135deg, #6496ff 0%, #5080dd 100%);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(100, 150, 255, 0.3);
+}
+
+.rooms-btn-primary:hover:not(:disabled) {
+    background: linear-gradient(135deg, #7aa3ff 0%, #5fa0ff 100%);
+    box-shadow: 0 6px 16px rgba(100, 150, 255, 0.4);
+    transform: translateY(-2px);
+}
+
+.rooms-btn-primary:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.rooms-btn-secondary {
+    background: rgba(100, 150, 255, 0.1);
+    color: #6496ff;
+    border: 1px solid rgba(100, 150, 255, 0.3);
+}
+
+.rooms-btn-secondary:hover:not(:disabled) {
+    background: rgba(100, 150, 255, 0.2);
+    border-color: #6496ff;
+}
+
+.rooms-btn-danger {
+    background: rgba(255, 100, 100, 0.1);
+    color: #ff6464;
+    border: 1px solid rgba(255, 100, 100, 0.3);
+}
+
+.rooms-btn-danger:hover:not(:disabled) {
+    background: rgba(255, 100, 100, 0.2);
+    border-color: #ff6464;
+}
+
+.rooms-sala-btn {
+    flex-shrink: 0;
+}
+
+/* =====================================================================
+   MENSAGENS
+   ===================================================================== */
+
+.rooms-message {
+    padding: 12px 16px;
+    border-radius: 4px;
+    margin-top: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    animation: slideDown 0.3s ease;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.rooms-message-sucesso {
+    background: rgba(100, 200, 100, 0.2);
+    color: #64c864;
+    border: 1px solid rgba(100, 200, 100, 0.4);
+}
+
+.rooms-message-erro {
+    background: rgba(255, 100, 100, 0.2);
+    color: #ff6464;
+    border: 1px solid rgba(255, 100, 100, 0.4);
+}
+
+.rooms-message-info {
+    background: rgba(100, 150, 255, 0.2);
+    color: #6496ff;
+    border: 1px solid rgba(100, 150, 255, 0.4);
+}
+
+/* =====================================================================
+   RESPONSIVIDADE
+   ===================================================================== */
+
+@media (max-width: 600px) {
+    .rooms-window {
+        width: 95%;
+        max-height: 95vh;
+        border-radius: 8px;
+    }
+
+    .rooms-header h2 {
+        font-size: 18px;
+    }
+
+    .rooms-tab-btn {
+        font-size: 12px;
+        padding: 10px 8px;
+    }
+
+    .rooms-tab-content {
+        padding: 12px;
+    }
+
+    .rooms-section h3 {
+        font-size: 16px;
+    }
+
+    .rooms-btn {
+        padding: 8px 12px;
+        font-size: 12px;
+    }
+
+    .rooms-sala-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .rooms-sala-btn {
+        width: 100%;
+        text-align: center;
+    }
+
+    .rooms-actions {
+        flex-direction: column;
+    }
+
+    .rooms-actions .rooms-btn {
+        width: 100%;
+    }
+}
+
+@media (max-width: 400px) {
+    .rooms-window {
+        max-width: 100%;
+    }
+
+    .rooms-header {
+        padding: 12px;
+    }
+
+    .rooms-tab-btn {
+        font-size: 11px;
+        padding: 8px 6px;
+    }
+
+    .rooms-tab-content {
+        padding: 10px;
+    }
+
+    .rooms-form-group {
+        margin-bottom: 12px;
+    }
+
+    .rooms-info-grid,
+    .rooms-config-grid {
+        gap: 8px;
+    }
+
+    .rooms-info-grid > div,
+    .rooms-config-grid > div {
+        padding: 8px;
+        font-size: 11px;
+    }
+}

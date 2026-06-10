@@ -77,6 +77,17 @@ const security = Object.freeze({
     })
 });
 
+// Configurações do sistema de salas
+const rooms = Object.freeze({
+    maxSalas: 100,
+    configPadrao: Object.freeze({
+        raioMapa: world.mapRadius,
+        raioBase: world.initialTerritoryRadius,
+        velocidade: movement.speed,
+        maxJogadores: 10
+    })
+});
+
 // Only values needed by the browser are exposed through /game-config.
 const client = Object.freeze({
     socket: Object.freeze({
@@ -99,5 +110,6 @@ module.exports = Object.freeze({
     inputActionAngles,
     inputBindings,
     security,
+    rooms,
     client
 });

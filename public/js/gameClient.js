@@ -3,6 +3,8 @@ import { createHud } from "./hud.js";
 import { createInputControls } from "./input.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createCanvasRenderer } from "./renderer.js";
+import { criarUIRooms } from "./ui/roomUI.js";
+import { criarGerenciadorEspectador } from "./ui/spectatorManager.js";
 
 export function startClient(gameConfig) {
     const socket = io({
@@ -16,6 +18,13 @@ export function startClient(gameConfig) {
     let myId = null;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles);
+    
+    // Inicializar sistema de salas
+    const uiRooms = criarUIRooms({ socket });
+    
+    // Inicializar gerenciador de espectador
+    const gerenciadorEspectador = criarGerenciadorEspectador({ socket });
+    
     window.addEventListener("resize", renderer.resizeCanvas);
 
     socket.on("connect", () => {
