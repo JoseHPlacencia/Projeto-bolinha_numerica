@@ -1,12 +1,12 @@
 const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
-const { initializePlayerTerritory, isPointOwnedByPlayer } = require("../state/territories");
+const { initializePlayerTerritory } = require("../state/territories");
 const { clamp, distanceBetween, lerpAngle } = require("../utils/math");
 
 const BOT_ID_PREFIX = "bot:";
 const geometryEpsilon = 1e-7;
 
-function createBotManager({ roomCode, players, territories, numberSystem, botCount = null, botDifficulty = null }) {
+function createBotManager({ roomCode, players, territories, numberSystem, botCount = null, botDifficulty = null, runtimeConfig = null }) {
     const state = {
         botCount,
         botDifficulty,
@@ -28,7 +28,12 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
         }
 
         while (state.botIds.size < getTargetBotCount(state)) {
-            const bot = createBot(roomCode, players, territories, state.nextBotNumber++, state.botDifficulty);
+            const bot = createBot(roomCode, players, territories, state.nextBotNumber++, state.botDifficulty, runtimeConfig);
+
+            if (!bot) {
+                break;
+            }
+
             state.botIds.add(bot.id);
         }
     }
@@ -54,7 +59,7 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
     }
 }
 
-function createBot(roomCode, players, territories, botNumber, botDifficulty = null) {
+function createBot(roomCode, players, territories, botNumber, botDifficulty = null, runtimeConfig = null) {
     const botConfig = config.bots;
     const botNames = getBotNames(botConfig);
     const nameIndex = (botNumber - 1) % botNames.length;
@@ -63,15 +68,23 @@ function createBot(roomCode, players, territories, botNumber, botDifficulty = nu
         color: botConfig.colors[colorIndex],
         difficulty: botDifficulty || botConfig.difficulty,
         isBot: true,
-        name: botNames[nameIndex]
+        maxLives: runtimeConfig && runtimeConfig.gameMode && runtimeConfig.gameMode.catch
+            ? runtimeConfig.gameMode.catch.roomLives
+            : null,
+        name: botNames[nameIndex],
+        runtimeConfig
     });
+
+    if (!bot) {
+        return null;
+    }
 
     bot.botAi = {
         expansionPlan: null,
         orbitDirection: Math.random() < 0.5 ? -1 : 1,
         orbitPhase: Math.random() * Math.PI * 2
     };
-    initializePlayerTerritory(territories, bot);
+    initializePlayerTerritory(territories, bot, runtimeConfig || config);
 
     return bot;
 }
@@ -152,8 +165,7 @@ function getCorrectNumbers(bot, territories, numberSystem) {
     }
 
     return [...numbers.values()]
-        .filter(number => theme.check(number))
-        .filter(number => !isPointOwnedByPlayer(territories, bot.id, number.x, number.y));
+        .filter(number => theme.check(number));
 }
 
 function evaluateThreat(bot, players, correctNumbers) {

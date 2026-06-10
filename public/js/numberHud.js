@@ -8,7 +8,11 @@ export function createNumberHud(options = {}) {
 
     let hideNotifTimer = null;
 
-    return { updateTheme, showCollection };
+    return { updateBalance, updateTheme, showCollection };
+
+    function updateBalance(player) {
+        themePanel.updateBalance(player);
+    }
 
     function updateTheme(theme, secsLeft) {
         themePanel.update(theme, secsLeft);
@@ -34,6 +38,10 @@ function createThemePanel() {
             </div>
             <div class="theme-timer" id="themeTimer"></div>
         </div>
+        <div class="theme-balance" id="themeBalance" aria-live="polite">
+            <span>Saldo de acertos</span>
+            <strong id="themeBalanceValue">0</strong>
+        </div>
     `;
     injectThemeStyles();
 
@@ -41,6 +49,8 @@ function createThemePanel() {
     const labelEl = el.querySelector("#themeLabel");
     const descEl  = el.querySelector("#themeDesc");
     const timerEl = el.querySelector("#themeTimer");
+    const balanceEl = el.querySelector("#themeBalance");
+    const balanceValueEl = el.querySelector("#themeBalanceValue");
 
     function update(theme, secsLeft) {
         if (!theme) return;
@@ -58,7 +68,27 @@ function createThemePanel() {
         }
     }
 
-    return { el, update };
+    function updateBalance(player) {
+        if (!balanceEl || !balanceValueEl) {
+            return;
+        }
+
+        const balance = Number(player && player.catchBalance);
+
+        if (!Number.isFinite(balance)) {
+            balanceEl.hidden = true;
+            return;
+        }
+
+        const roundedBalance = Math.round(balance);
+        balanceEl.hidden = false;
+        balanceEl.classList.toggle("theme-balance--positive", roundedBalance > 0);
+        balanceEl.classList.toggle("theme-balance--negative", roundedBalance < 0);
+        balanceEl.classList.toggle("theme-balance--neutral", roundedBalance === 0);
+        balanceValueEl.textContent = roundedBalance > 0 ? `+${roundedBalance}` : String(roundedBalance);
+    }
+
+    return { el, update, updateBalance };
 }
 
 function injectThemeStyles() {
@@ -73,6 +103,9 @@ function injectThemeStyles() {
             transform: translateX(-50%);
             z-index: 200;
             pointer-events: none;
+            display: grid;
+            gap: 6px;
+            justify-items: center;
         }
         .theme-inner {
             display: flex;
@@ -129,6 +162,52 @@ function injectThemeStyles() {
             font-family: 'Play', sans-serif;
             min-width: 30px;
             text-align: right;
+        }
+        .theme-balance {
+            align-items: center;
+            background: rgba(15, 15, 25, 0.76);
+            border: 1.5px solid rgba(255,255,255,0.13);
+            border-radius: 999px;
+            box-shadow: 0 4px 18px rgba(0,0,0,0.34);
+            color: rgba(255,255,255,0.64);
+            display: inline-grid;
+            font-family: 'Play', sans-serif;
+            gap: 8px;
+            grid-template-columns: auto auto;
+            min-height: 30px;
+            min-width: 178px;
+            padding: 5px 12px;
+        }
+        .theme-balance[hidden] {
+            display: none;
+        }
+        .theme-balance span {
+            font-size: 10px;
+            font-weight: 700;
+            line-height: 1;
+            text-transform: uppercase;
+        }
+        .theme-balance strong {
+            color: #e2e8f0;
+            font-size: 16px;
+            line-height: 1;
+            min-width: 34px;
+            text-align: right;
+        }
+        .theme-balance--positive {
+            border-color: rgba(74, 222, 128, 0.48);
+        }
+        .theme-balance--positive strong {
+            color: #4ade80;
+        }
+        .theme-balance--negative {
+            border-color: rgba(248, 113, 113, 0.46);
+        }
+        .theme-balance--negative strong {
+            color: #f87171;
+        }
+        .theme-balance--neutral strong {
+            color: #e2e8f0;
         }
 
         #collectNotif {

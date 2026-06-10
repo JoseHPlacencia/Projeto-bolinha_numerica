@@ -1,4 +1,5 @@
 const config = require("../config/gameConfig");
+const { serializeRoomSettings } = require("./roomSettings");
 const { getServerTime } = require("../utils/time");
 const { calculatePolygonArea, getPolygonBounds } = require("../utils/geometry");
 
@@ -24,7 +25,7 @@ function cloneClientSnapshotState(clientState = createClientSnapshotState()) {
     };
 }
 
-function createSnapshot(players, territories, viewerId = null, clientState = createClientSnapshotState(), numberSystem = null) {
+function createSnapshot(players, territories, viewerId = null, clientState = createClientSnapshotState(), numberSystem = null, runtimeConfig = null) {
     const viewer = viewerId ? players.get(viewerId) : null;
     const now = getServerTime();
     const interestBounds = createInterestBounds(viewer);
@@ -51,7 +52,8 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         trailIds,
         trails: trailUpdates,
         mode: config.gameMode.mode,
-        leaderboard: createLeaderboard(players, territories),
+        roomConfig: serializeRoomSettings(runtimeConfig),
+        leaderboard: createLeaderboard(players, territories, runtimeConfig),
         numbers: numberSystem ? numberSystem.serialize() : null
     };
 
@@ -121,8 +123,9 @@ function serializeChangedPlayerInfo(players, playerIds, clientState, now) {
     return serializedInfo;
 }
 
-function createLeaderboard(players, territories) {
-    const totalArea = Math.PI * config.world.mapRadius * config.world.mapRadius;
+function createLeaderboard(players, territories, runtimeConfig = null) {
+    const worldConfig = runtimeConfig && runtimeConfig.world ? runtimeConfig.world : config.world;
+    const totalArea = Math.PI * worldConfig.mapRadius * worldConfig.mapRadius;
 
     return [...players.values()]
         .map(player => {

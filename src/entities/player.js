@@ -29,6 +29,14 @@ function normalizePlayerName(name, options = {}) {
     return normalizedName;
 }
 
+function normalizeSpawnPoint(point) {
+    return point
+        && Number.isFinite(point.x)
+        && Number.isFinite(point.y)
+        ? { x: point.x, y: point.y }
+        : null;
+}
+
 function isReservedBotName(name) {
     const normalizedName = String(name || "").trim().toLowerCase();
     const reservedNames = config.bots && Array.isArray(config.bots.reservedNames)
@@ -55,6 +63,14 @@ function getLivesForDifficulty(difficulty) {
     return Number.isInteger(lives) && lives > 0 ? lives : 1;
 }
 
+function getPlayerMaxLives(difficulty, maxLives) {
+    const overrideLives = Math.round(Number(maxLives));
+
+    return Number.isInteger(overrideLives) && overrideLives > 0
+        ? overrideLives
+        : getLivesForDifficulty(difficulty);
+}
+
 function getRandomAngle() {
     return Math.random() * Math.PI * 2;
 }
@@ -75,8 +91,9 @@ class Player {
         this.isBot = Boolean(options.isBot);
         this.color = normalizePlayerColor(options.color) || createRandomColor();
         this.name = normalizePlayerName(options.name, { isBot: this.isBot });
+        this.runtimeConfig = options.runtimeConfig || config;
         this.difficulty = normalizeDifficulty(options.difficulty);
-        this.maxLives = getLivesForDifficulty(this.difficulty);
+        this.maxLives = getPlayerMaxLives(this.difficulty, options.maxLives);
         this.lives = this.maxLives;
         this.eliminations = 0;
         this.catchHits = 0;
@@ -109,13 +126,29 @@ class Player {
         this.clearTrailState();
     }
 
-    returnToSpawn() {
-        this.x = this.territoryX;
-        this.y = this.territoryY;
+    returnToSpawn(options = {}) {
+        this.respawnAt({
+            x: this.territoryX,
+            y: this.territoryY
+        }, options);
+    }
+
+    respawnAt(point, options = {}) {
+        const spawn = normalizeSpawnPoint(point);
+
+        if (!spawn) {
+            return false;
+        }
+
+        this.x = spawn.x;
+        this.y = spawn.y;
         this.angle = getRandomAngle();
         this.boundarySlideDirection = null;
-        this.resetCatchProgress();
+        if (options.resetCatchProgress !== false) {
+            this.resetCatchProgress();
+        }
         this.clearTrailState();
+        return true;
     }
 
     setSpawnPoint(point) {
@@ -162,6 +195,18 @@ class Player {
         }
 
         this.markInfoChanged();
+    }
+
+    consumeCatchBalance(amount = 1) {
+        const safeAmount = Math.max(1, Math.round(Number(amount) || 1));
+
+        if (this.catchBalance < safeAmount) {
+            return false;
+        }
+
+        this.catchBalance -= safeAmount;
+        this.markInfoChanged();
+        return true;
     }
 
     resetCatchProgress() {
@@ -318,7 +363,13 @@ class Player {
 }
 
 function createPlayer(players, id, territories = null, options = {}) {
-    const player = new Player(id, createSpawn(players, territories), options);
+    const spawn = normalizeSpawnPoint(options.spawn) || createSpawn(players, territories, options.runtimeConfig);
+
+    if (!spawn) {
+        return null;
+    }
+
+    const player = new Player(id, spawn, options);
     players.set(id, player);
     return player;
 }
@@ -339,7 +390,13 @@ function getAngleDelta(fromAngle, toAngle) {
 }
 
 function reconnectPlayerAsNew(players, player, territories = null) {
-    player.reconnect(createSpawn(getOtherPlayers(players, player.id), territories));
+    const spawn = createSpawn(getOtherPlayers(players, player.id), territories, player.runtimeConfig);
+
+    if (!spawn) {
+        return null;
+    }
+
+    player.reconnect(spawn);
 
     return player;
 }

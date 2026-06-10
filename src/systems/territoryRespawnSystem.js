@@ -1,8 +1,4 @@
 const config = require("../config/gameConfig");
-const { reconnectPlayerAsNew } = require("../entities/player");
-const {
-    initializePlayerTerritory
-} = require("../state/territories");
 const {
     calculatePolygonArea,
     calculatePolygonCentroid,
@@ -13,6 +9,8 @@ const {
 const gridSideSamples = 41;
 
 function relocatePlayersAfterTerritoryChange(players, territories, playerIds) {
+    const noRespawnPlayerIds = new Set();
+
     for (const playerId of playerIds || []) {
         const player = players.get(playerId);
 
@@ -20,34 +18,32 @@ function relocatePlayersAfterTerritoryChange(players, territories, playerIds) {
             continue;
         }
 
-        relocatePlayerAfterTerritoryChange(players, territories, player);
+        if (!relocatePlayerAfterTerritoryChange(territories, player)) {
+            noRespawnPlayerIds.add(player.id);
+        }
     }
+
+    return noRespawnPlayerIds;
 }
 
-function relocatePlayerAfterTerritoryChange(players, territories, player) {
+function relocatePlayerAfterTerritoryChange(territories, player) {
     const territory = territories.get(player.id);
 
     if (!territory || calculatePolygonArea(territory.polygon) <= 0) {
-        reconnectPlayerWithNewTerritory(players, territories, player);
-        return;
+        return false;
     }
 
     const point = findSpawnPointInsideTerritory(territory.polygon);
 
     if (!point) {
-        reconnectPlayerWithNewTerritory(players, territories, player);
-        return;
+        return false;
     }
 
     player.setSpawnPoint(point);
     territory.baseX = point.x;
     territory.baseY = point.y;
     territory.color = player.color;
-}
-
-function reconnectPlayerWithNewTerritory(players, territories, player) {
-    reconnectPlayerAsNew(players, player, territories);
-    initializePlayerTerritory(territories, player);
+    return true;
 }
 
 function findSpawnPointInsideTerritory(polygon) {

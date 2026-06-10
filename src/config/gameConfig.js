@@ -42,7 +42,7 @@ const loop = Object.freeze({
 });
 
 const world = Object.freeze({
-    mapRadius: 3000,
+    mapRadius: 5000,
     playerSize: 70,
     initialTerritoryRadius: 200
 });
@@ -54,7 +54,8 @@ const territory = Object.freeze({
     fillAlpha: 0.36,
     minCaptureArea: 800,
     minCaptureTrailPoints: 4,
-    trailPointSpacing: 14
+    trailPointSpacing: 14,
+    victoryAreaRatio: 0.9995
 });
 
 const movement = Object.freeze({
@@ -69,6 +70,16 @@ const movement = Object.freeze({
     speed: 600,
     rotationStrength: 0.1,
     slideAngleThreshold: 0.1
+});
+
+const numbers = Object.freeze({
+    radius: 40,
+    minDistanceBetween: 180,
+    minDistanceFromPlayer: 220,
+    maxNumbers: 25,
+    respawnDelaySec: 4,
+    maxSpawnAttempts: 80,
+    spawnRadiusRatio: 0.88
 });
 
 const player = Object.freeze({
@@ -199,6 +210,7 @@ const client = Object.freeze({
     }),
     world,
     territory,
+    numbers,
     player,
     gameMode,
     minimap,
@@ -218,6 +230,49 @@ const rooms = Object.freeze({
     privateRoomPasswordMinLength: 4
 });
 
+const roomOptionMultipliers = Object.freeze([0.5, 0.75, 1, 1.5, 2]);
+
+const roomCustomOptions = Object.freeze({
+    multipliers: roomOptionMultipliers,
+    lives: Object.freeze({
+        min: 1,
+        max: 5
+    }),
+    groups: Object.freeze([
+        Object.freeze({
+            id: "world",
+            label: "Mundo",
+            options: Object.freeze([
+                Object.freeze({ id: "mapSize", label: "Tamanho do mapa", type: "multiplier" })
+            ])
+        }),
+        Object.freeze({
+            id: "movement",
+            label: "Movimento",
+            options: Object.freeze([
+                Object.freeze({ id: "playerSpeed", label: "Velocidade do jogador", type: "multiplier" })
+            ])
+        }),
+        Object.freeze({
+            id: "numbers",
+            label: "Numeros",
+            options: Object.freeze([
+                Object.freeze({ id: "numberRespawn", label: "Tempo de reaparecimento", type: "multiplier" }),
+                Object.freeze({ id: "numberDensity", label: "Quantidade de numeros", type: "multiplier" }),
+                Object.freeze({ id: "numberSpread", label: "Distribuicao no mapa", type: "multiplier" }),
+                Object.freeze({ id: "themeDuration", label: "Duracao do tema", type: "multiplier" })
+            ])
+        }),
+        Object.freeze({
+            id: "match",
+            label: "Partida",
+            options: Object.freeze([
+                Object.freeze({ id: "lives", label: "Vidas", type: "lives" })
+            ])
+        })
+    ])
+});
+
 const menuBackground = Object.freeze({
     enabled: true,
     roomCode: "BOTS",
@@ -232,6 +287,7 @@ module.exports = Object.freeze({
     world,
     territory,
     movement,
+    numbers,
     player,
     gameMode,
     bots,
@@ -244,5 +300,6 @@ module.exports = Object.freeze({
     security,
     client,
     rooms,
+    roomCustomOptions,
     menuBackground
 });

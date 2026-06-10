@@ -70,7 +70,7 @@
     </section>
 
     <div id="roomCreateModal" class="room-modal menu-room-modal" aria-hidden="true">
-        <div class="room-modal__content" role="dialog" aria-modal="true" aria-label="Criar sala">
+        <div class="room-modal__content room-modal__content--wide" role="dialog" aria-modal="true" aria-label="Criar sala">
             <div class="room-modal__header">
                 <div>
                     <p class="room-modal__eyebrow">Sala personalizada</p>
@@ -88,6 +88,59 @@
                 <p class="room-modal__hint">Proteja a sala com senha e compartilhe o código apenas com quem você quiser.</p>
                 <label for="roomCreatePasswordInput" class="room-modal__input-label hidden">Senha da sala</label>
                 <input id="roomCreatePasswordInput" class="room-modal__input hidden" type="password" maxlength="20" autocomplete="new-password" placeholder="Senha para sala privada">
+            </div>
+
+            <div class="room-modal__section">
+                <button id="toggleCustomOptionsButton" class="room-button room-button--ghost" type="button">Opções customizadas</button>
+                <div id="customOptionsPanel" class="room-options hidden" aria-hidden="true">
+                    <div class="room-options__group">
+                        <h2>Mundo</h2>
+                        <label class="room-slider" data-option="mapSize" data-type="multiplier">
+                            <span>Tamanho do mapa</span>
+                            <strong data-value>1x</strong>
+                            <input type="range" min="0" max="4" step="1" value="2">
+                        </label>
+                    </div>
+                    <div class="room-options__group">
+                        <h2>Movimento</h2>
+                        <label class="room-slider" data-option="playerSpeed" data-type="multiplier">
+                            <span>Velocidade do jogador</span>
+                            <strong data-value>1x</strong>
+                            <input type="range" min="0" max="4" step="1" value="2">
+                        </label>
+                    </div>
+                    <div class="room-options__group">
+                        <h2>Números</h2>
+                        <label class="room-slider" data-option="numberRespawn" data-type="multiplier">
+                            <span>Tempo de reaparecimento</span>
+                            <strong data-value>1x</strong>
+                            <input type="range" min="0" max="4" step="1" value="2">
+                        </label>
+                        <label class="room-slider" data-option="numberDensity" data-type="multiplier">
+                            <span>Quantidade de números</span>
+                            <strong data-value>1x</strong>
+                            <input type="range" min="0" max="4" step="1" value="2">
+                        </label>
+                        <label class="room-slider" data-option="numberSpread" data-type="multiplier">
+                            <span>Distribuição no mapa</span>
+                            <strong data-value>1x</strong>
+                            <input type="range" min="0" max="4" step="1" value="2">
+                        </label>
+                        <label class="room-slider" data-option="themeDuration" data-type="multiplier">
+                            <span>Duração do tema</span>
+                            <strong data-value>1x</strong>
+                            <input type="range" min="0" max="4" step="1" value="2">
+                        </label>
+                    </div>
+                    <div class="room-options__group">
+                        <h2>Partida</h2>
+                        <label class="room-slider" data-option="lives" data-type="lives">
+                            <span>Vidas</span>
+                            <strong data-value>2</strong>
+                            <input type="range" min="0" max="4" step="1" value="1">
+                        </label>
+                    </div>
+                </div>
                 <button id="createRoomButton" class="room-button room-button--accent" type="button">Criar nova sala</button>
             </div>
 
@@ -105,22 +158,20 @@
                 <button id="closeFindRoomButton" class="room-modal__close" type="button">×</button>
             </div>
 
-            <div class="room-modal__section room-modal__form">
-                <label for="roomCodeInput">Código da sala</label>
-                <input id="roomCodeInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
-                <label for="roomJoinPasswordInput">Senha da sala</label>
-                <input id="roomJoinPasswordInput" type="password" maxlength="20" autocomplete="current-password" placeholder="Senha da sala privada">
-                <button id="joinRoomButton" class="room-button" type="button">Entrar</button>
-            </div>
-
             <div class="room-modal__section">
-                <div class="rooms-filter">
-                    <span>Filtrar salas:</span>
-                    <div class="rooms-filter__badges">
-                        <button id="filterAllBtn" class="rooms-filter__badge rooms-filter__badge--active" data-filter="all" type="button">Todas</button>
-                        <button id="filterPublicBtn" class="rooms-filter__badge" data-filter="public" type="button">Públicas</button>
-                        <button id="filterPrivateBtn" class="rooms-filter__badge" data-filter="private" type="button">Privadas</button>
+                <div class="rooms-filter rooms-filter--bar">
+                    <div>
+                        <span>Filtrar salas:</span>
+                        <div class="rooms-filter__badges">
+                            <button id="filterAllBtn" class="rooms-filter__badge rooms-filter__badge--active" data-filter="all" type="button">Todas</button>
+                            <button id="filterPublicBtn" class="rooms-filter__badge" data-filter="public" type="button">Públicas</button>
+                            <button id="filterPrivateBtn" class="rooms-filter__badge" data-filter="private" type="button">Privadas</button>
+                        </div>
                     </div>
+                    <label class="rooms-code-filter" for="roomCodeFilterInput">
+                        <span>Código</span>
+                        <input id="roomCodeFilterInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
+                    </label>
                 </div>
                 <ul id="roomsList" class="rooms-list"></ul>
             </div>
@@ -132,6 +183,36 @@
                 <strong id="roomCodeDisplay"></strong>
                 <button id="leaveRoomButton" class="room-link" type="button">Sair da sala</button>
             </div>
+        </div>
+    </div>
+
+    <div id="roomPasswordModal" class="room-modal room-modal--nested" aria-hidden="true">
+        <div class="room-modal__content room-modal__content--compact" role="dialog" aria-modal="true" aria-label="Senha da sala">
+            <div class="room-modal__header">
+                <div>
+                    <p class="room-modal__eyebrow">Sala privada</p>
+                    <h1>Senha da sala</h1>
+                </div>
+                <button id="closeRoomPasswordButton" class="room-modal__close" type="button">&times;</button>
+            </div>
+            <div class="room-modal__section room-modal__form">
+                <p id="roomPasswordPrompt" class="room-modal__hint">Informe a senha para entrar.</p>
+                <input id="roomPasswordPopupInput" class="room-modal__input" type="password" maxlength="20" autocomplete="current-password" placeholder="Senha">
+                <button id="confirmRoomPasswordButton" class="room-button room-button--accent" type="button">Entrar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="roomDetailsModal" class="room-modal room-modal--nested" aria-hidden="true">
+        <div class="room-modal__content room-modal__content--compact" role="dialog" aria-modal="true" aria-label="Propriedades da sala">
+            <div class="room-modal__header">
+                <div>
+                    <p class="room-modal__eyebrow">Propriedades</p>
+                    <h1 id="roomDetailsTitle">Sala</h1>
+                </div>
+                <button id="closeRoomDetailsButton" class="room-modal__close" type="button">&times;</button>
+            </div>
+            <div id="roomDetailsBody" class="room-modal__section room-details"></div>
         </div>
     </div>
 

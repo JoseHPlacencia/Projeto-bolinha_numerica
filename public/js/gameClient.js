@@ -41,6 +41,7 @@ export function startClient(gameConfig, options = {}) {
             : () => document.body.classList.contains("is-game-active")
     });
     const roomUi = createRoomUi(socket, {
+        gameConfig,
         getPlayerOptions: options.getPlayerOptions,
         onExitGame: options.onExitGame,
         onJoinFailure: options.onJoinFailure,
@@ -69,6 +70,7 @@ export function startClient(gameConfig, options = {}) {
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
+        applyRoomConfig(snapshot && snapshot.roomConfig);
         renderer.processSnapshot(snapshot);
         const applyResult = snapshots.processSnapshot(snapshot);
 
@@ -106,6 +108,8 @@ export function startClient(gameConfig, options = {}) {
 
         const state = snapshots.getRenderState();
         const currentPlayer = state && myId ? state.players[myId] : null;
+
+        numberHud.updateBalance(currentPlayer);
 
         hud.update({
             frameStats: {
@@ -174,6 +178,30 @@ export function startClient(gameConfig, options = {}) {
         minimap.clear();
         lastViewportSentAt = Number.NEGATIVE_INFINITY;
         lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
+    }
+
+    function applyRoomConfig(roomConfig) {
+        if (!roomConfig) {
+            return;
+        }
+
+        mergeObject(gameConfig, roomConfig);
+        if (typeof renderer.updateConfig === "function") {
+            renderer.updateConfig(gameConfig);
+        }
+    }
+
+    function mergeObject(target, source) {
+        for (const [key, value] of Object.entries(source || {})) {
+            if (value && typeof value === "object" && !Array.isArray(value)) {
+                if (!target[key] || typeof target[key] !== "object") {
+                    target[key] = {};
+                }
+                mergeObject(target[key], value);
+            } else {
+                target[key] = value;
+            }
+        }
     }
 
     function createSnapshotAcknowledgement(applyResult) {

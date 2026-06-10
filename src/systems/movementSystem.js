@@ -10,8 +10,11 @@ const {
     vectorLength
 } = require("../utils/math");
 
-function updatePlayers(players, deltaTime) {
+function updatePlayers(players, deltaTime, runtimeConfig = null) {
     for (const player of players.values()) {
+        if (runtimeConfig) {
+            player.runtimeConfig = runtimeConfig;
+        }
         updatePlayer(player, deltaTime);
     }
 }
@@ -128,7 +131,7 @@ function evaluateBoundarySlideInput(player, targetInput, deltaTime) {
     const position = getPlayerPosition(player);
     const targetAngle = targetInput.angle;
     const relation = getBoundaryInputRelation(position, targetAngle);
-    const isTouchingBoundary = isPlayerHitboxTouchingMapBoundary(position);
+    const isTouchingBoundary = isPlayerHitboxTouchingMapBoundary(player, position);
     const isSliding = isBoundarySlideDirection(player.boundarySlideDirection);
     const hasUnhandledInput = hasUnhandledBoundarySlideInput(player);
     const evaluation = {
@@ -210,9 +213,9 @@ function evaluateBoundarySlideExit(player, targetAngle, deltaTime) {
     const lockedBoundarySlideAngle = getLockedBoundarySlideAngle(player);
     const baseAngle = lockedBoundarySlideAngle === null ? player.angle : lockedBoundarySlideAngle;
     const candidateAngle = lerpAngle(baseAngle, targetAngle, getRotationBlend(deltaTime));
-    const candidateMovement = createMovementVector(candidateAngle, config.movement.speed, deltaTime);
+    const candidateMovement = createMovementVector(candidateAngle, getMovementSpeed(player), deltaTime);
     const candidatePosition = addVectors(position, candidateMovement);
-    const candidateExitDepth = getMapMovementLimit() - vectorLength(candidatePosition);
+    const candidateExitDepth = getMapMovementLimit(player) - vectorLength(candidatePosition);
 
     return {
         exitsBoundary: candidateExitDepth >= getBoundarySlideExitDistance()
@@ -288,7 +291,7 @@ function getBoundarySlideTriggerBaseAngle(player, targetAngle, deltaTime) {
 function shouldBlockOutsideBoundaryInput(player, targetAngle) {
     const position = getPlayerPosition(player);
 
-    if (!isPlayerHitboxTouchingMapBoundary(position)) {
+    if (!isPlayerHitboxTouchingMapBoundary(player, position)) {
         return false;
     }
 
@@ -307,7 +310,7 @@ function movePlayer(player, deltaTime) {
 }
 
 function getPlayerMovementVector(player, deltaTime) {
-    return createMovementVector(player.angle, config.movement.speed, deltaTime);
+    return createMovementVector(player.angle, getMovementSpeed(player), deltaTime);
 }
 
 function getBoundaryAwareMovement(player, deltaTime) {
@@ -323,7 +326,7 @@ function resolveMapBoundary(player, movementVector, movementAngle = player.angle
     const position = getPlayerPosition(player);
     const nextPosition = addVectors(position, movementVector);
     const distanceFromCenter = vectorLength(nextPosition);
-    const mapLimit = getMapMovementLimit();
+    const mapLimit = getMapMovementLimit(player);
 
     if (distanceFromCenter <= mapLimit) {
         clearBoundarySlideDirectionIfAwayFromBoundary(player, nextPosition);
@@ -344,13 +347,13 @@ function resolveSlidingBoundary(player, movementVector, movementAngle, nextPosit
 
     if (wallPush > 0) {
         const position = getPlayerPosition(player);
-        const hitTime = getMapBoundaryHitTime(position, movementVector);
+        const hitTime = getMapBoundaryHitTime(player, position, movementVector);
         const hitPosition = addVectors(position, scaleVector(movementVector, hitTime));
         const hitNormal = getBoundaryNormal(hitPosition) || wallNormal;
         const remainingVector = scaleVector(movementVector, 1 - hitTime);
         const slideDirection = getLockedBoundarySlideDirection(player, hitNormal, movementVector);
         const slidingVector = createBoundarySlideVector(remainingVector, hitNormal, slideDirection);
-        const slideState = clampPositionToMap(addVectors(hitPosition, slidingVector), movementAngle);
+        const slideState = clampPositionToMap(player, addVectors(hitPosition, slidingVector), movementAngle);
 
         return {
             x: slideState.x,
@@ -359,7 +362,7 @@ function resolveSlidingBoundary(player, movementVector, movementAngle, nextPosit
         };
     }
 
-    return clampPositionToMap(nextPosition, movementAngle);
+    return clampPositionToMap(player, nextPosition, movementAngle);
 }
 
 function getStrictBoundaryTangentAngle(position, fallbackNormal, slideDirection) {
@@ -392,9 +395,9 @@ function getBoundarySlideTrigger(player, targetAngle) {
         return null;
     }
 
-    const triggerRadius = getBoundarySlideTriggerRadius(outwardAlignment);
+    const triggerRadius = getBoundarySlideTriggerRadius(player, outwardAlignment);
 
-    if (!isBoundarySlideTriggerCollidingWithMap(position, triggerRadius)) {
+    if (!isBoundarySlideTriggerCollidingWithMap(player, position, triggerRadius)) {
         return null;
     }
 
@@ -409,7 +412,7 @@ function getBoundarySlideTrigger(player, targetAngle) {
     return {
         angle: Math.atan2(tangent.y, tangent.x),
         alignment: outwardAlignment,
-        progress: getBoundarySlideTriggerProgress(position, triggerRadius)
+        progress: getBoundarySlideTriggerProgress(player, position, triggerRadius)
     };
 }
 
@@ -446,7 +449,7 @@ function getLockedBoundarySlideAngle(player) {
 
     const position = getPlayerPosition(player);
 
-    if (!isPlayerHitboxTouchingMapBoundary(position)) {
+    if (!isPlayerHitboxTouchingMapBoundary(player, position)) {
         return null;
     }
 
@@ -493,15 +496,15 @@ function markBoundarySlideInputHandled(player) {
 }
 
 function clearBoundarySlideDirectionIfAwayFromBoundary(player, position) {
-    const releaseDistance = config.world.playerSize / 2;
+    const releaseDistance = getRuntimeConfig(player).world.playerSize / 2;
 
-    if (!isNearMapBoundary(position, releaseDistance)) {
+    if (!isNearMapBoundary(player, position, releaseDistance)) {
         clearBoundarySlideDirection(player);
     }
 }
 
-function getMapBoundaryHitTime(position, movementVector) {
-    const mapLimit = getMapMovementLimit();
+function getMapBoundaryHitTime(player, position, movementVector) {
+    const mapLimit = getMapMovementLimit(player);
     const movementLengthSquared = dotProduct(movementVector, movementVector);
 
     if (movementLengthSquared <= Number.EPSILON) {
@@ -552,17 +555,17 @@ function getBoundarySlideTriggerMinOutwardAlignment() {
     return Number.isFinite(alignment) ? clamp(alignment, 0, 1) : 0;
 }
 
-function isBoundarySlideTriggerCollidingWithMap(position, triggerRadius) {
+function isBoundarySlideTriggerCollidingWithMap(player, position, triggerRadius) {
     if (triggerRadius <= Number.EPSILON) {
         return false;
     }
 
-    return vectorLength(position) + triggerRadius >= config.world.mapRadius;
+    return vectorLength(position) + triggerRadius >= getRuntimeConfig(player).world.mapRadius;
 }
 
-function getBoundarySlideTriggerProgress(position, triggerRadius) {
-    const triggerStartDistance = config.world.mapRadius - triggerRadius;
-    const hitboxContactDistance = getMapMovementLimit();
+function getBoundarySlideTriggerProgress(player, position, triggerRadius) {
+    const triggerStartDistance = getRuntimeConfig(player).world.mapRadius - triggerRadius;
+    const hitboxContactDistance = getMapMovementLimit(player);
     const triggerDistance = hitboxContactDistance - triggerStartDistance;
 
     if (triggerDistance <= Number.EPSILON) {
@@ -590,10 +593,10 @@ function getBoundarySlideTriggerRotationCurveSharpness() {
     return Number.isFinite(curveSharpness) ? Math.max(0, curveSharpness) : 0;
 }
 
-function getBoundarySlideTriggerRadius(outwardAlignment) {
+function getBoundarySlideTriggerRadius(player, outwardAlignment) {
     const playerSizeRatio = getBoundarySlideTriggerPerpendicularPlayerSizeRatio();
 
-    return config.world.playerSize * playerSizeRatio * outwardAlignment;
+    return getRuntimeConfig(player).world.playerSize * playerSizeRatio * outwardAlignment;
 }
 
 function getBoundarySlideTriggerPerpendicularPlayerSizeRatio() {
@@ -715,13 +718,16 @@ function getBoundaryTouchTolerance() {
     return Number.isFinite(tolerance) ? Math.max(0, tolerance) : 4;
 }
 
-function isPlayerHitboxTouchingMapBoundary(position) {
-    return isNearMapBoundary(position, getBoundaryTouchTolerance());
+function isPlayerHitboxTouchingMapBoundary(playerOrPosition, maybePosition = null) {
+    const player = maybePosition ? playerOrPosition : null;
+    const position = maybePosition || playerOrPosition;
+
+    return isNearMapBoundary(player, position, getBoundaryTouchTolerance());
 }
 
-function isNearMapBoundary(position, distanceFromBoundary) {
+function isNearMapBoundary(player, position, distanceFromBoundary) {
     const distanceFromCenter = vectorLength(position);
-    const mapLimit = getMapMovementLimit();
+    const mapLimit = getMapMovementLimit(player);
 
     return distanceFromCenter >= mapLimit - distanceFromBoundary - Number.EPSILON;
 }
@@ -736,8 +742,8 @@ function getBoundaryNormal(position) {
     return scaleVector(position, 1 / distanceFromCenter);
 }
 
-function clampPositionToMap(position, angle) {
-    const mapLimit = getMapMovementLimit();
+function clampPositionToMap(player, position, angle) {
+    const mapLimit = getMapMovementLimit(player);
     const distanceFromCenter = vectorLength(position) || 1;
 
     if (distanceFromCenter <= mapLimit) {
@@ -757,8 +763,20 @@ function clampPositionToMap(position, angle) {
     };
 }
 
-function getMapMovementLimit() {
-    return config.world.mapRadius - config.world.playerSize / 2;
+function getMapMovementLimit(player = null) {
+    const runtimeConfig = getRuntimeConfig(player);
+
+    return runtimeConfig.world.mapRadius - runtimeConfig.world.playerSize / 2;
+}
+
+function getMovementSpeed(player) {
+    return getRuntimeConfig(player).movement.speed;
+}
+
+function getRuntimeConfig(player = null) {
+    return player && player.runtimeConfig && player.runtimeConfig.world
+        ? player.runtimeConfig
+        : config;
 }
 
 function getPlayerPosition(player) {

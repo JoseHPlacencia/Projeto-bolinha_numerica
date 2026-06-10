@@ -12,6 +12,11 @@ const {
     getHumanPlayerCount
 } = require("../systems/botSystem");
 const { createNumberSystem } = require("../systems/numberSystem");
+const { createSpawn } = require("../systems/spawnSystem");
+const {
+    createRoomRuntimeConfig,
+    serializeRoomSettings
+} = require("./roomSettings");
 
 const rooms = new Map();
 const socketIdToRoomCode = new Map();
@@ -32,7 +37,14 @@ function createRoom(io, options = {}) {
     const territories = createTerritories();
     const players = new Map();
     const difficultyKey = normalizeRoomDifficulty(options.difficulty);
-    const numberSystem = createNumberSystem(config.world.mapRadius, players, territories, difficultyKey);
+    const runtimeConfig = createRoomRuntimeConfig(options.customOptions, difficultyKey);
+    const numberSystem = createNumberSystem(
+        runtimeConfig.world.mapRadius,
+        players,
+        territories,
+        difficultyKey,
+        runtimeConfig.numbers
+    );
 
     const room = {
         code: roomCode,
@@ -42,12 +54,13 @@ function createRoom(io, options = {}) {
         botManager: null,
         createdAt: Date.now(),
         lastActivity: Date.now(),
-        difficulty: normalizeRoomDifficulty(options.difficulty),
+        difficulty: difficultyKey,
         gameLoopInterval: null,
         hiddenFromList: Boolean(options.hiddenFromList),
         snapshotLoopInterval: null,
         isPrivate,
         isSystemRoom,
+        runtimeConfig,
         passwordHash: null,
         passwordSalt: null
     };
@@ -74,11 +87,12 @@ function createRoom(io, options = {}) {
         territories,
         numberSystem,
         botCount: options.botCount,
-        botDifficulty: options.botDifficulty || difficultyKey
+        botDifficulty: options.botDifficulty || difficultyKey,
+        runtimeConfig
     });
     room.botManager.ensureBots();
-    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem, room.botManager);
-    room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem);
+    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem, room.botManager, runtimeConfig);
+    room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig);
 
     rooms.set(roomCode, room);
     return { success: true, room };
@@ -133,13 +147,19 @@ function joinRoom(roomCode, socket, password = "") {
         }
     }
 
-    if (getHumanPlayerCount(room.players) >= config.rooms.maxPlayersPerRoom) {
+    const alreadyJoined = socket.data.roomCode === normalizedRoomCode && room.players.has(socket.id);
+
+    if (!alreadyJoined && getHumanPlayerCount(room.players) >= config.rooms.maxPlayersPerRoom) {
         return { success: false, message: "Room is full." };
     }
 
-    if (socket.data.roomCode === normalizedRoomCode) {
-        const alreadyJoined = room.players.has(socket.id);
+    const spawn = alreadyJoined ? null : createSpawn(room.players, room.territories, room.runtimeConfig);
 
+    if (!alreadyJoined && !spawn) {
+        return { success: false, message: "NÃ£o hÃ¡ espaÃ§o suficiente para nascer nesta sala." };
+    }
+
+    if (socket.data.roomCode === normalizedRoomCode) {
         if (!alreadyJoined) {
             resetSocketSnapshotState(socket);
         }
@@ -149,7 +169,8 @@ function joinRoom(roomCode, socket, password = "") {
         return {
             success: true,
             room,
-            alreadyJoined
+            alreadyJoined,
+            spawn
         };
     }
 
@@ -163,7 +184,7 @@ function joinRoom(roomCode, socket, password = "") {
     socketIdToRoomCode.set(socket.id, normalizedRoomCode);
     room.lastActivity = Date.now();
 
-    return { success: true, room };
+    return { success: true, room, spawn };
 }
 
 function createPasswordHash(password) {
@@ -228,6 +249,7 @@ function listRooms() {
             playerCount: getHumanPlayerCount(room.players),
             difficulty: room.difficulty || "medium",
             isPrivate: Boolean(room.isPrivate),
+            settings: serializeRoomSettings(room.runtimeConfig),
             createdAt: room.createdAt
         }));
 }

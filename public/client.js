@@ -18,6 +18,7 @@ const createRoomMenuButton = document.getElementById("btn-criar-sala");
 const mainMenu = document.getElementById("mainMenu");
 const gameLayer = document.getElementById("gameLayer");
 const gameOverPanel = document.getElementById("gameOverPanel");
+const gameOverTitle = document.getElementById("gameOverTitle");
 const gameOverMessage = document.getElementById("gameOverMessage");
 const gameOverReturnButton = document.getElementById("gameOverReturnButton");
 const statusMessage = createStatusMessage();
@@ -391,11 +392,25 @@ function showGameOver(data = {}) {
     gameClient.roomUi.clearRoomInfo();
 
     const eliminatedBy = typeof data.eliminatedBy === "string" ? data.eliminatedBy.trim() : "";
-    if (data.reason === "selfTrail") {
+    if (data.reason === "victory") {
+        if (gameOverTitle) gameOverTitle.textContent = "Vitória";
+        gameOverMessage.textContent = "Você dominou 100% do mapa.";
+    } else if (data.reason === "selfTrail") {
+        if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
         gameOverMessage.textContent = "Você cruzou seu próprio rastro e perdeu a última vida.";
+    } else if (data.reason === "captured") {
+        if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
+        gameOverMessage.textContent = eliminatedBy
+            ? `Você foi englobado pela captura de ${eliminatedBy} e ficou sem vidas.`
+            : "Você foi englobado por uma captura e ficou sem vidas.";
+    } else if (data.reason === "noRespawnSpace") {
+        if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
+        gameOverMessage.textContent = "Seu território não tinha espaço suficiente para respawn.";
     } else if (eliminatedBy) {
+        if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
         gameOverMessage.textContent = `Suas vidas acabaram. Você foi eliminado por ${eliminatedBy}.`;
     } else {
+        if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
         gameOverMessage.textContent = "Suas vidas acabaram.";
     }
 

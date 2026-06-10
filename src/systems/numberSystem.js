@@ -1,17 +1,10 @@
 "use strict";
 
-const { isPointOwnedByPlayer } = require("../state/territories");
+const config = require("../config/gameConfig");
 
 // ─── Config base ──────────────────────────────────────────────────────────────
 
-const NUMBER_CONFIG = Object.freeze({
-    radius: 40,
-    minDistanceBetween: 180,
-    minDistanceFromPlayer: 220,
-    maxNumbers: 25,
-    respawnDelaySec: 4,
-    maxSpawnAttempts: 80
-});
+const NUMBER_CONFIG = Object.freeze(config.numbers);
 
 // ─── Tabela de primos (para geração rápida) ───────────────────────────────────
 
@@ -429,21 +422,37 @@ function pickGenerator(weightTable) {
 
 // ─── Sistema de números (instância por sala) ──────────────────────────────────
 
-function createNumberSystem(mapRadius, players, territories, difficulty) {
+function createNumberSystem(mapRadius, players, territories, difficulty, numberOptions = {}) {
     const profileKey  = (difficulty === "easy" || difficulty === "hard") ? difficulty : "medium";
     const profile     = PROFILES[profileKey];
+    const numberConfig = createNumberConfig(numberOptions);
     const weightTable = buildWeightTable(profile.generators);
     const state       = createNumberState();
 
-    initNumbers(state, mapRadius, players, weightTable, profile);
+    initNumbers(state, mapRadius, players, weightTable, profile, numberConfig);
 
     return {
         difficulty:     profileKey,
         getNumbersMap:  () => state.numbers,
         getTheme:       () => state.theme,
         serialize:      () => serializeNumbers(state),
-        update:         nowMs => updateNumbers(state, players, territories, mapRadius, nowMs, weightTable, profile)
+        update:         nowMs => updateNumbers(state, players, territories, mapRadius, nowMs, weightTable, profile, numberConfig)
     };
+}
+
+function createNumberConfig(options = {}) {
+    const source = options && typeof options === "object" ? options : {};
+
+    return Object.freeze({
+        radius: getPositiveNumber(source.radius, NUMBER_CONFIG.radius),
+        minDistanceBetween: getPositiveNumber(source.minDistanceBetween, NUMBER_CONFIG.minDistanceBetween),
+        minDistanceFromPlayer: getPositiveNumber(source.minDistanceFromPlayer, NUMBER_CONFIG.minDistanceFromPlayer),
+        maxNumbers: Math.max(1, Math.round(getPositiveNumber(source.maxNumbers, NUMBER_CONFIG.maxNumbers))),
+        respawnDelaySec: getPositiveNumber(source.respawnDelaySec, NUMBER_CONFIG.respawnDelaySec),
+        maxSpawnAttempts: Math.max(1, Math.round(getPositiveNumber(source.maxSpawnAttempts, NUMBER_CONFIG.maxSpawnAttempts))),
+        spawnRadiusRatio: clamp(getPositiveNumber(source.spawnRadiusRatio, NUMBER_CONFIG.spawnRadiusRatio), 0.1, 0.98),
+        themeIntervalMultiplier: getPositiveNumber(source.themeIntervalMultiplier, 1)
+    });
 }
 
 function createNumberState() {
@@ -457,26 +466,26 @@ function createNumberState() {
     };
 }
 
-function initNumbers(state, mapRadius, players, weightTable, profile) {
+function initNumbers(state, mapRadius, players, weightTable, profile, numberConfig) {
     state.numbers.clear();
     state.pending = [];
     state.nextId  = 1;
 
-    for (let i = 0; i < NUMBER_CONFIG.maxNumbers; i++) {
-        spawnOneNumber(state, mapRadius, players, weightTable);
+    for (let i = 0; i < numberConfig.maxNumbers; i++) {
+        spawnOneNumber(state, mapRadius, players, weightTable, numberConfig);
     }
 
-    initTheme(state, profile);
+    initTheme(state, profile, numberConfig);
 }
 
-function initTheme(state, profile) {
+function initTheme(state, profile, numberConfig) {
     state.themeIdx        = Math.floor(Math.random() * profile.themes.length);
     state.theme           = profile.themes[state.themeIdx];
-    state.themeNextSwitch = Date.now() + profile.themeIntervalSec * 1000;
+    state.themeNextSwitch = Date.now() + getThemeIntervalMs(profile, numberConfig);
 }
 
-function spawnOneNumber(state, mapRadius, players, weightTable) {
-    const pos = trySpawnPosition(state, mapRadius, players);
+function spawnOneNumber(state, mapRadius, players, weightTable, numberConfig) {
+    const pos = trySpawnPosition(state, mapRadius, players, numberConfig);
     if (!pos) return null;
 
     const numData = pickGenerator(weightTable)();
@@ -495,24 +504,24 @@ function spawnOneNumber(state, mapRadius, players, weightTable) {
     return id;
 }
 
-function trySpawnPosition(state, mapRadius, players) {
-    const limit = mapRadius * 0.88;
-    for (let i = 0; i < NUMBER_CONFIG.maxSpawnAttempts; i++) {
+function trySpawnPosition(state, mapRadius, players, numberConfig) {
+    const limit = mapRadius * numberConfig.spawnRadiusRatio;
+    for (let i = 0; i < numberConfig.maxSpawnAttempts; i++) {
         const angle = Math.random() * Math.PI * 2;
         const dist  = Math.sqrt(Math.random()) * limit;
         const x     = Math.cos(angle) * dist;
         const y     = Math.sin(angle) * dist;
 
-        if (!isPosFarFromNumbers(state, x, y)) continue;
-        if (!isPosFarFromPlayers(x, y, players)) continue;
+        if (!isPosFarFromNumbers(state, x, y, numberConfig)) continue;
+        if (!isPosFarFromPlayers(x, y, players, numberConfig)) continue;
 
         return { x, y };
     }
     return null;
 }
 
-function isPosFarFromNumbers(state, x, y) {
-    const minD = NUMBER_CONFIG.minDistanceBetween;
+function isPosFarFromNumbers(state, x, y, numberConfig) {
+    const minD = numberConfig.minDistanceBetween;
     for (const num of state.numbers.values()) {
         const dx = num.x - x, dy = num.y - y;
         if (dx * dx + dy * dy < minD * minD) return false;
@@ -520,8 +529,8 @@ function isPosFarFromNumbers(state, x, y) {
     return true;
 }
 
-function isPosFarFromPlayers(x, y, players) {
-    const minD = NUMBER_CONFIG.minDistanceFromPlayer;
+function isPosFarFromPlayers(x, y, players, numberConfig) {
+    const minD = numberConfig.minDistanceFromPlayer;
     for (const p of players.values()) {
         const dx = p.x - x, dy = p.y - y;
         if (dx * dx + dy * dy < minD * minD) return false;
@@ -529,39 +538,37 @@ function isPosFarFromPlayers(x, y, players) {
     return true;
 }
 
-function updateNumbers(state, players, territories, mapRadius, nowMs, weightTable, profile) {
+function updateNumbers(state, players, territories, mapRadius, nowMs, weightTable, profile, numberConfig) {
     let themeChanged = false;
 
     // Troca de tema
     if (nowMs >= state.themeNextSwitch) {
         state.themeIdx        = (state.themeIdx + 1) % profile.themes.length;
         state.theme           = profile.themes[state.themeIdx];
-        state.themeNextSwitch = nowMs + profile.themeIntervalSec * 1000;
+        state.themeNextSwitch = nowMs + getThemeIntervalMs(profile, numberConfig);
         themeChanged          = true;
     }
 
     // Respawn pendente
     while (state.pending.length > 0 && state.pending[0].spawnAt <= nowMs) {
         state.pending.shift();
-        if (state.numbers.size < NUMBER_CONFIG.maxNumbers) {
-            spawnOneNumber(state, mapRadius, players, weightTable);
+        if (state.numbers.size < numberConfig.maxNumbers) {
+            spawnOneNumber(state, mapRadius, players, weightTable, numberConfig);
         }
     }
 
     // Completar mapa
-    if (state.numbers.size < NUMBER_CONFIG.maxNumbers && state.pending.length === 0) {
-        spawnOneNumber(state, mapRadius, players, weightTable);
+    if (state.numbers.size < numberConfig.maxNumbers && state.pending.length === 0) {
+        spawnOneNumber(state, mapRadius, players, weightTable, numberConfig);
     }
 
     // Colisões
     const collisions    = [];
     const playerRadius  = 35;
-    const combinedR2    = (NUMBER_CONFIG.radius + playerRadius) ** 2;
+    const combinedR2    = (numberConfig.radius + playerRadius) ** 2;
 
     for (const [nid, num] of state.numbers) {
         for (const player of players.values()) {
-            if (territories && isPointOwnedByPlayer(territories, player.id, num.x, num.y)) continue;
-
             const dx = player.x - num.x;
             const dy = player.y - num.y;
             if (dx * dx + dy * dy < combinedR2) {
@@ -574,7 +581,7 @@ function updateNumbers(state, players, territories, mapRadius, nowMs, weightTabl
                     belongsToTheme: state.theme ? state.theme.check(num) : false
                 });
                 state.numbers.delete(nid);
-                state.pending.push({ spawnAt: nowMs + NUMBER_CONFIG.respawnDelaySec * 1000 });
+                state.pending.push({ spawnAt: nowMs + numberConfig.respawnDelaySec * 1000 });
                 break;
             }
         }
@@ -606,6 +613,22 @@ function serializeNumbers(state) {
         } : null,
         themeEndsIn: Math.max(0, Math.round((state.themeNextSwitch - Date.now()) / 1000))
     };
+}
+
+function getThemeIntervalMs(profile, numberConfig) {
+    return profile.themeIntervalSec * numberConfig.themeIntervalMultiplier * 1000;
+}
+
+function getPositiveNumber(value, fallback) {
+    const numericValue = Number(value);
+
+    return Number.isFinite(numericValue) && numericValue > 0
+        ? numericValue
+        : fallback;
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
 }
 
 module.exports = {

@@ -14,7 +14,9 @@ function createTerritories() {
     return new Map();
 }
 
-function initializePlayerTerritory(territories, player) {
+function initializePlayerTerritory(territories, player, runtimeConfig = config) {
+    const territoryConfig = runtimeConfig && runtimeConfig.territory ? runtimeConfig.territory : config.territory;
+    const worldConfig = runtimeConfig && runtimeConfig.world ? runtimeConfig.world : config.world;
     const previousTerritory = territories.get(player.id);
 
     territories.set(player.id, {
@@ -27,8 +29,8 @@ function initializePlayerTerritory(territories, player) {
         polygon: createCirclePolygon(
             player.territoryX,
             player.territoryY,
-            config.world.initialTerritoryRadius,
-            config.territory.circleSegments
+            worldConfig.initialTerritoryRadius,
+            territoryConfig.circleSegments
         )
     });
 }

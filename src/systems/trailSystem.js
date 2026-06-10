@@ -60,9 +60,12 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
 
     if (leftInside && rightInside && hasAnyTrailSegment(player)) {
         if (canCaptureClosedTrail(player)) {
-            captureClosedTrail(player, territories, players);
+            const capturedPolygon = captureClosedTrail(player, territories, players, context);
+
+            if (capturedPolygon) {
+                player.consumeCatchBalance(1);
+            }
         }
-        player.resetCatchProgress();
         clearTrail(player);
         return;
     }
@@ -207,7 +210,7 @@ function appendPoint(points, point, force) {
     if (lastPoint) {
         const distance = distanceBetween(point.x, point.y, lastPoint.x, lastPoint.y);
 
-        if (distance <= Number.EPSILON || (!force && distance < config.territory.trailPointSpacing)) {
+        if (distance <= Number.EPSILON || (!force && distance < getTrailPointSpacing())) {
             return false;
         }
     }
@@ -366,7 +369,7 @@ function getRecentSelfTrailCollisionPointSkip(player, movingSide, storedSide) {
     }
 
     const boundaryTurnSkip = Math.ceil(
-        (config.world.playerSize * 4) / config.territory.trailPointSpacing
+        (getRuntimeConfig(player).world.playerSize * 4) / getTrailPointSpacing(player)
     );
 
     return Math.max(baseSkip, boundaryTurnSkip);
@@ -374,15 +377,17 @@ function getRecentSelfTrailCollisionPointSkip(player, movingSide, storedSide) {
 
 function isPlayerSlidingOnMapBoundary(player) {
     return isBoundarySlideDirection(player.boundarySlideDirection)
-        && Math.hypot(player.x, player.y) >= getMapMovementLimit() - Number.EPSILON;
+        && Math.hypot(player.x, player.y) >= getMapMovementLimit(player) - Number.EPSILON;
 }
 
 function isBoundarySlideDirection(value) {
     return value === -1 || value === 1;
 }
 
-function getMapMovementLimit() {
-    return config.world.mapRadius - config.world.playerSize / 2;
+function getMapMovementLimit(player = null) {
+    const runtimeConfig = getRuntimeConfig(player);
+
+    return runtimeConfig.world.mapRadius - runtimeConfig.world.playerSize / 2;
 }
 
 function segmentsCross(firstStart, firstEnd, secondStart, secondEnd) {
@@ -440,7 +445,7 @@ function clearTrailFill(player) {
 }
 
 function createTrailSample(player) {
-    const halfWidth = config.world.playerSize / 2;
+    const halfWidth = getRuntimeConfig(player).world.playerSize / 2;
     const normal = getPlayerNormal(player.angle);
 
     return {
@@ -453,6 +458,16 @@ function createTrailSample(player) {
             y: player.y - normal.y * halfWidth
         }
     };
+}
+
+function getTrailPointSpacing(player = null) {
+    return getRuntimeConfig(player).territory.trailPointSpacing;
+}
+
+function getRuntimeConfig(player = null) {
+    return player && player.runtimeConfig && player.runtimeConfig.world
+        ? player.runtimeConfig
+        : config;
 }
 
 function serializeTrails(players, territories) {

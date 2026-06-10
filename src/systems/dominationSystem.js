@@ -6,13 +6,19 @@ const {
 const {
     calculatePolygonArea,
     createKnownSimplePolygonFromPoints,
-    findClosestPolygonBoundaryContact
+    findClosestPolygonBoundaryContact,
+    isPointInPolygon
 } = require("../utils/geometry");
+const {
+    endPlayerGame,
+    handlePlayerLifeLoss,
+    handlePlayerVictory
+} = require("./catchModeSystem");
 const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
 
 const geometryEpsilon = 1e-7;
 
-function captureClosedTrail(player, territories, players) {
+function captureClosedTrail(player, territories, players, context = {}) {
     const capture = createExternalTrailCapture(player, territories);
 
     if (!capture) {
@@ -26,13 +32,163 @@ function captureClosedTrail(player, territories, players) {
     });
 
     storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
+    damagePlayersInsideCapturedPolygon(players, territories, player, capture.polygon, context);
 
     const relocationPlayerIds = new Set(changedPlayerIds);
     relocationPlayerIds.delete(player.id);
 
-    relocatePlayersAfterTerritoryChange(players, territories, relocationPlayerIds);
+    const noRespawnPlayerIds = relocatePlayersAfterTerritoryChange(players, territories, relocationPlayerIds);
+    endPlayersWithoutRespawn(players, territories, noRespawnPlayerIds, player, context);
+    maybeEndGameWithVictory(players, territories, player, context);
 
     return capture.polygon;
+}
+
+function damagePlayersInsideCapturedPolygon(players, territories, attacker, capturedPolygon, context) {
+    for (const target of [...players.values()]) {
+        if (!target || target.id === attacker.id) {
+            continue;
+        }
+
+        if (!isPointInPolygon(capturedPolygon, target.x, target.y)
+            && !doesTrailTouchCapturedPolygon(target, capturedPolygon)) {
+            continue;
+        }
+
+        handlePlayerLifeLoss(players, territories, target, context, {
+            attacker,
+            reason: "captured"
+        });
+    }
+}
+
+function doesTrailTouchCapturedPolygon(player, capturedPolygon) {
+    return doSegmentsTouchPolygon(player.trailLeftSegments, capturedPolygon)
+        || doSegmentsTouchPolygon(player.trailRightSegments, capturedPolygon);
+}
+
+function doSegmentsTouchPolygon(segments, polygon) {
+    if (!Array.isArray(segments) || !polygon || !polygon[0]) {
+        return false;
+    }
+
+    for (const segment of segments) {
+        if (!Array.isArray(segment) || segment.length === 0) {
+            continue;
+        }
+
+        if (segment.some(point => isPointInPolygon(polygon, point.x, point.y))) {
+            return true;
+        }
+
+        for (let index = 0; index < segment.length - 1; index++) {
+            if (doesSegmentCrossPolygon(segment[index], segment[index + 1], polygon)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function doesSegmentCrossPolygon(startPoint, endPoint, polygon) {
+    const ring = polygon[0] || [];
+
+    for (let index = 0; index < ring.length - 1; index++) {
+        const boundaryStart = coordinatesToPoint(ring[index]);
+        const boundaryEnd = coordinatesToPoint(ring[index + 1]);
+
+        if (segmentsIntersect(startPoint, endPoint, boundaryStart, boundaryEnd)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
+    if (!doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd)) {
+        return false;
+    }
+
+    const firstDirection = subtractPoints(firstEnd, firstStart);
+    const secondDirection = subtractPoints(secondEnd, secondStart);
+    const denominator = crossProduct(firstDirection, secondDirection);
+
+    if (Math.abs(denominator) <= geometryEpsilon) {
+        return false;
+    }
+
+    const startDelta = subtractPoints(secondStart, firstStart);
+    const firstT = crossProduct(startDelta, secondDirection) / denominator;
+    const secondT = crossProduct(startDelta, firstDirection) / denominator;
+
+    return firstT >= -geometryEpsilon
+        && firstT <= 1 + geometryEpsilon
+        && secondT >= -geometryEpsilon
+        && secondT <= 1 + geometryEpsilon;
+}
+
+function doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
+    return Math.max(Math.min(firstStart.x, firstEnd.x), Math.min(secondStart.x, secondEnd.x))
+        <= Math.min(Math.max(firstStart.x, firstEnd.x), Math.max(secondStart.x, secondEnd.x)) + geometryEpsilon
+        && Math.max(Math.min(firstStart.y, firstEnd.y), Math.min(secondStart.y, secondEnd.y))
+        <= Math.min(Math.max(firstStart.y, firstEnd.y), Math.max(secondStart.y, secondEnd.y)) + geometryEpsilon;
+}
+
+function coordinatesToPoint(coordinates) {
+    return {
+        x: coordinates[0],
+        y: coordinates[1]
+    };
+}
+
+function subtractPoints(first, second) {
+    return {
+        x: first.x - second.x,
+        y: first.y - second.y
+    };
+}
+
+function crossProduct(first, second) {
+    return first.x * second.y - first.y * second.x;
+}
+
+function endPlayersWithoutRespawn(players, territories, playerIds, attacker, context) {
+    for (const playerId of playerIds || []) {
+        const target = players.get(playerId);
+
+        if (!target || target.id === attacker.id) {
+            continue;
+        }
+
+        endPlayerGame(players, territories, target, context, {
+            attacker,
+            reason: "noRespawnSpace"
+        });
+    }
+}
+
+function maybeEndGameWithVictory(players, territories, player, context) {
+    if (!player || !players.has(player.id) || !hasPlayerDominatedMap(territories, player)) {
+        return false;
+    }
+
+    return handlePlayerVictory(players, territories, player, context);
+}
+
+function hasPlayerDominatedMap(territories, player) {
+    const territory = territories.get(player.id);
+    const runtimeConfig = player.runtimeConfig;
+    const worldConfig = runtimeConfig && runtimeConfig.world ? runtimeConfig.world : config.world;
+    const totalMapArea = Math.PI * worldConfig.mapRadius * worldConfig.mapRadius;
+    const victoryRatio = Number.isFinite(config.territory.victoryAreaRatio)
+        ? config.territory.victoryAreaRatio
+        : 1;
+
+    return territory
+        && totalMapArea > 0
+        && calculatePolygonArea(territory.polygon) >= totalMapArea * victoryRatio;
 }
 
 function createExternalTrailCapturePolygon(player, territories) {

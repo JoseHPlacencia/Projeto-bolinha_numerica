@@ -1,6 +1,6 @@
 const config = require("../config/gameConfig");
 const { deletePlayerTerritory } = require("../state/territories");
-const { returnPlayerToSpawn } = require("../entities/player");
+const { findSpawnPointInsideTerritory } = require("./territoryRespawnSystem");
 
 function handleNumberCollected(players, territories, collection, context = {}) {
     const player = players.get(collection.playerId);
@@ -45,12 +45,41 @@ function handlePlayerLifeLoss(players, territories, target, context = {}, option
     }
 
     if (target.loseLife() > 0) {
-        returnPlayerToSpawn(target);
+        const spawn = findRespawnPointForPlayer(territories, target);
+
+        if (!spawn) {
+            endPlayerGame(players, territories, target, context, {
+                ...options,
+                reason: "noRespawnSpace"
+            });
+            return true;
+        }
+
+        setPlayerRespawnPoint(territories, target, spawn);
+        target.respawnAt(spawn, { resetCatchProgress: true });
         return false;
     }
 
     endPlayerGame(players, territories, target, context, options);
     return true;
+}
+
+function findRespawnPointForPlayer(territories, player) {
+    const territory = territories.get(player.id);
+
+    return territory ? findSpawnPointInsideTerritory(territory.polygon) : null;
+}
+
+function setPlayerRespawnPoint(territories, player, point) {
+    const territory = territories.get(player.id);
+
+    player.setSpawnPoint(point);
+
+    if (territory) {
+        territory.baseX = point.x;
+        territory.baseY = point.y;
+        territory.color = player.color;
+    }
 }
 
 function endPlayerGame(players, territories, target, context = {}, options = {}) {
@@ -60,6 +89,7 @@ function endPlayerGame(players, territories, target, context = {}, options = {})
         ? attacker.name
         : null;
 
+    clearPendingTarget(players, target.id);
     target.resetCatchProgress();
     players.delete(target.id);
     deletePlayerTerritory(territories, target.id);
@@ -82,6 +112,17 @@ function endPlayerGame(players, territories, target, context = {}, options = {})
     }, config.gameMode.catch.gameOverDisconnectDelayMs);
 }
 
+function handlePlayerVictory(players, territories, winner, context = {}) {
+    if (!winner) {
+        return false;
+    }
+
+    endPlayerGame(players, territories, winner, context, {
+        reason: "victory"
+    });
+    return true;
+}
+
 function clearPendingTarget(players, targetId) {
     for (const player of players.values()) {
         player.clearCatchEliminationTarget(targetId);
@@ -89,6 +130,8 @@ function clearPendingTarget(players, targetId) {
 }
 
 module.exports = {
+    endPlayerGame,
     handleNumberCollected,
-    handlePlayerLifeLoss
+    handlePlayerLifeLoss,
+    handlePlayerVictory
 };

@@ -5,15 +5,15 @@ const {
     createSnapshot
 } = require("./snapshotSerializer");
 
-function startSnapshotLoop(io, players, territories, roomCode, numberSystem) {
+function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null) {
     const intervalMs = 1000 / config.loop.snapshotRate;
 
     return setInterval(() => {
-        sendSnapshot(io, players, territories, roomCode, numberSystem);
+        sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig);
     }, intervalMs);
 }
 
-function sendSnapshot(io, players, territories, roomCode, numberSystem) {
+function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null) {
     for (const socket of io.sockets.sockets.values()) {
         const isPlayerSocket = roomCode && socket.data.roomCode === roomCode && players.has(socket.id);
         const isSpectatorSocket = roomCode && socket.data.spectatorRoomCode === roomCode;
@@ -35,12 +35,12 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem) {
         }
 
         if (retryPendingReliableSnapshot(socket)) {
-            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId);
+            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig);
             continue;
         }
 
         const nextSnapshotState = cloneClientSnapshotState(socket.data.snapshotState);
-        const snapshot = createSnapshot(players, territories, viewerId, nextSnapshotState, numberSystem);
+        const snapshot = createSnapshot(players, territories, viewerId, nextSnapshotState, numberSystem, runtimeConfig);
 
         if (isSpectatorSocket) {
             snapshot.spectator = { followId: viewerId };
@@ -82,11 +82,11 @@ function retryPendingReliableSnapshot(socket) {
     return true;
 }
 
-function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId) {
+function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig = null) {
     if (config.network.volatileSnapshotsWhileReliablePendingEnabled === false) return;
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
-    const snapshot = createSnapshot(players, territories, viewerId, temporaryState, numberSystem);
+    const snapshot = createSnapshot(players, territories, viewerId, temporaryState, numberSystem, runtimeConfig);
     if (socket.data && socket.data.spectatorRoomCode) {
         snapshot.spectator = { followId: viewerId };
     }

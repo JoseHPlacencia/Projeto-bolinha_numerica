@@ -43,10 +43,18 @@ function registerRoomEvents(socket, io, roomManager) {
         const password = String(payload && payload.password || "");
         const isPrivate = Boolean(payload && payload.isPrivate);
         const roomDifficulty = String(payload && payload.difficulty || "").trim().toLowerCase() || "medium";
+        const customOptions = payload && typeof payload.customOptions === "object"
+            ? payload.customOptions
+            : {};
         const playerOptions = normalizePlayerOptions(payload && payload.player);
 
         if (createNewRoom) {
-            const createResult = roomManager.createRoom(io, { isPrivate, password, difficulty: roomDifficulty });
+            const createResult = roomManager.createRoom(io, {
+                customOptions,
+                difficulty: roomDifficulty,
+                isPrivate,
+                password
+            });
 
             if (!createResult.success) {
                 socket.emit("joinRoomResult", { success: false, message: createResult.message });
@@ -61,7 +69,17 @@ function registerRoomEvents(socket, io, roomManager) {
                 return;
             }
 
-            initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined, playerOptions);
+            const player = initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined, playerOptions, joinResult.spawn);
+
+            if (!player && !joinResult.alreadyJoined) {
+                roomManager.leaveRoom(socket);
+                roomManager.destroyRoom(createResult.room.code);
+                socket.emit("joinRoomResult", {
+                    success: false,
+                    message: "NÃ£o hÃ¡ espaÃ§o suficiente para nascer nesta sala."
+                });
+                return;
+            }
 
             socket.emit("joinRoomResult", { success: true, roomCode: joinResult.room.code });
             io.emit("roomsList", buildRoomsList(roomManager));
@@ -80,7 +98,17 @@ function registerRoomEvents(socket, io, roomManager) {
             return;
         }
 
-        initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined, playerOptions);
+        const player = initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined, playerOptions, joinResult.spawn);
+
+        if (!player && !joinResult.alreadyJoined) {
+            roomManager.leaveRoom(socket);
+            socket.emit("joinRoomResult", {
+                success: false,
+                message: "NÃ£o hÃ¡ espaÃ§o suficiente para nascer nesta sala."
+            });
+            io.emit("roomsList", buildRoomsList(roomManager));
+            return;
+        }
 
         socket.emit("joinRoomResult", { success: true, roomCode: joinResult.room.code });
         io.emit("roomsList", buildRoomsList(roomManager));
@@ -149,11 +177,27 @@ function resetSpectatorSnapshotState(socket) {
     socket.data.nextReliableSnapshotId = 0;
 }
 
-function initializeSocketPlayer(room, socket, alreadyJoined, playerOptions = {}) {
-    if (alreadyJoined) return;
+function initializeSocketPlayer(room, socket, alreadyJoined, playerOptions = {}, spawn = null) {
+    if (alreadyJoined) {
+        return room.players.get(socket.id) || null;
+    }
 
-    const player = createPlayer(room.players, socket.id, room.territories, playerOptions);
-    initializePlayerTerritory(room.territories, player);
+    const runtimeConfig = room.runtimeConfig || config;
+    const player = createPlayer(room.players, socket.id, room.territories, {
+        ...playerOptions,
+        maxLives: runtimeConfig.gameMode && runtimeConfig.gameMode.catch
+            ? runtimeConfig.gameMode.catch.roomLives
+            : null,
+        runtimeConfig,
+        spawn
+    });
+
+    if (!player) {
+        return null;
+    }
+
+    initializePlayerTerritory(room.territories, player, runtimeConfig);
+    return player;
 }
 
 function normalizePlayerOptions(rawPlayer) {

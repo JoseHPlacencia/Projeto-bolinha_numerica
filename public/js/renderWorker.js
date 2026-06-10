@@ -4,6 +4,7 @@ import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 let renderer = null;
 let snapshots = null;
 let currentPlayerId = null;
+let currentGameConfig = null;
 let running = false;
 let frameCount = 0;
 let renderedFrameCount = 0;
@@ -25,6 +26,11 @@ self.addEventListener("message", event => {
         return;
     }
 
+    if (message.type === "config") {
+        applyGameConfig(message.gameConfig);
+        return;
+    }
+
     if (message.type === "snapshot") {
         processSnapshot(message.snapshot);
         return;
@@ -41,6 +47,7 @@ self.addEventListener("message", event => {
 });
 
 function initializeRenderer({ canvas, gameConfig, layout }) {
+    currentGameConfig = gameConfig;
     renderer = createCanvasRenderer(canvas, gameConfig);
     renderer.resizeCanvas(layout);
     snapshots = createSnapshotInterpolator(gameConfig.network, {
@@ -54,6 +61,27 @@ function initializeRenderer({ canvas, gameConfig, layout }) {
     if (!running) {
         running = true;
         scheduleFrame(renderLoop);
+    }
+}
+
+function applyGameConfig(nextConfig) {
+    if (!currentGameConfig || !nextConfig) {
+        return;
+    }
+
+    mergeObject(currentGameConfig, nextConfig);
+}
+
+function mergeObject(target, source) {
+    for (const [key, value] of Object.entries(source || {})) {
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+            if (!target[key] || typeof target[key] !== "object") {
+                target[key] = {};
+            }
+            mergeObject(target[key], value);
+        } else {
+            target[key] = value;
+        }
     }
 }
 

@@ -4,7 +4,7 @@ const { updateTrails } = require("../systems/trailSystem");
 const { handleNumberCollected } = require("../systems/catchModeSystem");
 const { getHighResolutionTime } = require("../utils/time");
 
-function startGameLoop(players, territories, io, roomCode, numberSystem, botManager = null) {
+function startGameLoop(players, territories, io, roomCode, numberSystem, botManager = null, runtimeConfig = null) {
     const intervalMs = 1000 / config.loop.tickRate;
     let previousTime = getHighResolutionTime();
 
@@ -17,7 +17,7 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
             botManager.update(Date.now());
         }
 
-        updatePlayers(players, deltaTime);
+        updatePlayers(players, deltaTime, runtimeConfig);
         updateTrails(players, territories, { io, roomCode });
 
         const result = numberSystem
