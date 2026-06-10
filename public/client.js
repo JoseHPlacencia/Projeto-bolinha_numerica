@@ -21,6 +21,7 @@ const gameOverMessage = document.getElementById("gameOverMessage");
 const gameOverReturnButton = document.getElementById("gameOverReturnButton");
 const statusMessage = createStatusMessage();
 const AUTO_START_TIMEOUT_MS = 10000;
+const PLAY_BUTTON_IDLE_LABEL = "▶ Partida rápida";
 
 let selectedColor = DEFAULT_PLAYER_COLOR;
 let selectedDifficulty = "medium";
@@ -410,11 +411,11 @@ function hideGameOver() {
     gameOverPanel.setAttribute("aria-hidden", "true");
 }
 
-function setMenuBusy(isBusy, label = "Partida rápida") {
+function setMenuBusy(isBusy, label = "Acessando...") {
     playButton.disabled = isBusy;
     if (findRoomMenuButton) findRoomMenuButton.disabled = isBusy;
     if (createRoomMenuButton) createRoomMenuButton.disabled = isBusy;
-    playButton.textContent = isBusy ? label : "Partida rápida";
+    playButton.textContent = isBusy ? label : PLAY_BUTTON_IDLE_LABEL;
 }
 
 function openOverlay(overlayId) {

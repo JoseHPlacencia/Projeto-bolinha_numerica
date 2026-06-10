@@ -44,6 +44,7 @@ export function startClient(gameConfig, options = {}) {
         getPlayerOptions: options.getPlayerOptions,
         onExitGame: options.onExitGame,
         onJoinFailure: options.onJoinFailure,
+        onJoinStart: options.onJoinStart,
         onJoinSuccess: handleRoomJoinSuccess,
         onRoomsList: options.onRoomsList
     });

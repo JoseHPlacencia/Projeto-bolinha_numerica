@@ -225,10 +225,12 @@ function createRoom(socket, elements, roomOptions = {}, options = {}) {
     setStatus(elements, "Criando sala...");
     elements.createRoomButton.disabled = true;
     notifyJoinStart(options);
+    const playerOpts = typeof options.getPlayerOptions === "function" ? options.getPlayerOptions() : {};
     socket.emit("joinRoom", {
         createNewRoom: true,
         isPrivate,
         password,
+        difficulty: playerOpts.difficulty || "medium",
         ...createPlayerPayload(options)
     });
 }

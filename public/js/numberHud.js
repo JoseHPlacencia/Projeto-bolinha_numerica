@@ -48,6 +48,14 @@ function createThemePanel() {
         labelEl.textContent = theme.label || "—";
         descEl.textContent  = theme.description || "";
         timerEl.textContent = secsLeft > 0 ? `${secsLeft}s` : "";
+
+        // Visual accent for union/intersection themes
+        const inner = el.querySelector(".theme-inner");
+        if (inner) {
+            inner.classList.remove("theme-op-union", "theme-op-intersection");
+            if (theme.operator === "union")        inner.classList.add("theme-op-union");
+            if (theme.operator === "intersection") inner.classList.add("theme-op-intersection");
+        }
     }
 
     return { el, update };
@@ -105,6 +113,14 @@ function injectThemeStyles() {
             font-weight: 500;
             color: rgba(255,255,255,0.55);
             font-family: 'Play', sans-serif;
+        }
+        .theme-op-union {
+            border-color: rgba(74, 222, 128, 0.6) !important;
+            box-shadow: 0 4px 18px rgba(74,222,128,0.22), 0 0 0 2px rgba(74,222,128,0.18) !important;
+        }
+        .theme-op-intersection {
+            border-color: rgba(192, 132, 252, 0.7) !important;
+            box-shadow: 0 4px 18px rgba(192,132,252,0.28), 0 0 0 2px rgba(192,132,252,0.22) !important;
         }
         .theme-timer {
             font-size: 13px;
@@ -205,6 +221,11 @@ const SET_LABELS = {
     racional:   "Racional",
     par:        "Par",
     impar:      "Ímpar",
+    primo:      "Primo",
+    mult3:      "Múlt. 3",
+    mult5:      "Múlt. 5",
+    mult10:     "Múlt. 10",
+    zero:       "Zero",
     maior_zero: "> 0",
     menor_zero: "< 0"
 };
@@ -215,6 +236,9 @@ const SET_BG_COLORS = {
     fracao:     "#713f12",
     raiz:       "#1e3a5f",
     irracional: "#4a1d96",
+    primo:      "#7c3aed",
+    mult3:      "#0e4c6e",
+    mult5:      "#7a3a00",
     default:    "#1e293b"
 };
 
@@ -226,16 +250,19 @@ function getBgForSets(sets) {
 }
 
 function getColorForSets(sets) {
-    if (sets.includes("natural"))    return "#4ade80";
+    if (sets.includes("irracional")) return "#c084fc";
+    if (sets.includes("raiz"))       return "#60a5fa";
+    if (sets.includes("primo"))      return "#a78bfa";
     if (sets.includes("negativo"))   return "#f87171";
     if (sets.includes("fracao"))     return "#facc15";
-    if (sets.includes("raiz"))       return "#60a5fa";
-    if (sets.includes("irracional")) return "#c084fc";
+    if (sets.includes("natural"))    return "#4ade80";
+    if (sets.includes("mult3"))      return "#38bdf8";
+    if (sets.includes("mult5"))      return "#fb923c";
     return "#e2e8f0";
 }
 
 function friendlySets(sets) {
-    const priority = ["irracional","raiz","fracao","negativo","natural","inteiro","racional","par","impar"];
+    const priority = ["irracional","raiz","fracao","negativo","natural","inteiro","racional","primo","par","impar","mult3","mult5","mult10"];
     const visible = [];
     for (const key of priority) {
         if (sets.includes(key) && SET_LABELS[key]) {

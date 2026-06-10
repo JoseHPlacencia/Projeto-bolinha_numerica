@@ -51,8 +51,8 @@
                 </div>
             </div>
 
-            <button class="btn-play" id="btn-play" type="button">Partida rápida</button>
-            <button class="btn-encontrar-sala" id="btn-encontrar-sala" type="button">Encontrar sala</button>
+            <button class="btn-play" id="btn-play" type="button">▶ Partida rápida</button>
+            <button class="btn-encontrar-sala" id="btn-encontrar-sala" type="button">🔎︎ Encontrar sala</button>
             <button class="btn-criar-sala" id="btn-criar-sala" type="button">⚙ Criar sala</button>
         </div>
 
@@ -65,10 +65,6 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
                 Sobre
             </button>
-            <a class="icon-btn" href="https://github.com/UVV-CC1N-26-P3/Vennperio" target="_blank" rel="noopener">
-                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"></path></svg>
-                GitHub
-            </a>
         </div>
     </section>
 
@@ -175,11 +171,17 @@
                     </div>
                     <div class="help-section">
                         <h3>Dificuldades</h3>
+                        <p>A dificuldade define quantas vidas você tem, quais números aparecem na arena e quão exigentes são os conjuntos do tema. Em todos os modos, capturar território exige saldo positivo de acertos do tema.</p>
                         <div class="badge-row">
                             <span class="badge badge-easy">Fácil — 3 vidas</span>
                             <span class="badge badge-medium">Médio — 2 vidas</span>
                             <span class="badge badge-hard">Difícil — 1 vida</span>
                         </div>
+                        <ul>
+                            <li>Fácil — usa números naturais, pares, ímpares, primos e múltiplos. Não aparecem raízes; os temas são mais amplos e dão mais margem para erro.</li>
+                            <li>Médio — adiciona negativos e frações, com uniões como Frações ∪ Negativos e Naturais ∪ Frações. Também não usa raízes, mas exige mais atenção ao tipo do número.</li>
+                            <li>Difícil — inclui irracionais e raízes, mistura uniões e interseções e troca o tema mais rápido. Como há só 1 vida, errar ou ficar sem saldo positivo é muito mais arriscado.</li>
+                        </ul>
                     </div>
                     <div class="help-section">
                         <h3>Pontuação</h3>
@@ -195,7 +197,7 @@
                 <div class="tab-panel" id="tab-conjuntos">
                     <div class="help-section">
                         <h3>O que é um Conjunto?</h3>
-                        <p>Um conjunto é uma coleção bem definida de elementos. No jogo, números espalhados pela arena pertencem a conjuntos matemáticos; capturar território com os números corretos gera bônus de pontuação.</p>
+                        <p>Um conjunto é uma coleção bem definida de elementos. No jogo, números espalhados pela arena pertencem a conjuntos matemáticos; capturar território exigirá ir atrás dos números corretos.</p>
                     </div>
                     <div class="help-section">
                         <h3>Conjuntos Numéricos</h3>
@@ -213,11 +215,11 @@
                         </table>
                     </div>
                     <div class="help-section">
-                        <h3>Bônus por Conjunto</h3>
+                        <h3>Operações com Conjuntos</h3>
                         <ul>
-                            <li>União (A ∪ B) — capture território com elementos de A ou de B para bônus duplo.</li>
-                            <li>Interseção (A ∩ B) — capture somente o que está nos dois conjuntos para bônus triplo.</li>
-                            <li>Diferença (A − B) — capture o que está em A mas não em B para pontos extras.</li>
+                            <li>União (A ∪ B) — capture território com elementos de A ou de B.</li>
+                            <li>Interseção (A ∩ B) — capture somente o que está nos dois conjuntos.</li>
+                            <li>Diferença (A − B) — capture o que está em A mas não em B.</li>
                             <li>Complemento (Aᶜ) — capture tudo que não pertence ao conjunto A.</li>
                         </ul>
                     </div>
@@ -226,24 +228,24 @@
                 <div class="tab-panel" id="tab-galeria">
                     <div class="gallery-grid">
                         <div class="gallery-card">
-                            <div class="glyph" aria-hidden="true">▦</div>
+                            <div class="glyph" aria-hidden="true">◯</div>
                             <div class="gc-title">Território</div>
-                            <p>O mapa é dividido em células coloridas. Feche loops para conquistar áreas e expandir seu domínio.</p>
+                            <p>Feche loops ao voltar para sua área para anexar a região contornada pela trilha.</p>
                         </div>
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">#</div>
                             <div class="gc-title">Números</div>
-                            <p>Células do mapa carregam números. Capturar os corretos segundo o conjunto-alvo gera bônus de pontos.</p>
+                            <p>Números aparecem pela arena. Pegue os que pertencem ao tema para manter saldo positivo e liberar capturas.</p>
                         </div>
                         <div class="gallery-card">
-                            <div class="glyph" aria-hidden="true">⚡</div>
-                            <div class="gc-title">Power-ups</div>
-                            <p>Turbo, escudo e ímã surgem no mapa. Escudo protege sua trilha de ser cortada por rivais.</p>
+                            <div class="glyph" aria-hidden="true">∩</div>
+                            <div class="gc-title">Conjuntos</div>
+                            <p>O tema pode pedir conjuntos simples, uniões ou interseções. Leia o alvo antes de arriscar a coleta.</p>
                         </div>
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">★</div>
                             <div class="gc-title">Placar</div>
-                            <p>Ranking em tempo real pelo percentual de território dominado.</p>
+                            <p>O ranking mostra território dominado, eliminações e posição em tempo real.</p>
                         </div>
                         <div class="gallery-card">
                             <div class="glyph" aria-hidden="true">✂</div>
@@ -274,24 +276,33 @@
                 </div>
                 <div class="sobre-grid">
                     <a class="sobre-member" href="https://github.com/JoseHPlacencia" target="_blank" rel="noopener">
-                        <div class="member-avatar">JH</div>
+                        <img class="member-avatar" src="https://github.com/JoseHPlacencia.png" alt="Avatar de JoseHPlacencia">
                         <div class="member-info">
-                            <h4>Jose H. Placencia</h4>
-                            <span>Líder · Backend · Game Logic</span>
+                            <h4>@JoseHPlacencia</h4>
                         </div>
                     </a>
                     <a class="sobre-member" href="https://github.com/luizgrs97" target="_blank" rel="noopener">
-                        <div class="member-avatar">LG</div>
+                        <img class="member-avatar" src="https://github.com/luizgrs97.png" alt="Avatar de luizgrs97">
                         <div class="member-info">
-                            <h4>Luiz G.</h4>
-                            <span>Desenvolvedor · Contribuições no backend</span>
+                            <h4>@luizgrs97</h4>
                         </div>
                     </a>
                     <a class="sobre-member" href="https://github.com/GabrielAmatto" target="_blank" rel="noopener">
-                        <div class="member-avatar">GA</div>
+                        <img class="member-avatar" src="https://github.com/GabrielAmatto.png" alt="Avatar de GabrielAmatto">
                         <div class="member-info">
-                            <h4>GabrielAmatto</h4>
-                            <span>Frontend · UI/UX</span>
+                            <h4>@GabrielAmatto</h4>
+                        </div>
+                    </a>
+                    <a class="sobre-member" href="https://github.com/guzazo" target="_blank" rel="noopener">
+                        <img class="member-avatar" src="https://github.com/guzazo.png" alt="Avatar de guzazo">
+                        <div class="member-info">
+                            <h4>@guzazo</h4>
+                        </div>
+                    </a>
+                    <a class="sobre-member" href="https://github.com/AdsonSR" target="_blank" rel="noopener">
+                        <img class="member-avatar" src="https://github.com/AdsonSR.png" alt="Avatar de AdsonSR">
+                        <div class="member-info">
+                            <h4>@AdsonSR</h4>
                         </div>
                     </a>
                 </div>

@@ -37,10 +37,11 @@ function registerRoomEvents(socket, io, roomManager) {
         const requestedCode = String(payload && payload.roomCode || "").trim().toUpperCase();
         const password = String(payload && payload.password || "");
         const isPrivate = Boolean(payload && payload.isPrivate);
+        const roomDifficulty = String(payload && payload.difficulty || "").trim().toLowerCase() || "medium";
         const playerOptions = normalizePlayerOptions(payload && payload.player);
 
         if (createNewRoom) {
-            const createResult = roomManager.createRoom(io, { isPrivate, password });
+            const createResult = roomManager.createRoom(io, { isPrivate, password, difficulty: roomDifficulty });
 
             if (!createResult.success) {
                 socket.emit("joinRoomResult", { success: false, message: createResult.message });

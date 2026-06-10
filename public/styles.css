@@ -49,12 +49,13 @@ button:disabled {
 }
 
 .main-menu {
-    align-items: center;
+    align-items: flex-start;
     display: flex;
     inset: 0;
     justify-content: center;
     min-height: 100%;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding: 20px;
     position: fixed;
     transition: opacity 180ms ease, visibility 180ms ease;
@@ -68,7 +69,8 @@ button:disabled {
         linear-gradient(135deg, #07101d 0%, #0c1524 48%, #111827 100%);
     content: "";
     inset: 0;
-    position: absolute;
+    pointer-events: none;
+    position: fixed;
 }
 
 .menu-shell {
@@ -76,8 +78,8 @@ button:disabled {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    max-height: 100%;
-    overflow: auto;
+    margin: auto 0;
+    overflow: visible;
     padding: 18px 0;
     position: relative;
     width: min(480px, 100%);
@@ -325,13 +327,16 @@ input[type="password"]:focus {
 }
 
 .overlay {
-    align-items: center;
+    align-items: flex-start;
     background: rgba(4, 8, 18, 0.82);
+    box-sizing: border-box;
     display: flex;
     inset: 0;
     justify-content: center;
     opacity: 0;
-    padding: 20px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 32px 16px;
     pointer-events: none;
     position: fixed;
     transition: opacity 160ms ease, visibility 160ms ease;
@@ -352,7 +357,7 @@ input[type="password"]:focus {
     box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
     display: flex;
     flex-direction: column;
-    max-height: 82vh;
+    margin: auto 0;
     overflow: hidden;
     width: min(660px, 96vw);
 }
@@ -392,7 +397,7 @@ input[type="password"]:focus {
 
 .popup-body {
     flex: 1;
-    overflow-y: auto;
+    overflow: visible;
     padding: 24px;
 }
 
@@ -578,6 +583,8 @@ input[type="password"]:focus {
 .sobre-grid {
     display: grid;
     gap: 14px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    margin-bottom: 32px;
 }
 
 .sobre-member {
@@ -587,30 +594,38 @@ input[type="password"]:focus {
     border-radius: 8px;
     color: inherit;
     display: flex;
-    gap: 14px;
+    flex-direction: column;
+    gap: 10px;
+    justify-content: flex-start;
     padding: 14px 16px;
+    text-align: center;
     text-decoration: none;
 }
 
 .member-avatar {
-    align-items: center;
     background: rgba(99, 210, 255, 0.13);
     border: 1px solid rgba(99, 210, 255, 0.3);
     border-radius: 50%;
     color: var(--accent);
-    display: flex;
-    flex-shrink: 0;
+    display: block;
+    flex: 0 0 auto;
     font-size: 0.9rem;
     font-weight: 800;
-    height: 42px;
-    justify-content: center;
-    width: 42px;
+    height: 64px;
+    object-fit: cover;
+    width: 64px;
+}
+
+.member-info {
+    width: 100%;
 }
 
 .member-info h4 {
     font-size: 0.9rem;
     font-weight: 600;
-    margin: 0 0 3px;
+    margin: 0;
+    overflow-wrap: anywhere;
+    text-align: center;
 }
 
 .member-info span {
@@ -946,17 +961,21 @@ body.is-menu-active #rankPanel {
 }
 
 .room-modal {
-    align-items: center;
-    background: rgba(4, 8, 15, 0.76);
+    align-items: flex-start;
+    background: rgba(4, 8, 18, 0.82);
+    box-sizing: border-box;
     display: flex;
     inset: 0;
     justify-content: center;
     opacity: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding: 32px 16px;
     pointer-events: none;
     position: fixed;
-    transition: opacity 180ms ease, visibility 180ms ease;
+    transition: opacity 160ms ease, visibility 160ms ease;
     visibility: hidden;
-    z-index: 25;
+    z-index: 100;
 }
 
 .room-modal.is-open {
@@ -966,30 +985,34 @@ body.is-menu-active #rankPanel {
 }
 
 .room-modal__content {
-    background: var(--panel);
+    background: rgba(18, 25, 41, 0.96);
     border: 1px solid var(--border);
     border-radius: 8px;
-    box-shadow: var(--glow), 0 24px 60px rgba(0, 0, 0, 0.45);
-    max-height: calc(100vh - 32px);
-    overflow: auto;
-    padding: 28px;
-    width: min(420px, calc(100vw - 32px));
+    box-shadow: 0 0 60px rgba(0, 0, 0, 0.6);
+    margin: auto 0;
+    overflow: hidden;
+    width: min(520px, 96vw);
 }
 
 .room-modal__content--wide {
-    width: min(620px, calc(100vw - 32px));
+    width: min(660px, 96vw);
 }
 
 .room-modal__header {
     align-items: center;
+    border-bottom: 1px solid var(--border);
     display: flex;
+    flex-shrink: 0;
     gap: 12px;
     justify-content: space-between;
-    margin-bottom: 22px;
+    margin-bottom: 0;
+    padding: 18px 22px 14px;
 }
 
 .room-modal__header h1 {
-    font-size: 18px;
+    color: var(--accent);
+    font-size: 0.95rem;
+    letter-spacing: 2px;
     margin: 0;
     text-transform: uppercase;
 }
@@ -1004,21 +1027,30 @@ body.is-menu-active #rankPanel {
 }
 
 .room-modal__close {
-    background: rgba(255, 255, 255, 0.08);
+    background: none;
     border: none;
-    border-radius: 50%;
-    color: #fff;
-    font-size: 24px;
-    height: 40px;
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 1.4rem;
     line-height: 1;
-    width: 40px;
+    padding: 4px 8px;
+    transition: color 0.15s, background 0.15s;
+}
+
+.room-modal__close:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
 }
 
 .room-modal__section {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    margin-bottom: 18px;
+    margin: 0 24px 18px;
+}
+
+.room-modal__header + .room-modal__section {
+    margin-top: 24px;
 }
 
 .room-modal__divider {
@@ -1153,12 +1185,14 @@ body.is-menu-active #rankPanel {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
+    margin: 0 24px 24px;
 }
 
 .room-status {
     color: rgba(255, 255, 255, 0.7);
     font-size: 13px;
     line-height: 1.4;
+    margin: 0 24px 20px;
     min-height: 22px;
 }
 
@@ -1292,6 +1326,10 @@ body.is-menu-active #rankPanel {
 
     .gallery-grid {
         grid-template-columns: 1fr;
+    }
+
+    .sobre-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .hud {

@@ -25,7 +25,8 @@ function createRoom(io, options = {}) {
     const isPrivate = Boolean(options.isPrivate);
     const territories = createTerritories();
     const players = new Map();
-    const numberSystem = createNumberSystem(config.world.mapRadius, players, territories);
+    const difficultyKey = normalizeRoomDifficulty(options.difficulty);
+    const numberSystem = createNumberSystem(config.world.mapRadius, players, territories, difficultyKey);
 
     const room = {
         code: roomCode,
@@ -35,6 +36,7 @@ function createRoom(io, options = {}) {
         botManager: null,
         createdAt: Date.now(),
         lastActivity: Date.now(),
+        difficulty: normalizeRoomDifficulty(options.difficulty),
         gameLoopInterval: null,
         snapshotLoopInterval: null,
         isPrivate,
@@ -179,6 +181,7 @@ function listRooms() {
         code: room.code,
         botCount: getBotPlayerCount(room.players),
         playerCount: getHumanPlayerCount(room.players),
+        difficulty: room.difficulty || "medium",
         isPrivate: Boolean(room.isPrivate),
         createdAt: room.createdAt
     }));
@@ -205,6 +208,12 @@ function generateRoomCode() {
 
     throw new Error("Unable to generate unique room code.");
 }
+
+function normalizeRoomDifficulty(raw) {
+    const d = String(raw || "").trim().toLowerCase();
+    return d === "easy" || d === "hard" ? d : "medium";
+}
+
 
 module.exports = {
     createRoom,
