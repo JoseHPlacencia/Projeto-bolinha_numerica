@@ -1,4 +1,3 @@
-const { serializeNumbers } = require("../systems/numberSystem");
 const config = require("../config/gameConfig");
 const { getServerTime } = require("../utils/time");
 const { getPolygonBounds } = require("../utils/geometry");
@@ -8,7 +7,6 @@ function createClientSnapshotState() {
         playerInfo: new Map(),
         territories: new Map(),
         trails: new Map(),
-        // Per-socket point dictionary used by territory polygons.
         territoryPoints: new Map(),
         nextTerritoryPointId: 1
     };
@@ -26,7 +24,7 @@ function cloneClientSnapshotState(clientState = createClientSnapshotState()) {
     };
 }
 
-function createSnapshot(players, territories, viewerId = null, clientState = createClientSnapshotState()) {
+function createSnapshot(players, territories, viewerId = null, clientState = createClientSnapshotState(), numberSystem = null) {
     const viewer = viewerId ? players.get(viewerId) : null;
     const now = getServerTime();
     const interestBounds = createInterestBounds(viewer);
@@ -52,7 +50,7 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         territoryOps: territoryChanges.operations,
         trailIds,
         trails: trailUpdates,
-        numbers: serializeNumbers()
+        numbers: numberSystem ? numberSystem.serialize() : null
     };
 
     if (viewer && viewer.debugState) {

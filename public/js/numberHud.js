@@ -1,49 +1,25 @@
-/**
- * numberHud.js
- * HUD para o sistema de números:
- *  - Painel "Conjunto Tema" no topo/centro
- *  - Notificação de coleta no centro-inferior
- *
- * Usa DOM puro para performance em dispositivos fracos
- * (sem reflow pesado – apenas opacity/transform em elementos já existentes).
- */
-
-export function createNumberHud() {
-    // ── Tema ──────────────────────────────────────────────────────────────────
+export function createNumberHud(options = {}) {
     const themePanel = createThemePanel();
-    // ── Notificação ───────────────────────────────────────────────────────────
     const notifPanel = createNotifPanel();
+    const container = options.container || document.getElementById("gameLayer") || document.body;
 
-    document.body.appendChild(themePanel.el);
-    document.body.appendChild(notifPanel.el);
+    container.appendChild(themePanel.el);
+    container.appendChild(notifPanel.el);
 
     let hideNotifTimer = null;
 
     return { updateTheme, showCollection };
 
-    // ─── API ──────────────────────────────────────────────────────────────────
-
-    /**
-     * Atualiza o painel de tema com dados do snapshot.
-     * @param {{ id, label, emoji, description }|null} theme
-     * @param {number} secsLeft – segundos restantes no tema
-     */
     function updateTheme(theme, secsLeft) {
         themePanel.update(theme, secsLeft);
     }
 
-    /**
-     * Exibe notificação de número coletado.
-     * @param {{ display, value, sets, belongsToTheme }} data
-     */
     function showCollection(data) {
         clearTimeout(hideNotifTimer);
         notifPanel.show(data);
         hideNotifTimer = setTimeout(() => notifPanel.hide(), 3200);
     }
 }
-
-// ─── Painel de Tema ───────────────────────────────────────────────────────────
 
 function createThemePanel() {
     const el = document.createElement("div");
@@ -82,7 +58,6 @@ function injectThemeStyles() {
     const style = document.createElement("style");
     style.id = "numberHudStyles";
     style.textContent = `
-        /* ── Tema ── */
         #themePanel {
             position: fixed;
             top: 14px;
@@ -139,7 +114,6 @@ function injectThemeStyles() {
             text-align: right;
         }
 
-        /* ── Notificação ── */
         #collectNotif {
             position: fixed;
             bottom: 60px;
@@ -218,8 +192,6 @@ function injectThemeStyles() {
     `;
     document.head.appendChild(style);
 }
-
-// ─── Painel de Notificação ────────────────────────────────────────────────────
 
 const SET_LABELS = {
     natural:    "Natural",

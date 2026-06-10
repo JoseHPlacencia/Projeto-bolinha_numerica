@@ -3,97 +3,327 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
-<title>Teoria dos Conjuntos</title>
+<title>Vennperio</title>
 <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-
-<canvas id="gameCanvas"></canvas>
-<div id="hud" class="hud">
-    <div id="debugPanel" class="debug-panel" hidden>
-        <div data-debug-level="1"><span>FPS</span><strong id="debugFps">0</strong></div>
-        <div data-debug-level="1"><span>Render FPS</span><strong id="debugRenderFps">0</strong></div>
-        <div data-debug-level="1"><span>Frame</span><strong id="debugFrame">0ms</strong></div>
-        <div data-debug-level="1"><span>Buffer</span><strong id="debugBuffer">0ms</strong></div>
-        <div data-debug-level="1"><span>Snapshots</span><strong id="debugSnapshots">0</strong></div>
-        <div data-debug-level="1"><span>DPR</span><strong id="debugPixelRatio">1</strong></div>
-        <div data-debug-level="1"><span>Canvas</span><strong id="debugCanvas">0x0</strong></div>
-        <div data-debug-level="2"><span>Dir source</span><strong id="debugDirectionSource">-</strong></div>
-        <div data-debug-level="2"><span>Dir rad</span><strong id="debugDirectionAngleRad">-</strong></div>
-        <div data-debug-level="2"><span>Dir deg</span><strong id="debugDirectionAngleDeg">-</strong></div>
-        <div data-debug-level="2"><span>Angle rad</span><strong id="debugPlayerAngleRad">-</strong></div>
-        <div data-debug-level="2"><span>Angle deg</span><strong id="debugPlayerAngleDeg">-</strong></div>
-        <div data-debug-level="2"><span>Delta rad</span><strong id="debugInputAngleDeltaRad">-</strong></div>
-        <div data-debug-level="2"><span>Delta deg</span><strong id="debugInputAngleDeltaDeg">-</strong></div>
-        <div data-debug-level="2"><span>Boundary</span><strong id="debugBoundaryRelation">-</strong></div>
-        <div data-debug-level="2"><span>Slide dir</span><strong id="debugBoundarySlideDirection">-</strong></div>
-        <div data-debug-level="2"><span>Touching</span><strong id="debugTouchingBoundary">-</strong></div>
-        <div data-debug-level="2"><span>Input</span><strong id="debugInputAccepted">-</strong></div>
-        <div data-debug-level="2"><span>Decision</span><strong id="debugBoundaryDecision">-</strong></div>
-    </div>
-</div>
-<canvas id="minimapCanvas" class="minimap" aria-hidden="true"></canvas>
-<div id="touchControls" class="touch-controls" aria-hidden="true">
-    <div id="moveStick" class="move-stick">
-        <div id="moveStickKnob" class="move-stick-knob"></div>
-    </div>
-</div>
-
-<!-- Room button -->
-<button id="roomMenuButton" class="room-menu-button" type="button">Sala</button>
-<button id="exitGameButton" class="exit-game-button" type="button">Sair</button>
-
-<!-- Room modal -->
-<div id="roomModal" class="room-modal" aria-hidden="true">
-    <div class="room-modal__content" role="dialog" aria-modal="true" aria-label="Menu de salas">
-        <div class="room-modal__header">
-            <h1>Menu de salas</h1>
-            <button id="closeRoomMenuButton" class="room-modal__close" type="button">×</button>
+<body class="is-menu-active">
+<main id="mainMenu" class="main-menu" aria-label="Menu principal">
+    <section id="app" class="menu-shell">
+        <div class="logo-wrap">
+            <div class="logo-tag">Vennperio<span class="io">.io</span></div>
+            <div class="logo-sub">Conquista de Território em Arena</div>
         </div>
 
-        <div class="room-modal__section room-modal__form room-modal__private-card">
-            <label class="room-toggle">
-                <input id="privateRoomCheckbox" type="checkbox">
-                <span class="room-toggle__track"><span class="room-toggle__thumb"></span></span>
-                <span class="room-toggle__label">Sala privada</span>
-            </label>
-            <p class="room-modal__hint">Proteja a sala com senha e compartilhe o código apenas com quem você quiser.</p>
-            <label for="roomCreatePasswordInput" class="room-modal__input-label hidden">Senha da sala</label>
-            <input id="roomCreatePasswordInput" class="room-modal__input hidden" type="password" maxlength="20" autocomplete="new-password" placeholder="Senha para sala privada">
-            <button id="createRoomButton" class="room-button room-button--accent" type="button">Criar nova sala</button>
-        </div>
+        <div class="card">
+            <div class="field-group">
+                <label for="player-name">Nome do Jogador</label>
+                <input type="text" id="player-name" placeholder="Ex: Euler42" maxlength="20" autocomplete="off">
+            </div>
 
-        <div class="room-modal__divider"><span>ou</span></div>
-
-        <div class="room-modal__section room-modal__form">
-            <label for="roomCodeInput">Código da sala</label>
-            <input id="roomCodeInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
-            <label for="roomJoinPasswordInput">Senha da sala</label>
-            <input id="roomJoinPasswordInput" type="password" maxlength="20" autocomplete="current-password" placeholder="Senha da sala privada">
-            <button id="joinRoomButton" class="room-button" type="button">Entrar</button>
-        </div>
-
-        <div class="room-modal__section">
-            <div class="rooms-filter">
-                <span>Salas ativas:</span>
-                <div class="rooms-filter__badges">
-                    <button id="filterAllBtn" class="rooms-filter__badge rooms-filter__badge--active" data-filter="all" type="button">Todas</button>
-                    <button id="filterPublicBtn" class="rooms-filter__badge" data-filter="public" type="button">Públicas</button>
-                    <button id="filterPrivateBtn" class="rooms-filter__badge" data-filter="private" type="button">Privadas</button>
+            <div class="field-group">
+                <label>Cor da Trilha</label>
+                <div class="color-row" id="color-picker" role="listbox" aria-label="Cor da trilha">
+                    <button class="color-swatch selected" data-color="#4a90e2" style="background:#4a90e2" type="button" aria-label="Azul"></button>
+                    <button class="color-swatch" data-color="#5a9a6d" style="background:#5a9a6d" type="button" aria-label="Verde"></button>
+                    <button class="color-swatch" data-color="#c26a6a" style="background:#c26a6a" type="button" aria-label="Vermelho"></button>
+                    <button class="color-swatch" data-color="#b38f2a" style="background:#b38f2a" type="button" aria-label="Amarelo"></button>
+                    <button class="color-swatch" data-color="#8565b8" style="background:#8565b8" type="button" aria-label="Roxo"></button>
+                    <button class="color-swatch" data-color="#ce7b45" style="background:#ce7b45" type="button" aria-label="Laranja"></button>
+                    <button class="color-swatch" data-color="#565656" style="background:#565656" type="button" aria-label="Cinza"></button>
                 </div>
             </div>
-            <ul id="roomsList" class="rooms-list"></ul>
+
+            <div class="field-group">
+                <label>Dificuldade</label>
+                <div class="diff-row">
+                    <button class="diff-btn" data-diff="easy" type="button">Fácil</button>
+                    <button class="diff-btn active-medium" data-diff="medium" type="button">Médio</button>
+                    <button class="diff-btn" data-diff="hard" type="button">Difícil</button>
+                </div>
+            </div>
+
+            <button class="btn-play" id="btn-play" type="button">▶ Jogar</button>
+            <button class="btn-criar-sala" id="btn-criar-sala" type="button">⚙ Criar sala</button>
         </div>
 
-        <p id="roomStatus" class="room-status" aria-live="polite"></p>
+        <div class="bottom-links">
+            <button class="icon-btn" id="btn-help" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><circle cx="12" cy="17" r=".5" fill="currentColor"></circle></svg>
+                Ajuda
+            </button>
+            <button class="icon-btn" id="btn-sobre" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                Sobre
+            </button>
+            <a class="icon-btn" href="https://github.com/UVV-CC1N-26-P3/Vennperio" target="_blank" rel="noopener">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"></path></svg>
+                GitHub
+            </a>
+        </div>
+    </section>
 
-        <div id="roomInfo" class="room-info hidden">
-            <span>Sala atual:</span>
-            <strong id="roomCodeDisplay"></strong>
-            <button id="leaveRoomButton" class="room-link" type="button">Sair da sala</button>
+    <div class="overlay" id="overlay-help" aria-hidden="true">
+        <div class="popup" role="dialog" aria-modal="true" aria-label="Central de ajuda">
+            <div class="popup-header">
+                <h2>Central de Ajuda</h2>
+                <button class="popup-close" data-close="overlay-help" type="button">×</button>
+            </div>
+            <div class="popup-body">
+                <div class="tabs-nav">
+                    <button class="tab-pill active" data-tab="mecanicas" type="button">Mecânicas</button>
+                    <button class="tab-pill" data-tab="conjuntos" type="button">Conjuntos</button>
+                    <button class="tab-pill" data-tab="galeria" type="button">Galeria</button>
+                </div>
+
+                <div class="tab-panel active" id="tab-mecanicas">
+                    <div class="help-section">
+                        <h3>Objetivo</h3>
+                        <p>Mova sua bolinha pela arena e conquiste território. Ao sair da sua área e traçar um caminho pela região neutra ou inimiga, uma trilha colorida fica atrás de você. Feche o loop voltando à sua área para capturar o território delimitado pela trilha.</p>
+                    </div>
+                    <div class="help-section">
+                        <h3>Mecânica de Trilha</h3>
+                        <ul>
+                            <li>Trilha ativa — ao sair do seu território, você deixa uma linha colorida no mapa e fica vulnerável.</li>
+                            <li>Fechar o loop — retorne à sua área colorida para capturar tudo que ficou dentro do caminho traçado.</li>
+                            <li>Eliminar rivais — passe por cima da trilha aberta de outro jogador para eliminá-lo e roubar parte do território.</li>
+                            <li>Cuidado — se um inimigo cruzar sua trilha antes de você fechar o loop, você é eliminado.</li>
+                        </ul>
+                    </div>
+                    <div class="help-section">
+                        <h3>Controles</h3>
+                        <ul>
+                            <li>Mouse ou toque — mova o cursor para guiar a bolinha pela arena.</li>
+                            <li>WASD ou setas — movimento alternativo por teclado.</li>
+                            <li>Espaço — acelerar com turbo e recarga.</li>
+                        </ul>
+                    </div>
+                    <div class="help-section">
+                        <h3>Dificuldades</h3>
+                        <div class="badge-row">
+                            <span class="badge badge-easy">Fácil — arena menor e mais tempo para fechar loops</span>
+                            <span class="badge badge-medium">Médio — arena padrão e velocidade equilibrada</span>
+                            <span class="badge badge-hard">Difícil — arena dinâmica e loops mais rápidos</span>
+                        </div>
+                    </div>
+                    <div class="help-section">
+                        <h3>Pontuação</h3>
+                        <ul>
+                            <li>+10 pts por célula de território capturada.</li>
+                            <li>+50 pts ao eliminar um rival cortando sua trilha.</li>
+                            <li>Bônus de combo ao capturar grandes áreas de uma vez.</li>
+                            <li>Vence quem dominar mais território ao final da rodada.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="tab-panel" id="tab-conjuntos">
+                    <div class="help-section">
+                        <h3>O que é um Conjunto?</h3>
+                        <p>Um conjunto é uma coleção bem definida de elementos. No jogo, números espalhados pela arena pertencem a conjuntos matemáticos; capturar território com os números corretos gera bônus de pontuação.</p>
+                    </div>
+                    <div class="help-section">
+                        <h3>Conjuntos Numéricos</h3>
+                        <table class="set-table">
+                            <thead>
+                                <tr><th>Símbolo</th><th>Nome</th><th>Exemplos</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>ℕ</td><td>Naturais</td><td>0, 1, 2, 3, 100…</td></tr>
+                                <tr><td>ℤ</td><td>Inteiros</td><td>… −3, −2, −1, 0, 1, 2 …</td></tr>
+                                <tr><td>ℚ</td><td>Racionais</td><td>1/2, 0.25, −3/4, 7…</td></tr>
+                                <tr><td>𝕀</td><td>Irracionais</td><td>π, √2, e, φ…</td></tr>
+                                <tr><td>ℝ</td><td>Reais</td><td>Todos os acima</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="help-section">
+                        <h3>Bônus por Conjunto</h3>
+                        <ul>
+                            <li>União (A ∪ B) — capture território com elementos de A ou de B para bônus duplo.</li>
+                            <li>Interseção (A ∩ B) — capture somente o que está nos dois conjuntos para bônus triplo.</li>
+                            <li>Diferença (A − B) — capture o que está em A mas não em B para pontos extras.</li>
+                            <li>Complemento (Aᶜ) — capture tudo que não pertence ao conjunto A.</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="tab-panel" id="tab-galeria">
+                    <div class="gallery-grid">
+                        <div class="gallery-card">
+                            <div class="glyph" aria-hidden="true">▦</div>
+                            <div class="gc-title">Território</div>
+                            <p>O mapa é dividido em células coloridas. Feche loops para conquistar áreas e expandir seu domínio.</p>
+                        </div>
+                        <div class="gallery-card">
+                            <div class="glyph" aria-hidden="true">#</div>
+                            <div class="gc-title">Números</div>
+                            <p>Células do mapa carregam números. Capturar os corretos segundo o conjunto-alvo gera bônus de pontos.</p>
+                        </div>
+                        <div class="gallery-card">
+                            <div class="glyph" aria-hidden="true">⚡</div>
+                            <div class="gc-title">Power-ups</div>
+                            <p>Turbo, escudo e ímã surgem no mapa. Escudo protege sua trilha de ser cortada por rivais.</p>
+                        </div>
+                        <div class="gallery-card">
+                            <div class="glyph" aria-hidden="true">★</div>
+                            <div class="gc-title">Placar</div>
+                            <p>Ranking em tempo real pelo percentual de território dominado.</p>
+                        </div>
+                        <div class="gallery-card">
+                            <div class="glyph" aria-hidden="true">✂</div>
+                            <div class="gc-title">Cortar Trilha</div>
+                            <p>Passe pela trilha aberta de um inimigo para eliminá-lo e roubar seu território.</p>
+                        </div>
+                        <div class="gallery-card">
+                            <div class="glyph" aria-hidden="true">∑</div>
+                            <div class="gc-title">Desafio</div>
+                            <p>O conjunto-alvo muda periodicamente. Adapte sua estratégia ao novo conjunto anunciado.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
-</div>
+
+    <div class="overlay" id="overlay-sobre" aria-hidden="true">
+        <div class="popup" role="dialog" aria-modal="true" aria-label="Sobre o projeto">
+            <div class="popup-header">
+                <h2>Sobre o Projeto</h2>
+                <button class="popup-close" data-close="overlay-sobre" type="button">×</button>
+            </div>
+            <div class="popup-body">
+                <p class="sobre-desc">Vennperio é um jogo multiplayer online inspirado no paper.io, desenvolvido como projeto acadêmico. Ele combina conquista de território com desafios de Teoria dos Conjuntos de forma competitiva e interativa.</p>
+                <div class="help-section">
+                    <h3>Equipe de Desenvolvimento</h3>
+                </div>
+                <div class="sobre-grid">
+                    <a class="sobre-member" href="https://github.com/JoseHPlacencia" target="_blank" rel="noopener">
+                        <div class="member-avatar">JH</div>
+                        <div class="member-info">
+                            <h4>Jose H. Placencia</h4>
+                            <span>Líder · Backend · Game Logic</span>
+                        </div>
+                    </a>
+                    <a class="sobre-member" href="https://github.com/luizgrs97" target="_blank" rel="noopener">
+                        <div class="member-avatar">LG</div>
+                        <div class="member-info">
+                            <h4>Luiz G.</h4>
+                            <span>Desenvolvedor · Contribuições no backend</span>
+                        </div>
+                    </a>
+                    <a class="sobre-member" href="https://github.com/GabrielAmatto" target="_blank" rel="noopener">
+                        <div class="member-avatar">GA</div>
+                        <div class="member-info">
+                            <h4>GabrielAmatto</h4>
+                            <span>Frontend · UI/UX</span>
+                        </div>
+                    </a>
+                </div>
+                <div class="help-section">
+                    <h3>Tecnologias</h3>
+                    <div class="badge-row">
+                        <span class="badge badge-easy">HTML5</span>
+                        <span class="badge badge-medium">CSS3</span>
+                        <span class="badge badge-hard">JavaScript</span>
+                        <span class="badge badge-info">Canvas API</span>
+                        <span class="badge badge-socket">WebSockets</span>
+                    </div>
+                </div>
+                <a class="icon-btn repository-link" href="https://github.com/UVV-CC1N-26-P3/Vennperio" target="_blank" rel="noopener">
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12c0-6.63-5.37-12-12-12z"></path></svg>
+                    Ver Repositório no GitHub
+                </a>
+            </div>
+        </div>
+    </div>
+</main>
+
+<section id="gameLayer" class="game-layer" aria-label="Jogo" aria-hidden="true">
+    <canvas id="gameCanvas"></canvas>
+    <div id="hud" class="hud">
+        <div id="debugPanel" class="debug-panel" hidden>
+            <div data-debug-level="1"><span>FPS</span><strong id="debugFps">0</strong></div>
+            <div data-debug-level="1"><span>Render FPS</span><strong id="debugRenderFps">0</strong></div>
+            <div data-debug-level="1"><span>Frame</span><strong id="debugFrame">0ms</strong></div>
+            <div data-debug-level="1"><span>Buffer</span><strong id="debugBuffer">0ms</strong></div>
+            <div data-debug-level="1"><span>Snapshots</span><strong id="debugSnapshots">0</strong></div>
+            <div data-debug-level="1"><span>DPR</span><strong id="debugPixelRatio">1</strong></div>
+            <div data-debug-level="1"><span>Canvas</span><strong id="debugCanvas">0x0</strong></div>
+            <div data-debug-level="2"><span>Dir source</span><strong id="debugDirectionSource">-</strong></div>
+            <div data-debug-level="2"><span>Dir rad</span><strong id="debugDirectionAngleRad">-</strong></div>
+            <div data-debug-level="2"><span>Dir deg</span><strong id="debugDirectionAngleDeg">-</strong></div>
+            <div data-debug-level="2"><span>Angle rad</span><strong id="debugPlayerAngleRad">-</strong></div>
+            <div data-debug-level="2"><span>Angle deg</span><strong id="debugPlayerAngleDeg">-</strong></div>
+            <div data-debug-level="2"><span>Delta rad</span><strong id="debugInputAngleDeltaRad">-</strong></div>
+            <div data-debug-level="2"><span>Delta deg</span><strong id="debugInputAngleDeltaDeg">-</strong></div>
+            <div data-debug-level="2"><span>Boundary</span><strong id="debugBoundaryRelation">-</strong></div>
+            <div data-debug-level="2"><span>Slide dir</span><strong id="debugBoundarySlideDirection">-</strong></div>
+            <div data-debug-level="2"><span>Touching</span><strong id="debugTouchingBoundary">-</strong></div>
+            <div data-debug-level="2"><span>Input</span><strong id="debugInputAccepted">-</strong></div>
+            <div data-debug-level="2"><span>Decision</span><strong id="debugBoundaryDecision">-</strong></div>
+        </div>
+    </div>
+    <canvas id="minimapCanvas" class="minimap" aria-hidden="true"></canvas>
+    <div id="touchControls" class="touch-controls" aria-hidden="true">
+        <div id="moveStick" class="move-stick">
+            <div id="moveStickKnob" class="move-stick-knob"></div>
+        </div>
+    </div>
+
+    <button id="roomMenuButton" class="room-menu-button" type="button">Sala</button>
+    <button id="exitGameButton" class="exit-game-button" type="button">Sair</button>
+
+    <div id="roomModal" class="room-modal" aria-hidden="true">
+        <div class="room-modal__content" role="dialog" aria-modal="true" aria-label="Menu de salas">
+            <div class="room-modal__header">
+                <h1>Menu de salas</h1>
+                <button id="closeRoomMenuButton" class="room-modal__close" type="button">×</button>
+            </div>
+
+            <div class="room-modal__section room-modal__form room-modal__private-card">
+                <label class="room-toggle">
+                    <input id="privateRoomCheckbox" type="checkbox">
+                    <span class="room-toggle__track"><span class="room-toggle__thumb"></span></span>
+                    <span class="room-toggle__label">Sala privada</span>
+                </label>
+                <p class="room-modal__hint">Proteja a sala com senha e compartilhe o código apenas com quem você quiser.</p>
+                <label for="roomCreatePasswordInput" class="room-modal__input-label hidden">Senha da sala</label>
+                <input id="roomCreatePasswordInput" class="room-modal__input hidden" type="password" maxlength="20" autocomplete="new-password" placeholder="Senha para sala privada">
+                <button id="createRoomButton" class="room-button room-button--accent" type="button">Criar nova sala</button>
+            </div>
+
+            <div class="room-modal__divider"><span>ou</span></div>
+
+            <div class="room-modal__section room-modal__form">
+                <label for="roomCodeInput">Código da sala</label>
+                <input id="roomCodeInput" type="text" maxlength="6" autocomplete="off" inputmode="text" placeholder="ABC123">
+                <label for="roomJoinPasswordInput">Senha da sala</label>
+                <input id="roomJoinPasswordInput" type="password" maxlength="20" autocomplete="current-password" placeholder="Senha da sala privada">
+                <button id="joinRoomButton" class="room-button" type="button">Entrar</button>
+            </div>
+
+            <div class="room-modal__section">
+                <div class="rooms-filter">
+                    <span>Salas ativas:</span>
+                    <div class="rooms-filter__badges">
+                        <button id="filterAllBtn" class="rooms-filter__badge rooms-filter__badge--active" data-filter="all" type="button">Todas</button>
+                        <button id="filterPublicBtn" class="rooms-filter__badge" data-filter="public" type="button">Públicas</button>
+                        <button id="filterPrivateBtn" class="rooms-filter__badge" data-filter="private" type="button">Privadas</button>
+                    </div>
+                </div>
+                <ul id="roomsList" class="rooms-list"></ul>
+            </div>
+
+            <p id="roomStatus" class="room-status" aria-live="polite"></p>
+
+            <div id="roomInfo" class="room-info hidden">
+                <span>Sala atual:</span>
+                <strong id="roomCodeDisplay"></strong>
+                <button id="leaveRoomButton" class="room-link" type="button">Sair da sala</button>
+            </div>
+        </div>
+    </div>
+</section>
 
 <script src="/socket.io/socket.io.js"></script>
 <script src="/shared/math.js"></script>

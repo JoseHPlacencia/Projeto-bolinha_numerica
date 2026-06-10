@@ -11,7 +11,7 @@ const KEYBOARD_GROUPS = Object.freeze({
     w: "wasd"
 });
 
-export function registerKeyboardInput(keyToAction, inputActionAngles, inputState, inputOwnership) {
+export function registerKeyboardInput(keyToAction, inputActionAngles, inputState, inputOwnership, options = {}) {
     const activeKeys = new Set();
     let lockedKeyboardGroup = null;
     let hasPendingDirectionUpdate = false;
@@ -26,6 +26,10 @@ export function registerKeyboardInput(keyToAction, inputActionAngles, inputState
     window.addEventListener("blur", releaseKeyboardInput);
 
     function sendInputDown(event) {
+        if (!isInputEnabled(options) || isEditableTarget(event.target)) {
+            return;
+        }
+
         const key = getEventKey(event);
         const action = keyToAction.get(key);
         const keyboardGroup = getKeyboardGroup(key);
@@ -54,6 +58,15 @@ export function registerKeyboardInput(keyToAction, inputActionAngles, inputState
     }
 
     function sendInputUp(event) {
+        if (!isInputEnabled(options)) {
+            releaseKeyboardInput();
+            return;
+        }
+
+        if (isEditableTarget(event.target)) {
+            return;
+        }
+
         const key = getEventKey(event);
         const action = keyToAction.get(key);
 
@@ -143,4 +156,16 @@ function getKeyboardGroup(key) {
 
 function getEventKey(event) {
     return event.key.toLowerCase();
+}
+
+function isEditableTarget(target) {
+    if (!target || typeof target.closest !== "function") {
+        return false;
+    }
+
+    return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+}
+
+function isInputEnabled(options) {
+    return typeof options.isEnabled !== "function" || options.isEnabled();
 }

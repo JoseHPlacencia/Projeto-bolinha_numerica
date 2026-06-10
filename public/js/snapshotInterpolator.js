@@ -17,7 +17,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     const networkState = {
         bufferMs: networkConfig.initialBufferMs,
         serverOffset: 0,
-        lastSnapshotReceivedAt: performance.now(),
+        lastSnapshotReceivedAt: null,
         deltas: [],
         lastSnapshotDeltaMs: 0,
         averageSnapshotDeltaMs: 0,
@@ -36,8 +36,31 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     return {
         getDebugState,
         getRenderState,
-        processSnapshot
+        processSnapshot,
+        reset
     };
+
+    function reset() {
+        snapshots.length = 0;
+        entityCache.playerInfo = {};
+        entityCache.territories = {};
+        entityCache.territoryPoints = {};
+        entityCache.trails = {};
+        networkState.bufferMs = networkConfig.initialBufferMs;
+        networkState.serverOffset = 0;
+        networkState.lastSnapshotReceivedAt = null;
+        networkState.deltas = [];
+        networkState.lastSnapshotDeltaMs = 0;
+        networkState.averageSnapshotDeltaMs = 0;
+        networkState.jitterMs = 0;
+        debugState.visiblePlayers = 0;
+        debugState.visibleTerritories = 0;
+        debugState.visibleTrails = 0;
+        pendingTerritoryOperations.clear();
+        suppressedCaptureOperationResyncIds.clear();
+        hasServerClockSync = false;
+        lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
+    }
 
     function processSnapshot(rawSnapshot) {
         const now = performance.now();
@@ -151,7 +174,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             time: rawSnapshot.time,
             players,
             territories,
-            trails
+            trails,
+            numbers: rawSnapshot.numbers || null
         };
     }
 
@@ -171,11 +195,17 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             time: snapshot.time,
             players: snapshot.players || {},
             territories: snapshot.territories || {},
-            trails: snapshot.trails || {}
+            trails: snapshot.trails || {},
+            numbers: snapshot.numbers || null
         };
     }
 
     function updateAdaptiveBuffer(now) {
+        if (!Number.isFinite(networkState.lastSnapshotReceivedAt)) {
+            networkState.lastSnapshotReceivedAt = now;
+            return;
+        }
+
         const delta = now - networkState.lastSnapshotReceivedAt;
         networkState.lastSnapshotReceivedAt = now;
         networkState.deltas.push(delta);
@@ -272,6 +302,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createRenderState(snapshot, players) {
         return {
             players,
+            numbers: snapshot.numbers || null,
             territories: snapshot.territories,
             trails: snapshot.trails
         };
@@ -280,6 +311,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createInterpolatedRenderState(previous, next, players) {
         return {
             players,
+            numbers: next.numbers || previous.numbers || null,
             territories: next.territories,
             trails: previous.trails
         };

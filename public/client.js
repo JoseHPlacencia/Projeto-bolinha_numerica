@@ -1,34 +1,360 @@
 import { loadGameConfig } from "./js/config.js";
 import { startClient } from "./js/gameClient.js";
 
+const STORAGE_KEYS = {
+    color: "bolinhaJogadorCor",
+    difficulty: "bolinhaDificuldade",
+    name: "bolinhaJogadorNome"
+};
+
+const playerNameInput = document.getElementById("player-name");
+const colorPicker = document.getElementById("color-picker");
+const difficultyRow = document.querySelector(".diff-row");
+const playButton = document.getElementById("btn-play");
+const createRoomMenuButton = document.getElementById("btn-criar-sala");
+const mainMenu = document.getElementById("mainMenu");
+const gameLayer = document.getElementById("gameLayer");
+const statusMessage = createStatusMessage();
+const AUTO_START_TIMEOUT_MS = 10000;
+
+let selectedColor = "#4a90e2";
+let selectedDifficulty = "medium";
+let gameClient = null;
+let pendingAutoStart = null;
+let pendingAutoStartTimer = null;
+let pendingSocketConnectCleanup = null;
+let nextAutoStartId = 0;
+
 initializeClient();
 
 async function initializeClient() {
     try {
         const gameConfig = await loadGameConfig();
-        startClient(gameConfig);
+        gameClient = startClient(gameConfig, {
+            onExitGame: showMenu,
+            onJoinFailure: handleJoinFailure,
+            onJoinSuccess: handleJoinSuccess
+        });
 
-        // Auto-open room modal if redirected from tela inicial with openRoom=1
-        const params = new URLSearchParams(window.location.search);
-        setTimeout(() => {
-            const roomModal = document.getElementById("roomModal");
-            if (roomModal) {
-                if (params.get("openRoom") === "1") {
-                    // Just open the modal to let user choose a room
-                    roomModal.classList.add("is-open");
-                    roomModal.setAttribute("aria-hidden", "false");
-                } else if (params.get("createRoom") === "1") {
-                    // Open modal and auto-create a room
-                    roomModal.classList.add("is-open");
-                    roomModal.setAttribute("aria-hidden", "false");
-                    // Trigger auto-create after a short delay
-                    setTimeout(() => {
-                        document.getElementById("createRoomButton")?.click();
-                    }, 300);
-                }
-            }
-        }, 300);
+        initializeMenu();
     } catch (error) {
         console.error("Failed to start client:", error);
+        statusMessage.update("Erro ao iniciar o jogo.");
     }
+}
+
+function initializeMenu() {
+    loadPreferences();
+    attachColorPicker();
+    attachDifficultyButtons();
+    attachPlayButton();
+    attachCreateRoomButton();
+    attachOverlayButtons();
+    showMenu();
+}
+
+function loadPreferences() {
+    const savedName = localStorage.getItem(STORAGE_KEYS.name);
+    const savedColor = localStorage.getItem(STORAGE_KEYS.color);
+    const savedDifficulty = localStorage.getItem(STORAGE_KEYS.difficulty);
+
+    if (savedName) playerNameInput.value = savedName;
+    if (savedColor) selectColor(savedColor);
+    if (savedDifficulty) selectDifficulty(savedDifficulty);
+}
+
+function attachColorPicker() {
+    colorPicker.addEventListener("click", event => {
+        const swatch = event.target.closest(".color-swatch");
+        if (!swatch) return;
+        selectColor(swatch.dataset.color);
+    });
+}
+
+function attachDifficultyButtons() {
+    difficultyRow.addEventListener("click", event => {
+        const button = event.target.closest(".diff-btn");
+        if (!button) return;
+        selectDifficulty(button.dataset.diff);
+    });
+}
+
+function attachPlayButton() {
+    playButton.addEventListener("click", () => {
+        savePreferences();
+        startPublicGame();
+    });
+}
+
+function attachCreateRoomButton() {
+    if (!createRoomMenuButton) return;
+
+    createRoomMenuButton.addEventListener("click", () => {
+        savePreferences();
+        showGame();
+        gameClient.roomUi.openModal();
+    });
+}
+
+function attachOverlayButtons() {
+    document.querySelectorAll("[data-close]").forEach(button => {
+        button.addEventListener("click", () => {
+            closeOverlay(button.dataset.close);
+        });
+    });
+
+    document.getElementById("btn-help")?.addEventListener("click", () => {
+        openOverlay("overlay-help");
+    });
+
+    document.getElementById("btn-sobre")?.addEventListener("click", () => {
+        openOverlay("overlay-sobre");
+    });
+
+    document.querySelectorAll(".tab-pill").forEach(pill => {
+        pill.addEventListener("click", () => {
+            const tabName = pill.dataset.tab;
+            document.querySelectorAll(".tab-pill").forEach(item => item.classList.remove("active"));
+            document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.remove("active"));
+            pill.classList.add("active");
+            document.getElementById(`tab-${tabName}`)?.classList.add("active");
+        });
+    });
+}
+
+function savePreferences() {
+    const name = playerNameInput.value.trim() || "Jogador";
+    selectedColor ||= "#63d2ff";
+    selectedDifficulty ||= "medium";
+
+    localStorage.setItem(STORAGE_KEYS.name, name);
+    localStorage.setItem(STORAGE_KEYS.color, selectedColor);
+    localStorage.setItem(STORAGE_KEYS.difficulty, selectedDifficulty);
+}
+
+function selectColor(color) {
+    selectedColor = color;
+    colorPicker.querySelectorAll(".color-swatch").forEach(swatch => {
+        swatch.classList.toggle("selected", swatch.dataset.color === color);
+    });
+}
+
+function selectDifficulty(difficulty) {
+    selectedDifficulty = difficulty;
+    difficultyRow.querySelectorAll(".diff-btn").forEach(button => {
+        button.classList.remove("active-easy", "active-medium", "active-hard");
+        if (button.dataset.diff === difficulty) {
+            button.classList.add(`active-${difficulty}`);
+        }
+    });
+}
+
+function beginAutoStartAttempt() {
+    cancelAutoStartAttempt();
+
+    const attempt = {
+        id: ++nextAutoStartId,
+        roomRequested: false
+    };
+
+    pendingAutoStart = attempt;
+    startAutoStartTimer(attempt, "Tempo esgotado ao conectar ao servidor.");
+
+    return attempt;
+}
+
+function startPublicGame() {
+    const attempt = beginAutoStartAttempt();
+
+    setMenuBusy(true, "Acessando...");
+    gameClient.roomUi.resetActions();
+
+    if (gameClient.socket.connected) {
+        requestPublicRoom(attempt);
+        return;
+    }
+
+    statusMessage.update("Conectando ao servidor...");
+    waitForSocketConnection(attempt);
+    gameClient.socket.connect();
+}
+
+function waitForSocketConnection(attempt) {
+    clearPendingSocketConnectWait();
+
+    const onConnect = () => {
+        if (!isActiveAutoStartAttempt(attempt)) {
+            return;
+        }
+
+        requestPublicRoom(attempt);
+    };
+
+    const onConnectError = error => {
+        if (!isActiveAutoStartAttempt(attempt)) {
+            return;
+        }
+
+        handleJoinFailure({
+            message: error && error.message
+                ? `Não foi possível conectar ao servidor: ${error.message}`
+                : "Não foi possível conectar ao servidor."
+        });
+    };
+
+    gameClient.socket.once("connect", onConnect);
+    gameClient.socket.once("connect_error", onConnectError);
+
+    pendingSocketConnectCleanup = () => {
+        gameClient.socket.off("connect", onConnect);
+        gameClient.socket.off("connect_error", onConnectError);
+        pendingSocketConnectCleanup = null;
+    };
+}
+
+function requestPublicRoom(attempt) {
+    if (!isActiveAutoStartAttempt(attempt)) {
+        return;
+    }
+
+    clearPendingSocketConnectWait();
+    attempt.roomRequested = true;
+    startAutoStartTimer(attempt, "Tempo esgotado ao entrar na sala.");
+    statusMessage.update("Criando sala pública...");
+    gameClient.roomUi.createRoom({ isPrivate: false, password: "" });
+}
+
+function startAutoStartTimer(attempt, message) {
+    clearAutoStartTimer();
+    pendingAutoStartTimer = setTimeout(() => {
+        if (!isActiveAutoStartAttempt(attempt)) {
+            return;
+        }
+
+        handleJoinFailure({ message });
+    }, AUTO_START_TIMEOUT_MS);
+}
+
+function handleJoinSuccess() {
+    if (pendingAutoStart) {
+        finishAutoStartAttempt();
+        showGame();
+        statusMessage.hide();
+        setMenuBusy(false);
+        return;
+    }
+
+    if (!document.body.classList.contains("is-game-active")) {
+        gameClient.socket.emit("leaveRoom");
+        gameClient.roomUi.clearRoomInfo();
+    }
+
+    statusMessage.hide();
+    setMenuBusy(false);
+}
+
+function handleJoinFailure(result) {
+    if (!pendingAutoStart) {
+        return;
+    }
+
+    finishAutoStartAttempt();
+    gameClient.roomUi.resetActions();
+    showMenu();
+    statusMessage.update(result && result.message ? result.message : "Erro ao entrar na sala.");
+    setMenuBusy(false);
+}
+
+function isActiveAutoStartAttempt(attempt) {
+    return pendingAutoStart !== null && pendingAutoStart.id === attempt.id;
+}
+
+function finishAutoStartAttempt() {
+    pendingAutoStart = null;
+    clearAutoStartTimer();
+    clearPendingSocketConnectWait();
+}
+
+function cancelAutoStartAttempt() {
+    pendingAutoStart = null;
+    clearAutoStartTimer();
+    clearPendingSocketConnectWait();
+}
+
+function clearAutoStartTimer() {
+    if (!pendingAutoStartTimer) {
+        return;
+    }
+
+    clearTimeout(pendingAutoStartTimer);
+    pendingAutoStartTimer = null;
+}
+
+function clearPendingSocketConnectWait() {
+    if (typeof pendingSocketConnectCleanup !== "function") {
+        return;
+    }
+
+    pendingSocketConnectCleanup();
+}
+
+function showGame() {
+    closeAllOverlays();
+    document.body.classList.remove("is-menu-active");
+    document.body.classList.add("is-game-active");
+    mainMenu.setAttribute("aria-hidden", "true");
+    gameLayer.setAttribute("aria-hidden", "false");
+}
+
+function showMenu() {
+    closeAllOverlays();
+    document.body.classList.remove("is-game-active");
+    document.body.classList.add("is-menu-active");
+    mainMenu.setAttribute("aria-hidden", "false");
+    gameLayer.setAttribute("aria-hidden", "true");
+    statusMessage.hide();
+    setMenuBusy(false);
+}
+
+function setMenuBusy(isBusy, label = "Jogar") {
+    playButton.disabled = isBusy;
+    if (createRoomMenuButton) createRoomMenuButton.disabled = isBusy;
+    playButton.textContent = isBusy ? label : "▶ Jogar";
+}
+
+function openOverlay(overlayId) {
+    const overlay = document.getElementById(overlayId);
+    if (!overlay) return;
+    overlay.classList.add("open");
+    overlay.setAttribute("aria-hidden", "false");
+}
+
+function closeOverlay(overlayId) {
+    const overlay = document.getElementById(overlayId);
+    if (!overlay) return;
+    overlay.classList.remove("open");
+    overlay.setAttribute("aria-hidden", "true");
+}
+
+function closeAllOverlays() {
+    document.querySelectorAll(".overlay.open").forEach(overlay => {
+        overlay.classList.remove("open");
+        overlay.setAttribute("aria-hidden", "true");
+    });
+}
+
+function createStatusMessage() {
+    const container = document.createElement("div");
+    container.className = "status-message";
+    document.body.appendChild(container);
+
+    return {
+        hide() {
+            container.style.display = "none";
+        },
+        update(message) {
+            container.textContent = message;
+            container.style.display = "block";
+        }
+    };
 }

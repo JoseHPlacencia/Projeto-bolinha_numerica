@@ -17,27 +17,13 @@ app.get("/game-config", (_request, response) => {
     response.json(config.client);
 });
 
-app.get("/api/rooms-list", (_request, response) => {
-    const rooms = [];
-    for (const [code, room] of roomManager.rooms) {
-        rooms.push({
-            code,
-            playerCount: room.players.size,
-            isPrivate: Boolean(room.isPrivate),
-            createdAt: room.createdAt
-        });
-    }
-    response.json({ rooms });
-});
-
 app.get("/shared/math.js", (_request, response) => {
     response.type("application/javascript");
     response.sendFile(sharedMathPath);
 });
 
-// Redirect root to tela inicial
 app.get("/", (_request, response) => {
-    response.redirect("/telainicial/index.html");
+    response.sendFile(path.join(publicPath, "index.html"));
 });
 
 app.use(express.static(publicPath));

@@ -1,48 +1,13 @@
-/**
- * numberSystem.js
- * Sistema de Números Numéricos – Servidor
- *
- * Responsabilidades:
- *  - Gerar números dos conjuntos: Naturais, Inteiros Negativos, Frações, Raízes e Irracionais
- *  - Fazer spawn/respawn com espalhamento e distância mínima
- *  - Detectar colisão com jogadores (círculo × círculo)
- *  - Gerir o Conjunto Tema que alterna periodicamente
- *  - Publicar estado compacto no snapshot
- *
- * Otimizado para dispositivos fracos:
- *  - Estruturas simples (Map, arrays planos)
- *  - Sem dependências externas
- *  - Atualizações somente quando há mudança
- */
-
 "use strict";
 
-// ─── Variáveis Globais de Configuração ───────────────────────────────────────
-
 const NUMBER_CONFIG = Object.freeze({
-    // Raio visual do número no mundo (px world-space)
     radius: 40,
-
-    // Distância mínima entre números spawnados
     minDistanceBetween: 180,
-
-    // Distância mínima de jogadores no spawn
     minDistanceFromPlayer: 220,
-
-    // Quantidade máxima de números ativos no mapa
     maxNumbers: 25,
-
-    // Segundos até respawn após coleta
     respawnDelaySec: 4,
-
-    // Segundos que o Conjunto Tema fica ativo antes de trocar
     themeIntervalSec: 20,
-
-    // Tentativas máximas de encontrar posição válida
     maxSpawnAttempts: 80,
-
-    // Pesos de spawn por conjunto (maior = aparece mais)
-    // Naturais=1, Negativos=2, Frações=3, Raízes=3, Irracionais=1
     spawnWeights: Object.freeze({
         natural:   1,
         negativo:  2,
@@ -52,7 +17,6 @@ const NUMBER_CONFIG = Object.freeze({
     })
 });
 
-// Constantes irracionais disponíveis (até 2 dígitos de valor absoluto)
 const IRRATIONALS = Object.freeze([
     { display: "π",   value: Math.PI,           approx: 3.14  },
     { display: "e",   value: Math.E,             approx: 2.72  },
@@ -85,7 +49,6 @@ const IRRATIONALS = Object.freeze([
     { display: "√97", value: Math.sqrt(97),      approx: 9.85  }
 ]);
 
-// Temas disponíveis (com variantes operacionais)
 const THEMES = Object.freeze([
     {
         id: "natural",
@@ -129,7 +92,6 @@ const THEMES = Object.freeze([
         description: "Colete números Irracionais",
         check: n => n.sets.has("irracional")
     },
-    // Variantes operacionais
     {
         id: "maior_zero",
         label: "Positivos",
@@ -158,24 +120,31 @@ const THEMES = Object.freeze([
         description: "Colete Inteiros Ímpares",
         check: n => n.sets.has("inteiro") && Number.isInteger(n.value) && Math.abs(n.value % 2) === 1
     }
-    // Primos reservado para modo futuro:
-    // { id: "primo", label: "Primos", check: n => isPrime(n.value), enabled: false }
 ]);
 
-// ─── Estado Global ────────────────────────────────────────────────────────────
+function createNumberSystem(mapRadius, players) {
+    const state = createNumberState();
 
-let _nextId    = 1;
-let _numbers   = new Map();   // id → numberObject
-let _pending   = [];          // [{spawnAt}] fila de respawns
-let _theme     = null;        // tema atual
-let _themeIdx  = 0;
-let _themeNextSwitch = 0;
+    initNumbers(state, mapRadius, players);
 
-// ─── Geração de Números ───────────────────────────────────────────────────────
+    return {
+        getNumbersMap: () => state.numbers,
+        serialize: () => serializeNumbers(state),
+        update: nowMs => updateNumbers(state, players, mapRadius, nowMs)
+    };
+}
 
-/**
- * Retorna o conjunto de peso acumulado para escolha ponderada.
- */
+function createNumberState() {
+    return {
+        nextId: 1,
+        numbers: new Map(),
+        pending: [],
+        theme: null,
+        themeIdx: 0,
+        themeNextSwitch: 0
+    };
+}
+
 let _weightTable = null;
 function getWeightTable() {
     if (_weightTable) return _weightTable;
@@ -199,78 +168,68 @@ function pickRandomSet() {
     return table[table.length - 1].key;
 }
 
-/**
- * Gera um objeto de número com todos os metadados:
- *  display, value, sets (Set de strings)
- */
 function generateNumber() {
     const setType = pickRandomSet();
 
     switch (setType) {
         case "natural":    return makeNatural();
-        case "negativo":   return makeNegativo();
-        case "fracao":     return makeFracao();
-        case "raiz":       return makeRaiz();
-        case "irracional": return makeIrracional();
+        case "negativo":   return makeNegative();
+        case "fracao":     return makeFraction();
+        case "raiz":       return makeRoot();
+        case "irracional": return makeIrrational();
         default:           return makeNatural();
     }
 }
 
 function makeNatural() {
-    const v = Math.floor(Math.random() * 100); // 0–99
-    return buildNumber(String(v), v, ["natural", "inteiro", "racional", v >= 0 ? "maior_zero_ou_zero" : null]);
+    const value = Math.floor(Math.random() * 100);
+    return buildNumber(String(value), value, ["natural", "inteiro", "racional", value >= 0 ? "maior_zero_ou_zero" : null]);
 }
 
-function makeNegativo() {
-    const v = -(Math.floor(Math.random() * 99) + 1); // -1 a -99
-    return buildNumber(String(v), v, ["negativo", "inteiro", "racional"]);
+function makeNegative() {
+    const value = -(Math.floor(Math.random() * 99) + 1);
+    return buildNumber(String(value), value, ["negativo", "inteiro", "racional"]);
 }
 
-function makeFracao() {
-    // Numerador e denominador para fracoes simples legíveis
+function makeFraction() {
     const denominators = [2, 3, 4, 5, 6, 8, 10];
-    const den = denominators[Math.floor(Math.random() * denominators.length)];
-    let num = Math.floor(Math.random() * (den * 2 - 1)) + 1; // 1 até 2*den-1
-    if (num === den) num = den - 1 || 1; // evitar inteiros
+    const denominator = denominators[Math.floor(Math.random() * denominators.length)];
+    let numerator = Math.floor(Math.random() * (denominator * 2 - 1)) + 1;
+    if (numerator === denominator) numerator = denominator - 1 || 1;
     const negative = Math.random() < 0.3;
     const sign = negative ? "-" : "";
-    const value = (negative ? -num : num) / den;
-    const display = `${sign}${num}/${den}`;
+    const value = (negative ? -numerator : numerator) / denominator;
+    const display = `${sign}${numerator}/${denominator}`;
     const sets = ["fracao", "racional"];
     if (negative) sets.push("negativo");
-    else sets.push("natural_fracionario"); // não é natural mas > 0
+    else sets.push("natural_fracionario");
     return buildNumber(display, value, sets);
 }
 
-function makeRaiz() {
-    // Raízes de não-quadrados perfeitos até √99 → irracional; quadrados → racional
-    // Exibimos como "√N"
-    let n;
+function makeRoot() {
+    let rootValue;
     const isIrrational = Math.random() < 0.7;
     if (isIrrational) {
-        // não-quadrado perfeito entre 2 e 99
         const nonPerfect = [2,3,5,6,7,8,10,11,12,13,14,15,17,18,19,20,21,22,23,24,26,
             27,28,29,30,31,32,33,34,35,37,38,39,40,41,42,43,44,45,46,47,48,50,
             51,52,53,54,55,56,57,58,59,60,61,62,63,65,66,67,68,69,70,71,72,73,
             74,75,76,77,78,79,80,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99];
-        n = nonPerfect[Math.floor(Math.random() * nonPerfect.length)];
-        return buildNumber(`√${n}`, Math.sqrt(n), ["raiz", "irracional", "racional_ext"]);
+        rootValue = nonPerfect[Math.floor(Math.random() * nonPerfect.length)];
+        return buildNumber(`√${rootValue}`, Math.sqrt(rootValue), ["raiz", "irracional", "racional_ext"]);
     } else {
-        // quadrado perfeito: 1,4,9,16,25,36,49,64,81
         const perfect = [1,4,9,16,25,36,49,64,81];
-        n = perfect[Math.floor(Math.random() * perfect.length)];
-        return buildNumber(`√${n}`, Math.sqrt(n), ["raiz", "natural", "inteiro", "racional"]);
+        rootValue = perfect[Math.floor(Math.random() * perfect.length)];
+        return buildNumber(`√${rootValue}`, Math.sqrt(rootValue), ["raiz", "natural", "inteiro", "racional"]);
     }
 }
 
-function makeIrracional() {
+function makeIrrational() {
     const item = IRRATIONALS[Math.floor(Math.random() * IRRATIONALS.length)];
     return buildNumber(item.display, item.value, ["irracional", "racional_ext"]);
 }
 
 function buildNumber(display, value, rawSets) {
     const sets = new Set(rawSets.filter(Boolean));
-    // Inferência adicional de conjuntos
     if (sets.has("natural") && !sets.has("negativo")) sets.add("maior_zero_ou_zero");
     if (value > 0) sets.add("maior_zero");
     if (value < 0) sets.add("menor_zero");
@@ -281,9 +240,7 @@ function buildNumber(display, value, rawSets) {
     return { display, value, sets };
 }
 
-// ─── Posicionamento ───────────────────────────────────────────────────────────
-
-function trySpawnPosition(mapRadius, players) {
+function trySpawnPosition(state, mapRadius, players) {
     const limit = mapRadius * 0.88;
     for (let i = 0; i < NUMBER_CONFIG.maxSpawnAttempts; i++) {
         const angle = Math.random() * Math.PI * 2;
@@ -291,17 +248,17 @@ function trySpawnPosition(mapRadius, players) {
         const x     = Math.cos(angle) * dist;
         const y     = Math.sin(angle) * dist;
 
-        if (!isPositionFarFromNumbers(x, y)) continue;
+        if (!isPositionFarFromNumbers(state, x, y)) continue;
         if (!isPositionFarFromPlayers(x, y, players)) continue;
 
         return { x, y };
     }
-    return null; // não encontrou (mapa lotado)
+    return null;
 }
 
-function isPositionFarFromNumbers(x, y) {
+function isPositionFarFromNumbers(state, x, y) {
     const minD = NUMBER_CONFIG.minDistanceBetween;
-    for (const num of _numbers.values()) {
+    for (const num of state.numbers.values()) {
         const dx = num.x - x, dy = num.y - y;
         if (dx * dx + dy * dy < minD * minD) return false;
     }
@@ -317,83 +274,70 @@ function isPositionFarFromPlayers(x, y, players) {
     return true;
 }
 
-// ─── Ciclo de Vida ────────────────────────────────────────────────────────────
-
-function spawnOneNumber(mapRadius, players) {
-    const pos = trySpawnPosition(mapRadius, players);
+function spawnOneNumber(state, mapRadius, players) {
+    const pos = trySpawnPosition(state, mapRadius, players);
     if (!pos) return null;
 
     const numData  = generateNumber();
-    const id       = _nextId++;
+    const id       = state.nextId++;
     const numObj   = {
         id,
         x:       pos.x,
         y:       pos.y,
         display: numData.display,
         value:   numData.value,
-        sets:    numData.sets,   // Set<string> – somente servidor
+        sets:    numData.sets,
         version: 1
     };
-    _numbers.set(id, numObj);
+    state.numbers.set(id, numObj);
     return numObj;
 }
 
-/**
- * Inicializa o mapa com números.
- */
-function initNumbers(mapRadius, players) {
-    _numbers.clear();
-    _pending = [];
+function initNumbers(state, mapRadius, players) {
+    state.numbers.clear();
+    state.pending = [];
+    state.nextId = 1;
+
     for (let i = 0; i < NUMBER_CONFIG.maxNumbers; i++) {
-        spawnOneNumber(mapRadius, players);
+        spawnOneNumber(state, mapRadius, players);
     }
-    initTheme();
+
+    initTheme(state);
 }
 
-function initTheme() {
-    _themeIdx         = Math.floor(Math.random() * THEMES.length);
-    _theme            = THEMES[_themeIdx];
-    _themeNextSwitch  = Date.now() + NUMBER_CONFIG.themeIntervalSec * 1000;
+function initTheme(state) {
+    state.themeIdx = Math.floor(Math.random() * THEMES.length);
+    state.theme = THEMES[state.themeIdx];
+    state.themeNextSwitch = Date.now() + NUMBER_CONFIG.themeIntervalSec * 1000;
 }
 
-/**
- * Tick chamado pelo gameLoop (60 Hz). Leve: só verifica timers.
- * @param {Map} players
- * @param {number} mapRadius
- * @param {number} nowMs  - Date.now()
- * @returns {{collisions: Array, themeChanged: boolean}}
- */
-function updateNumbers(players, mapRadius, nowMs) {
+function updateNumbers(state, players, mapRadius, nowMs) {
     let themeChanged = false;
 
-    // Troca de tema
-    if (nowMs >= _themeNextSwitch) {
-        _themeIdx = (_themeIdx + 1) % THEMES.length;
-        _theme    = THEMES[_themeIdx];
-        _themeNextSwitch = nowMs + NUMBER_CONFIG.themeIntervalSec * 1000;
+    if (nowMs >= state.themeNextSwitch) {
+        state.themeIdx = (state.themeIdx + 1) % THEMES.length;
+        state.theme = THEMES[state.themeIdx];
+        state.themeNextSwitch = nowMs + NUMBER_CONFIG.themeIntervalSec * 1000;
         themeChanged = true;
     }
 
-    // Respawn de números pendentes
-    while (_pending.length > 0 && _pending[0].spawnAt <= nowMs) {
-        _pending.shift();
-        if (_numbers.size < NUMBER_CONFIG.maxNumbers) {
-            spawnOneNumber(mapRadius, players);
+    while (state.pending.length > 0 && state.pending[0].spawnAt <= nowMs) {
+        state.pending.shift();
+        if (state.numbers.size < NUMBER_CONFIG.maxNumbers) {
+            spawnOneNumber(state, mapRadius, players);
         }
     }
 
-    // Completar mapa se abaixo do máximo e sem pending
-    if (_numbers.size < NUMBER_CONFIG.maxNumbers && _pending.length === 0) {
-        spawnOneNumber(mapRadius, players);
+    if (state.numbers.size < NUMBER_CONFIG.maxNumbers && state.pending.length === 0) {
+        spawnOneNumber(state, mapRadius, players);
     }
 
-    // Detecção de colisão
     const collisions = [];
-    const playerRadius = 35; // metade do playerSize para cálculo de colisão
+    const playerRadius = 35;
     const combinedRadius = NUMBER_CONFIG.radius + playerRadius;
     const cr2 = combinedRadius * combinedRadius;
 
-    for (const [nid, num] of _numbers) {
+    for (const [nid, num] of state.numbers) {
         for (const player of players.values()) {
             const dx = player.x - num.x;
             const dy = player.y - num.y;
@@ -403,11 +347,11 @@ function updateNumbers(players, mapRadius, nowMs) {
                     playerId:  player.id,
                     display:   num.display,
                     value:     num.value,
-                    sets:      [...num.sets],    // array para serialização
-                    belongsToTheme: _theme ? _theme.check(num) : false
+                    sets:      [...num.sets],
+                    belongsToTheme: state.theme ? state.theme.check(num) : false
                 });
-                _numbers.delete(nid);
-                _pending.push({ spawnAt: nowMs + NUMBER_CONFIG.respawnDelaySec * 1000 });
+                state.numbers.delete(nid);
+                state.pending.push({ spawnAt: nowMs + NUMBER_CONFIG.respawnDelaySec * 1000 });
                 break;
             }
         }
@@ -416,16 +360,9 @@ function updateNumbers(players, mapRadius, nowMs) {
     return { collisions, themeChanged };
 }
 
-// ─── Serialização Compacta ────────────────────────────────────────────────────
-
-/**
- * Snapshot compacto para enviar ao cliente.
- * Formato: { nums: [[id,x,y,display,value], ...], theme: {id,label,emoji,description}, themeEndsIn }
- */
-function serializeNumbers() {
+function serializeNumbers(state) {
     const nums = [];
-    for (const n of _numbers.values()) {
-        // [id, x(int), y(int), display, value(float2)]
+    for (const n of state.numbers.values()) {
         nums.push([
             n.id,
             Math.round(n.x),
@@ -436,21 +373,18 @@ function serializeNumbers() {
     }
     return {
         nums,
-        theme: _theme ? {
-            id:          _theme.id,
-            label:       _theme.label,
-            emoji:       _theme.emoji,
-            description: _theme.description
+        theme: state.theme ? {
+            id:          state.theme.id,
+            label:       state.theme.label,
+            emoji:       state.theme.emoji,
+            description: state.theme.description
         } : null,
-        themeEndsIn: Math.max(0, Math.round((_themeNextSwitch - Date.now()) / 1000))
+        themeEndsIn: Math.max(0, Math.round((state.themeNextSwitch - Date.now()) / 1000))
     };
 }
 
 module.exports = {
     NUMBER_CONFIG,
     THEMES,
-    initNumbers,
-    updateNumbers,
-    serializeNumbers,
-    getNumbersMap: () => _numbers
+    createNumberSystem
 };

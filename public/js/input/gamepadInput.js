@@ -8,13 +8,21 @@ const GAMEPAD_DPAD_BUTTONS = Object.freeze({
 });
 const GAMEPAD_DEAD_ZONE = 0.28;
 
-export function registerGamepadDirectionInput(inputActionAngles, inputState, inputOwnership) {
+export function registerGamepadDirectionInput(inputActionAngles, inputState, inputOwnership, options = {}) {
     const pressedGamepadActions = new Set();
     let lockedGamepadSource = null;
 
     requestAnimationFrame(updateGamepadInput);
 
     function updateGamepadInput() {
+        if (!isInputEnabled(options)) {
+            releaseLockedGamepadSource();
+            lockedGamepadSource = null;
+            inputOwnership.release("gamepad");
+            requestAnimationFrame(updateGamepadInput);
+            return;
+        }
+
         const gamepadInput = getGamepadInput();
         const nextSource = getLockedGamepadSource(gamepadInput);
 
@@ -195,4 +203,8 @@ function isGamepadButtonPressed(button) {
 
 function applyDeadZone(value, deadZone) {
     return Math.abs(value) >= deadZone ? value : 0;
+}
+
+function isInputEnabled(options) {
+    return typeof options.isEnabled !== "function" || options.isEnabled();
 }

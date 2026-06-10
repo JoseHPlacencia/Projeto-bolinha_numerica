@@ -26,7 +26,6 @@ function getSpawnRadiusLimit() {
 function createRandomPointInsideCircle(radius) {
     const angle = Math.random() * Math.PI * 2;
 
-    // sqrt keeps points evenly distributed over the circle area.
     const distance = Math.sqrt(Math.random()) * radius;
 
     return {

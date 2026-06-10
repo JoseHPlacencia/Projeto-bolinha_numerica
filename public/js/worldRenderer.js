@@ -18,6 +18,7 @@ function createMainWorldRenderer(canvas, gameConfig) {
         getViewportState: renderer.getViewportState,
         processSnapshot,
         renderWorld: renderer.renderWorld,
+        resetSnapshots,
         resizeCanvas: renderer.resizeCanvas,
         setPlayerId
     };
@@ -31,6 +32,9 @@ function createMainWorldRenderer(canvas, gameConfig) {
 
     function processSnapshot() {
         return null;
+    }
+
+    function resetSnapshots() {
     }
 
     function setPlayerId() {
@@ -102,6 +106,7 @@ function tryCreateWorkerWorldRenderer(canvas, gameConfig, options) {
         getViewportState,
         processSnapshot,
         renderWorld,
+        resetSnapshots,
         resizeCanvas,
         setPlayerId
     };
@@ -122,6 +127,12 @@ function tryCreateWorkerWorldRenderer(canvas, gameConfig, options) {
         worker.postMessage({
             type: "snapshot",
             snapshot
+        });
+    }
+
+    function resetSnapshots() {
+        worker.postMessage({
+            type: "resetSnapshots"
         });
     }
 

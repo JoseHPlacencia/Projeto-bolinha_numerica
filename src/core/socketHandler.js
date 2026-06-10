@@ -1,7 +1,6 @@
 const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
 const {
-    deletePlayerTerritory,
     initializePlayerTerritory
 } = require("../state/territories");
 const { invalidateSnapshotCache } = require("./snapshotLoop");
@@ -9,7 +8,6 @@ const { createRateLimiter } = require("../utils/rateLimiter");
 
 function registerSocket(io, roomManager) {
     io.on("connection", socket => {
-        // Send current rooms list to newly connected client
         socket.emit("roomsList", buildRoomsList(roomManager));
 
         registerRoomEvents(socket, io, roomManager);
@@ -30,16 +28,7 @@ function registerSocket(io, roomManager) {
 }
 
 function buildRoomsList(roomManager) {
-    const list = [];
-    for (const [code, room] of roomManager.rooms) {
-        list.push({
-            code,
-            playerCount: room.players.size,
-            isPrivate: Boolean(room.isPrivate),
-            createdAt: room.createdAt
-        });
-    }
-    return list;
+    return roomManager.listRooms();
 }
 
 function registerRoomEvents(socket, io, roomManager) {
@@ -57,16 +46,17 @@ function registerRoomEvents(socket, io, roomManager) {
                 return;
             }
 
-            // Join the new room
-            const room = createResult.room;
-            const territories = room.territories;
-            socket.join(room.code);
-            socket.data.roomCode = room.code;
-            const player = createPlayer(room.players, socket.id, territories);
-            initializePlayerTerritory(territories, player);
-            room.lastActivity = Date.now();
+            const joinResult = roomManager.joinRoom(createResult.room.code, socket, password);
 
-            socket.emit("joinRoomResult", { success: true, roomCode: room.code });
+            if (!joinResult.success) {
+                roomManager.destroyRoom(createResult.room.code);
+                socket.emit("joinRoomResult", { success: false, message: joinResult.message });
+                return;
+            }
+
+            initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined);
+
+            socket.emit("joinRoomResult", { success: true, roomCode: joinResult.room.code });
             io.emit("roomsList", buildRoomsList(roomManager));
             return;
         }
@@ -83,29 +73,13 @@ function registerRoomEvents(socket, io, roomManager) {
             return;
         }
 
-        // Initialize player in the joined room
-        const room = joinResult.room;
-        const territories = room.territories;
-        const player = createPlayer(room.players, socket.id, territories);
-        initializePlayerTerritory(territories, player);
+        initializeSocketPlayer(joinResult.room, socket, joinResult.alreadyJoined);
 
-        socket.emit("joinRoomResult", { success: true, roomCode: requestedCode });
+        socket.emit("joinRoomResult", { success: true, roomCode: joinResult.room.code });
         io.emit("roomsList", buildRoomsList(roomManager));
     });
 
     socket.on("leaveRoom", () => {
-        // Clean up player state before leaving
-        const roomCode = socket.data && socket.data.roomCode;
-        if (roomCode) {
-            const room = roomManager.rooms.get(roomCode);
-            if (room) {
-                room.players.delete(socket.id);
-                if (room.territories) {
-                    deletePlayerTerritory(room.territories, socket.id);
-                }
-            }
-        }
-
         const leaveResult = roomManager.leaveRoom(socket);
 
         if (leaveResult && leaveResult.room && !leaveResult.destroyed) {
@@ -114,6 +88,13 @@ function registerRoomEvents(socket, io, roomManager) {
 
         io.emit("roomsList", buildRoomsList(roomManager));
     });
+}
+
+function initializeSocketPlayer(room, socket, alreadyJoined) {
+    if (alreadyJoined) return;
+
+    const player = createPlayer(room.players, socket.id, room.territories);
+    initializePlayerTerritory(room.territories, player);
 }
 
 function registerInputEvents(socket, roomManager) {
@@ -189,6 +170,10 @@ function createSocketRateGuard(socket, rateLimitConfig) {
     return { canHandleInput };
 
     function canHandleInput() {
+        if (!socket.data || !socket.data.roomCode) {
+            return false;
+        }
+
         if (rateLimiter.consume()) return true;
         violations++;
         if (violations >= rateLimitConfig.maxViolations) {

@@ -5,21 +5,16 @@ const {
     createSnapshot
 } = require("./snapshotSerializer");
 
-/**
- * Start a snapshot loop for a specific room.
- * Sends snapshots only to players in that room.
- */
-function startSnapshotLoop(io, players, territories, roomCode) {
+function startSnapshotLoop(io, players, territories, roomCode, numberSystem) {
     const intervalMs = 1000 / config.loop.snapshotRate;
 
     return setInterval(() => {
-        sendSnapshot(io, players, territories, roomCode);
+        sendSnapshot(io, players, territories, roomCode, numberSystem);
     }, intervalMs);
 }
 
-function sendSnapshot(io, players, territories, roomCode) {
+function sendSnapshot(io, players, territories, roomCode, numberSystem) {
     for (const socket of io.sockets.sockets.values()) {
-        // Only send to sockets in this room
         if (roomCode && socket.data.roomCode !== roomCode) {
             continue;
         }
@@ -33,12 +28,12 @@ function sendSnapshot(io, players, territories, roomCode) {
         }
 
         if (retryPendingReliableSnapshot(socket)) {
-            sendVolatileSnapshotWhileReliablePending(socket, players, territories);
+            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem);
             continue;
         }
 
         const nextSnapshotState = cloneClientSnapshotState(socket.data.snapshotState);
-        const snapshot = createSnapshot(players, territories, socket.id, nextSnapshotState);
+        const snapshot = createSnapshot(players, territories, socket.id, nextSnapshotState, numberSystem);
 
         if (shouldSendReliably(snapshot)) {
             queueReliableSnapshot(socket, snapshot, nextSnapshotState);
@@ -59,11 +54,11 @@ function retryPendingReliableSnapshot(socket) {
     return true;
 }
 
-function sendVolatileSnapshotWhileReliablePending(socket, players, territories) {
+function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem) {
     if (config.network.volatileSnapshotsWhileReliablePendingEnabled === false) return;
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
-    const snapshot = createSnapshot(players, territories, socket.id, temporaryState);
+    const snapshot = createSnapshot(players, territories, socket.id, temporaryState, numberSystem);
     const volatileSnapshot = createVolatileSnapshotForPendingReliableState(snapshot, clientState);
     socket.volatile.emit("gameState", volatileSnapshot);
 }

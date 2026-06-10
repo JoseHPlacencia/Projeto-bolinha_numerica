@@ -1,7 +1,7 @@
 const POINTER_DEAD_ZONE = 18;
 const POINTER_RADIUS_RATIO = 0.36;
 
-export function registerPointerDirectionInput(inputState) {
+export function registerPointerDirectionInput(inputState, options = {}) {
     const controls = document.getElementById("touchControls");
     const stick = document.getElementById("moveStick");
     const knob = document.getElementById("moveStickKnob");
@@ -31,6 +31,11 @@ export function registerPointerDirectionInput(inputState) {
     window.addEventListener("blur", resetPointerInputs);
 
     function updateMouseInput(event) {
+        if (!isInputEnabled(options)) {
+            inputState.clearDirection("mouse");
+            return;
+        }
+
         if (activePointerId !== null) {
             return;
         }
@@ -43,6 +48,10 @@ export function registerPointerDirectionInput(inputState) {
     }
 
     function startPointerInput(event) {
+        if (!isInputEnabled(options)) {
+            return;
+        }
+
         if (!canUsePointer(event) || activePointerId !== null) {
             return;
         }
@@ -59,6 +68,11 @@ export function registerPointerDirectionInput(inputState) {
     }
 
     function updatePointerInput(event) {
+        if (!isInputEnabled(options)) {
+            resetPointerInput();
+            return;
+        }
+
         if (event.pointerId !== activePointerId) {
             return;
         }
@@ -69,6 +83,11 @@ export function registerPointerDirectionInput(inputState) {
     }
 
     function releasePointerInput(event) {
+        if (!isInputEnabled(options)) {
+            resetPointerInput();
+            return;
+        }
+
         if (event.pointerId !== activePointerId) {
             return;
         }
@@ -157,11 +176,11 @@ export function registerPointerDirectionInput(inputState) {
     }
 }
 
-export function installGestureBlockers() {
-    document.addEventListener("gesturestart", preventDefault, { passive: false });
-    document.addEventListener("gesturechange", preventDefault, { passive: false });
-    document.addEventListener("gestureend", preventDefault, { passive: false });
-    document.addEventListener("touchmove", preventDefault, { passive: false });
+export function installGestureBlockers(options = {}) {
+    document.addEventListener("gesturestart", event => preventDefaultWhenEnabled(event, options), { passive: false });
+    document.addEventListener("gesturechange", event => preventDefaultWhenEnabled(event, options), { passive: false });
+    document.addEventListener("gestureend", event => preventDefaultWhenEnabled(event, options), { passive: false });
+    document.addEventListener("touchmove", event => preventDefaultWhenEnabled(event, options), { passive: false });
 }
 
 function canUsePointer(event) {
@@ -172,8 +191,14 @@ function getStickRadius(stick) {
     return stick.getBoundingClientRect().width * POINTER_RADIUS_RATIO;
 }
 
-function preventDefault(event) {
-    event.preventDefault();
+function preventDefaultWhenEnabled(event, options) {
+    if (isInputEnabled(options)) {
+        event.preventDefault();
+    }
+}
+
+function isInputEnabled(options) {
+    return typeof options.isEnabled !== "function" || options.isEnabled();
 }
 
 function requestNextFrame(callback) {

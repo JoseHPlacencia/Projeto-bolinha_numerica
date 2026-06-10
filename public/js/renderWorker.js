@@ -30,6 +30,11 @@ self.addEventListener("message", event => {
         return;
     }
 
+    if (message.type === "resetSnapshots") {
+        resetSnapshots();
+        return;
+    }
+
     if (message.type === "playerId") {
         currentPlayerId = message.playerId;
     }
@@ -64,6 +69,12 @@ function processSnapshot(snapshot) {
             type: "snapshotCacheInvalid",
             invalidations: applyResult.invalidations
         });
+    }
+}
+
+function resetSnapshots() {
+    if (snapshots) {
+        snapshots.reset();
     }
 }
 

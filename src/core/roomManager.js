@@ -2,8 +2,11 @@ const crypto = require("crypto");
 const config = require("../config/gameConfig");
 const { startGameLoop } = require("./gameLoop");
 const { startSnapshotLoop } = require("./snapshotLoop");
-const { createTerritories } = require("../state/territories");
-const { initNumbers } = require("../systems/numberSystem");
+const {
+    createTerritories,
+    deletePlayerTerritory
+} = require("../state/territories");
+const { createNumberSystem } = require("../systems/numberSystem");
 
 const rooms = new Map();
 const socketIdToRoomCode = new Map();
@@ -17,11 +20,13 @@ function createRoom(io, options = {}) {
     const isPrivate = Boolean(options.isPrivate);
     const territories = createTerritories();
     const players = new Map();
+    const numberSystem = createNumberSystem(config.world.mapRadius, players);
 
     const room = {
         code: roomCode,
         players,
         territories,
+        numberSystem,
         createdAt: Date.now(),
         lastActivity: Date.now(),
         gameLoopInterval: null,
@@ -47,12 +52,8 @@ function createRoom(io, options = {}) {
         room.passwordSalt = salt;
     }
 
-    // Initialize number system for this room
-    initNumbers(config.world.mapRadius, players);
-
-    // Start game loop and snapshot loop for this room
-    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode);
-    room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode);
+    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem);
+    room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem);
 
     rooms.set(roomCode, room);
     return { success: true, room };
@@ -83,12 +84,29 @@ function joinRoom(roomCode, socket, password = "") {
         return { success: false, message: "Room is full." };
     }
 
+    if (socket.data.roomCode === normalizedRoomCode) {
+        const alreadyJoined = room.players.has(socket.id);
+
+        if (!alreadyJoined) {
+            resetSocketSnapshotState(socket);
+        }
+
+        socketIdToRoomCode.set(socket.id, normalizedRoomCode);
+        room.lastActivity = Date.now();
+        return {
+            success: true,
+            room,
+            alreadyJoined
+        };
+    }
+
     if (socket.data.roomCode && socket.data.roomCode !== normalizedRoomCode) {
         leaveRoom(socket);
     }
 
     socket.join(normalizedRoomCode);
     socket.data.roomCode = normalizedRoomCode;
+    resetSocketSnapshotState(socket);
     socketIdToRoomCode.set(socket.id, normalizedRoomCode);
     room.lastActivity = Date.now();
 
@@ -108,7 +126,7 @@ function verifyPassword(password, hash, salt) {
 }
 
 function leaveRoom(socket) {
-    const roomCode = socket.data.roomCode;
+    const roomCode = socket.data.roomCode || socketIdToRoomCode.get(socket.id);
     if (!roomCode) return null;
 
     const room = rooms.get(roomCode);
@@ -119,8 +137,10 @@ function leaveRoom(socket) {
     }
 
     room.players.delete(socket.id);
+    deletePlayerTerritory(room.territories, socket.id);
     socket.leave(roomCode);
     socketIdToRoomCode.delete(socket.id);
+    resetSocketSnapshotState(socket);
     delete socket.data.roomCode;
     room.lastActivity = Date.now();
 
@@ -146,6 +166,21 @@ function getRoomBySocketId(socketId) {
     return roomCode ? rooms.get(roomCode) || null : null;
 }
 
+function listRooms() {
+    return Array.from(rooms.values()).map(room => ({
+        code: room.code,
+        playerCount: room.players.size,
+        isPrivate: Boolean(room.isPrivate),
+        createdAt: room.createdAt
+    }));
+}
+
+function resetSocketSnapshotState(socket) {
+    socket.data.snapshotState = null;
+    socket.data.pendingReliableSnapshot = null;
+    socket.data.nextReliableSnapshotId = 0;
+}
+
 function generateRoomCode() {
     const availableChars = config.rooms.roomCodeCharset;
     const length = config.rooms.roomCodeLength;
@@ -166,6 +201,7 @@ module.exports = {
     createRoom,
     joinRoom,
     leaveRoom,
+    listRooms,
     getRoomBySocketId,
     destroyRoom,
     rooms

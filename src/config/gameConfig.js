@@ -1,4 +1,4 @@
-const socketTransports = Object.freeze(["websocket"]);
+const socketTransports = Object.freeze(["polling", "websocket"]);
 
 const inputActionAngles = Object.freeze({
     "move-right": 0,
@@ -146,7 +146,6 @@ const security = Object.freeze({
     })
 });
 
-// Only values needed by the browser are exposed through /game-config.
 const client = Object.freeze({
     socket: Object.freeze({
         transports: socketTransports
@@ -189,5 +188,3 @@ module.exports = Object.freeze({
     client,
     rooms
 });
-
-// NOTE: appended by integration
