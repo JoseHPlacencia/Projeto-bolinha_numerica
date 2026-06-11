@@ -7,7 +7,8 @@ const {
     calculatePolygonArea,
     createKnownSimplePolygonFromPoints,
     findClosestPolygonBoundaryContact,
-    isPointInPolygon
+    isPointInPolygon,
+    subtractPolygon
 } = require("../utils/geometry");
 const {
     endPlayerGame,
@@ -27,12 +28,14 @@ function captureClosedTrail(player, territories, players, context = {}) {
 
     const territory = territories.get(player.id);
     const baseVersion = territory ? territory.version || 0 : 0;
-    const changedPlayerIds = applyCapturedPolygon(territories, player.id, capture.polygon, {
-        ownerPolygon: capture.operation && capture.operation.previewPolygon
+    const ownerPolygon = getCaptureOwnerPolygon(capture);
+    const newlyCapturedPolygon = createNewlyCapturedPolygon(capture, territory);
+    const changedPlayerIds = applyCapturedPolygon(territories, player.id, newlyCapturedPolygon, {
+        ownerPolygon
     });
 
     storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
-    damagePlayersInsideCapturedPolygon(players, territories, player, capture.polygon, context);
+    damagePlayersInsideCapturedPolygon(players, territories, player, newlyCapturedPolygon, context);
 
     const relocationPlayerIds = new Set(changedPlayerIds);
     relocationPlayerIds.delete(player.id);
@@ -44,7 +47,35 @@ function captureClosedTrail(player, territories, players, context = {}) {
     return capture.polygon;
 }
 
+function getCaptureOwnerPolygon(capture) {
+    const previewPolygon = capture && capture.operation && capture.operation.previewPolygon;
+
+    return getPolygonArea(previewPolygon) > geometryEpsilon
+        ? previewPolygon
+        : capture.polygon;
+}
+
+function createNewlyCapturedPolygon(capture, previousTerritory) {
+    if (getPolygonArea(capture.damagePolygon) > geometryEpsilon) {
+        return capture.damagePolygon;
+    }
+
+    if (!previousTerritory) {
+        return [];
+    }
+
+    const differencePolygon = subtractPolygon(getCaptureOwnerPolygon(capture), previousTerritory.polygon);
+
+    return getPolygonArea(differencePolygon) > geometryEpsilon
+        ? differencePolygon
+        : [];
+}
+
 function damagePlayersInsideCapturedPolygon(players, territories, attacker, capturedPolygon, context) {
+    if (getPolygonArea(capturedPolygon) <= geometryEpsilon) {
+        return;
+    }
+
     for (const target of [...players.values()]) {
         if (!target || target.id === attacker.id) {
             continue;
@@ -285,6 +316,7 @@ function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
         endContact.point
     );
     const boundaryPaths = createBoundaryPaths(territoryPolygon[0], endContact, startContact);
+    const segmentCandidates = [];
     let bestCandidate = null;
 
     for (let boundaryPathIndex = 0; boundaryPathIndex < boundaryPaths.length; boundaryPathIndex++) {
@@ -292,19 +324,33 @@ function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
         const points = createTrailBoundaryCapturePoints(clippedSidePoints, boundaryPath);
         const candidate = createTrailCandidateFromPoints(points);
 
-        if (candidate && isLargerAreaCandidate(candidate, bestCandidate)) {
-            bestCandidate = {
+        if (candidate) {
+            segmentCandidates.push({
                 ...candidate,
-                operation: createCaptureOperation(
-                    trail,
-                    clippedSidePoints,
-                    startContact,
-                    endContact,
-                    boundaryPaths,
-                    boundaryPathIndex,
-                    candidate.polygon
-                )
-            };
+                boundaryPathIndex
+            });
+        }
+    }
+
+    const damagePolygon = createSegmentDamagePolygon(segmentCandidates, territoryPolygon);
+
+    for (const candidate of segmentCandidates) {
+        const captureCandidate = {
+            ...candidate,
+            damagePolygon,
+            operation: createCaptureOperation(
+                trail,
+                clippedSidePoints,
+                startContact,
+                endContact,
+                boundaryPaths,
+                candidate.boundaryPathIndex,
+                candidate.polygon
+            )
+        };
+
+        if (isLargerAreaCandidate(captureCandidate, bestCandidate)) {
+            bestCandidate = captureCandidate;
         }
     }
 
@@ -313,6 +359,36 @@ function createTrailCaptureCandidatesFromSegment(trail, territoryPolygon) {
     }
 
     return candidates;
+}
+
+function createSegmentDamagePolygon(segmentCandidates, territoryPolygon) {
+    if (segmentCandidates.length >= 2) {
+        return clonePolygon(getSmallestAreaCandidate(segmentCandidates).polygon);
+    }
+
+    const candidate = segmentCandidates[0];
+
+    if (!candidate) {
+        return [];
+    }
+
+    const differencePolygon = subtractPolygon(candidate.polygon, territoryPolygon);
+
+    return getPolygonArea(differencePolygon) > geometryEpsilon
+        ? differencePolygon
+        : [];
+}
+
+function getPolygonArea(polygon) {
+    return Array.isArray(polygon) ? calculatePolygonArea(polygon) : 0;
+}
+
+function getSmallestAreaCandidate(candidates) {
+    return candidates.reduce((smallestCandidate, candidate) => (
+        !smallestCandidate || candidate.area < smallestCandidate.area
+            ? candidate
+            : smallestCandidate
+    ), null);
 }
 
 function getTrailSegments(player) {
@@ -567,6 +643,18 @@ function clonePoint(point) {
         x: point.x,
         y: point.y
     };
+}
+
+function clonePolygon(polygon) {
+    if (!Array.isArray(polygon)) {
+        return [];
+    }
+
+    return polygon.map(ring => (
+        Array.isArray(ring)
+            ? ring.map(coordinates => [coordinates[0], coordinates[1]])
+            : []
+    ));
 }
 
 function arePointsEqual(first, second) {

@@ -1,5 +1,8 @@
 const config = require("../config/gameConfig");
-const { deletePlayerTerritory } = require("../state/territories");
+const {
+    deletePlayerTerritory,
+    isPointOwnedByPlayer
+} = require("../state/territories");
 const { findSpawnPointInsideTerritory } = require("./territoryRespawnSystem");
 
 function handleNumberCollected(players, territories, collection, context = {}) {
@@ -27,7 +30,7 @@ function eliminatePendingTargets(players, territories, attacker, context) {
 }
 
 function eliminatePlayer(players, territories, attacker, target, context) {
-    if (target.id === attacker.id) {
+    if (target.id === attacker.id || isPlayerInsideOwnTerritory(territories, target)) {
         return;
     }
 
@@ -37,6 +40,10 @@ function eliminatePlayer(players, territories, attacker, target, context) {
         attacker,
         reason: "eliminated"
     });
+}
+
+function isPlayerInsideOwnTerritory(territories, player) {
+    return isPointOwnedByPlayer(territories, player.id, player.x, player.y);
 }
 
 function handlePlayerLifeLoss(players, territories, target, context = {}, options = {}) {

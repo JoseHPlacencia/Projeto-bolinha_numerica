@@ -45,27 +45,37 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
     const rightUpdate = updateTrailSide(player, trailSides.right, sample.rightPoint, territoryPolygon);
     const leftInside = leftUpdate.inside;
     const rightInside = rightUpdate.inside;
+    const isInsideOwnTerritory = leftInside && rightInside;
 
     player.lastLeftTrailPoint = clonePoint(sample.leftPoint);
     player.lastRightTrailPoint = clonePoint(sample.rightPoint);
 
-    if (!(leftInside && rightInside) && hasSelfTrailCollision(player, previousSample, sample)) {
+    if (!isInsideOwnTerritory && hasSelfTrailCollision(player, previousSample, sample)) {
         handlePlayerLifeLoss(players, territories, player, context, {
             reason: "selfTrail"
         });
         return;
     }
 
-    markCrossedTrailOwners(player, players, previousSample, sample);
+    if (!isInsideOwnTerritory) {
+        markCrossedTrailOwners(player, players, previousSample, sample);
+    }
 
-    if (leftInside && rightInside && hasAnyTrailSegment(player)) {
+    if (isInsideOwnTerritory && hasAnyTrailSegment(player)) {
+        let capturedPolygon = null;
+
         if (canCaptureClosedTrail(player)) {
-            const capturedPolygon = captureClosedTrail(player, territories, players, context);
+            capturedPolygon = captureClosedTrail(player, territories, players, context);
 
             if (capturedPolygon) {
                 player.consumeCatchBalance(1);
             }
         }
+
+        if (!capturedPolygon) {
+            clearCatchEliminationMarksForTrailOwner(players, player.id);
+        }
+
         clearTrail(player);
         return;
     }
@@ -274,6 +284,14 @@ function markCrossedTrailOwners(player, players, previousSample, sample) {
 
         if (doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner)) {
             player.queueCatchEliminationTarget(trailOwner.id);
+        }
+    }
+}
+
+function clearCatchEliminationMarksForTrailOwner(players, trailOwnerId) {
+    for (const player of players.values()) {
+        if (player.id !== trailOwnerId) {
+            player.clearCatchEliminationTarget(trailOwnerId);
         }
     }
 }
