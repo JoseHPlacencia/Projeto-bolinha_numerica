@@ -181,7 +181,7 @@ const network = Object.freeze({
     maxViewportWorldWidth: 3200,
     maxViewportWorldHeight: 2200,
     cullPlayerPositionsByViewport: false,
-    captureOperationSyncEnabled: false,
+    captureOperationSyncEnabled: true,
     captureOperationFallbackTrailPointsEnabled: false,
     captureOperationNeededTrailPointsEnabled: true,
     captureOperationBatchTrailPointsEnabled: true,

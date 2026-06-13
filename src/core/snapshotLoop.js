@@ -1,3 +1,4 @@
+const { performance } = require("node:perf_hooks");
 const config = require("../config/gameConfig");
 const {
     cloneClientSnapshotState,
@@ -7,13 +8,30 @@ const {
 
 function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null) {
     const intervalMs = 1000 / config.loop.snapshotRate;
+    const loopDiagnostics = {
+        expectedIntervalMs: intervalMs,
+        lastTickAt: null,
+        tick: 0,
+        tickIntervalMs: null,
+        tickDriftMs: null
+    };
 
     return setInterval(() => {
-        sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig);
+        const tickAt = performance.now();
+        loopDiagnostics.tick += 1;
+        loopDiagnostics.tickIntervalMs = Number.isFinite(loopDiagnostics.lastTickAt)
+            ? tickAt - loopDiagnostics.lastTickAt
+            : null;
+        loopDiagnostics.tickDriftMs = Number.isFinite(loopDiagnostics.tickIntervalMs)
+            ? loopDiagnostics.tickIntervalMs - intervalMs
+            : null;
+        loopDiagnostics.lastTickAt = tickAt;
+
+        sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig, loopDiagnostics);
     }, intervalMs);
 }
 
-function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null) {
+function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null, loopDiagnostics = null) {
     for (const socket of io.sockets.sockets.values()) {
         const isPlayerSocket = roomCode && socket.data.roomCode === roomCode && players.has(socket.id);
         const isSpectatorSocket = roomCode && socket.data.spectatorRoomCode === roomCode;
@@ -35,24 +53,34 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         }
 
         if (retryPendingReliableSnapshot(socket)) {
-            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig);
+            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig, loopDiagnostics);
             continue;
         }
 
         const nextSnapshotState = cloneClientSnapshotState(socket.data.snapshotState);
-        const snapshot = createSnapshot(players, territories, viewerId, nextSnapshotState, numberSystem, runtimeConfig);
+        const measuredSnapshot = createMeasuredSnapshot(
+            players,
+            territories,
+            viewerId,
+            nextSnapshotState,
+            numberSystem,
+            runtimeConfig,
+            isNetworkDiagnosticsEnabled(socket)
+        );
+        const snapshot = measuredSnapshot.snapshot;
+        const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics);
 
         if (isSpectatorSocket) {
             snapshot.spectator = { followId: viewerId };
         }
 
         if (shouldSendReliably(snapshot)) {
-            queueReliableSnapshot(socket, snapshot, nextSnapshotState);
+            queueReliableSnapshot(socket, snapshot, nextSnapshotState, sendDiagnostics);
             continue;
         }
 
         socket.data.snapshotState = nextSnapshotState;
-        emitVolatileSnapshot(socket, snapshot, "volatile");
+        emitVolatileSnapshot(socket, snapshot, "volatile", null, sendDiagnostics);
     }
 }
 
@@ -82,16 +110,27 @@ function retryPendingReliableSnapshot(socket) {
     return true;
 }
 
-function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig = null) {
+function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig = null, loopDiagnostics = null) {
     if (config.network.volatileSnapshotsWhileReliablePendingEnabled === false) return;
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
-    const snapshot = createSnapshot(players, territories, viewerId, temporaryState, numberSystem, runtimeConfig);
+    const measuredSnapshot = createMeasuredSnapshot(
+        players,
+        territories,
+        viewerId,
+        temporaryState,
+        numberSystem,
+        runtimeConfig,
+        isNetworkDiagnosticsEnabled(socket)
+    );
+    const snapshot = measuredSnapshot.snapshot;
+    const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics);
+
     if (socket.data && socket.data.spectatorRoomCode) {
         snapshot.spectator = { followId: viewerId };
     }
     const volatileSnapshot = createVolatileSnapshotForPendingReliableState(snapshot, clientState);
-    emitVolatileSnapshot(socket, volatileSnapshot, "volatile-pending", socket.data.pendingReliableSnapshot);
+    emitVolatileSnapshot(socket, volatileSnapshot, "volatile-pending", socket.data.pendingReliableSnapshot, sendDiagnostics);
 }
 
 function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
@@ -112,13 +151,14 @@ function filterKnownIds(ids, knownStates) {
     return (ids || []).filter(id => knownStates && knownStates.has(id));
 }
 
-function queueReliableSnapshot(socket, snapshot, nextSnapshotState) {
+function queueReliableSnapshot(socket, snapshot, nextSnapshotState, sendDiagnostics = null) {
     const pending = {
         createdAt: Date.now(),
         id: getNextReliableSnapshotId(socket),
         lastSentAt: null,
         nextRetryAt: 0,
         sentCount: 0,
+        sendDiagnostics,
         snapshot,
         snapshotState: nextSnapshotState
     };
@@ -134,7 +174,7 @@ function sendReliableSnapshot(socket, pending) {
     const emitter = typeof socket.timeout === "function"
         ? socket.timeout(getReliableSnapshotAckTimeoutMs())
         : socket;
-    emitter.emit("gameState", createSnapshotForNetworkSend(socket, pending.snapshot, sendType, pending), (error, acknowledgement) => {
+    emitter.emit("gameState", createSnapshotForNetworkSend(socket, pending.snapshot, sendType, pending, pending.sendDiagnostics), (error, acknowledgement) => {
         if (error) {
             pending.ackTimeouts = (pending.ackTimeouts || 0) + 1;
             pending.lastAckErrorAt = Date.now();
@@ -163,22 +203,23 @@ function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { appl
     socket.data.pendingReliableSnapshot = null;
 }
 
-function emitVolatileSnapshot(socket, snapshot, sendType, pending = null) {
-    socket.volatile.emit("gameState", createSnapshotForNetworkSend(socket, snapshot, sendType, pending));
+function emitVolatileSnapshot(socket, snapshot, sendType, pending = null, sendDiagnostics = null) {
+    socket.volatile.emit("gameState", createSnapshotForNetworkSend(socket, snapshot, sendType, pending, sendDiagnostics));
 }
 
-function createSnapshotForNetworkSend(socket, snapshot, sendType, pending = null) {
+function createSnapshotForNetworkSend(socket, snapshot, sendType, pending = null, sendDiagnostics = null) {
     if (!isNetworkDiagnosticsEnabled(socket)) {
         return snapshot;
     }
 
     return {
         ...snapshot,
-        networkDiagnostics: createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending)
+        networkDiagnostics: createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending, sendDiagnostics)
     };
 }
 
-function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = null) {
+function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = null, sendDiagnostics = null) {
+    const payloadMeasurement = measureSnapshotPayload(snapshot);
     const now = Date.now();
     const previousSentAt = Number.isFinite(socket.data.networkDiagnosticsLastSentAt)
         ? socket.data.networkDiagnosticsLastSentAt
@@ -189,13 +230,20 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
     socket.data.networkDiagnosticsLastSentAt = now;
 
     return {
-        schema: 1,
+        schema: 2,
         sequence,
         sendType,
         serverSentAt: now,
         serverSendIntervalMs: previousSentAt === null ? null : now - previousSentAt,
+        loopTick: finiteOrNull(sendDiagnostics && sendDiagnostics.loopTick),
+        loopExpectedIntervalMs: finiteOrNull(sendDiagnostics && sendDiagnostics.loopExpectedIntervalMs),
+        loopIntervalMs: finiteOrNull(sendDiagnostics && sendDiagnostics.loopIntervalMs),
+        loopDriftMs: finiteOrNull(sendDiagnostics && sendDiagnostics.loopDriftMs),
+        snapshotBuildMs: finiteOrNull(sendDiagnostics && sendDiagnostics.snapshotBuildMs),
         snapshotTime: snapshot.time,
-        basePayloadBytes: getSnapshotPayloadBytes(snapshot),
+        basePayloadBytes: payloadMeasurement.bytes,
+        payloadMeasureMs: payloadMeasurement.measureMs,
+        snapshotBreakdown: createSnapshotBreakdown(snapshot),
         playerCount: countObjectKeys(snapshot.players),
         territoryCount: countArrayItems(snapshot.territoryIds),
         trailCount: countArrayItems(snapshot.trailIds),
@@ -208,6 +256,36 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         reliableAgeMs: pending && Number.isFinite(pending.createdAt) ? now - pending.createdAt : null,
         reliableAckTimeouts: pending ? pending.ackTimeouts || 0 : 0,
         lastReliableAck: socket.data.networkDiagnosticsLastReliableAck || null
+    };
+}
+
+function createMeasuredSnapshot(players, territories, viewerId, clientState, numberSystem, runtimeConfig, shouldMeasure = false) {
+    const startedAt = shouldMeasure ? performance.now() : null;
+    const snapshot = createSnapshot(players, territories, viewerId, clientState, numberSystem, runtimeConfig);
+
+    return {
+        snapshot,
+        buildMs: shouldMeasure ? performance.now() - startedAt : null
+    };
+}
+
+function createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics) {
+    if (!measuredSnapshot || !Number.isFinite(measuredSnapshot.buildMs)) {
+        return null;
+    }
+
+    return {
+        loopTick: loopDiagnostics && Number.isFinite(loopDiagnostics.tick) ? loopDiagnostics.tick : null,
+        loopExpectedIntervalMs: loopDiagnostics && Number.isFinite(loopDiagnostics.expectedIntervalMs)
+            ? loopDiagnostics.expectedIntervalMs
+            : null,
+        loopIntervalMs: loopDiagnostics && Number.isFinite(loopDiagnostics.tickIntervalMs)
+            ? loopDiagnostics.tickIntervalMs
+            : null,
+        loopDriftMs: loopDiagnostics && Number.isFinite(loopDiagnostics.tickDriftMs)
+            ? loopDiagnostics.tickDriftMs
+            : null,
+        snapshotBuildMs: measuredSnapshot.buildMs
     };
 }
 
@@ -315,11 +393,19 @@ function isNetworkDiagnosticsEnabled(socket) {
     return Boolean(socket && socket.data && socket.data.networkDiagnosticsEnabled);
 }
 
-function getSnapshotPayloadBytes(snapshot) {
+function measureSnapshotPayload(snapshot) {
+    const startedAt = performance.now();
+
     try {
-        return Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+        return {
+            bytes: Buffer.byteLength(JSON.stringify(snapshot), "utf8"),
+            measureMs: performance.now() - startedAt
+        };
     } catch (error) {
-        return null;
+        return {
+            bytes: null,
+            measureMs: performance.now() - startedAt
+        };
     }
 }
 
@@ -329,6 +415,99 @@ function countObjectKeys(value) {
 
 function countArrayItems(value) {
     return Array.isArray(value) ? value.length : 0;
+}
+
+function createSnapshotBreakdown(snapshot) {
+    const territories = snapshot && snapshot.territories || {};
+    const territoryOps = snapshot && snapshot.territoryOps || {};
+    const trails = snapshot && snapshot.trails || {};
+    const territoryValues = Object.values(territories);
+    const operationValues = Object.values(territoryOps);
+    const trailValues = Object.values(trails);
+    let territoryPointDefinitionCount = 0;
+    let territoryRingReferenceCount = 0;
+    let captureOperationCount = 0;
+    let captureOperationTrailPointCount = 0;
+    let fullTrailUpdateCount = 0;
+    let fullTrailPointCount = 0;
+    let trailPatchUpdateCount = 0;
+    let trailPatchPointCount = 0;
+
+    for (const territory of territoryValues) {
+        const polygon = territory && territory.polygon;
+        territoryPointDefinitionCount += countArrayItems(polygon && polygon.points);
+        territoryRingReferenceCount += countRingReferences(polygon && polygon.rings);
+    }
+
+    for (const operation of operationValues) {
+        if (!operation || operation.type !== "trailCapture") {
+            continue;
+        }
+
+        captureOperationCount++;
+        captureOperationTrailPointCount += countArrayItems(operation.trailPoints)
+            + countArrayItems(operation.trailTailPoints);
+    }
+
+    for (const trail of trailValues) {
+        if (!trail) {
+            continue;
+        }
+
+        if (trail.full) {
+            fullTrailUpdateCount++;
+            fullTrailPointCount += countPackedSegmentsPoints(trail.leftSegments)
+                + countPackedSegmentsPoints(trail.rightSegments)
+                + countArrayItems(trail.leftFillPath)
+                + countArrayItems(trail.rightFillPath);
+            continue;
+        }
+
+        trailPatchUpdateCount++;
+        trailPatchPointCount += countTrailPatchPoints(trail);
+    }
+
+    return {
+        playerPositionCount: countObjectKeys(snapshot && snapshot.players),
+        playerInfoCount: countObjectKeys(snapshot && snapshot.playerInfo),
+        territoryVersionCount: countObjectKeys(snapshot && snapshot.territoryVersions),
+        territoryPayloadCount: countObjectKeys(territories),
+        territoryOperationCount: countObjectKeys(territoryOps),
+        captureOperationCount,
+        captureOperationTrailPointCount,
+        territoryPointDefinitionCount,
+        territoryRingReferenceCount,
+        trailUpdateCount: trailValues.length,
+        fullTrailUpdateCount,
+        fullTrailPointCount,
+        trailPatchUpdateCount,
+        trailPatchPointCount,
+        leaderboardCount: countArrayItems(snapshot && snapshot.leaderboard),
+        numberCount: countArrayItems(snapshot && snapshot.numbers && snapshot.numbers.nums)
+    };
+}
+
+function countRingReferences(rings) {
+    return (rings || []).reduce((sum, ring) => sum + countArrayItems(ring), 0);
+}
+
+function countPackedSegmentsPoints(segments) {
+    return (segments || []).reduce((sum, segment) => sum + countArrayItems(segment), 0);
+}
+
+function countTrailPatchPoints(trail) {
+    return countPatchPoints(trail.leftPatches)
+        + countPatchPoints(trail.rightPatches)
+        + countArrayItems(trail.leftFillPoints)
+        + countArrayItems(trail.rightFillPoints);
+}
+
+function countPatchPoints(patches) {
+    return (patches || []).reduce((sum, patch) => sum + countArrayItems(patch && patch.points), 0);
+}
+
+function finiteOrNull(value) {
+    return Number.isFinite(value) ? value : null;
 }
 
 function countInvalidations(invalidations) {

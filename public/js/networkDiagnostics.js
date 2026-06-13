@@ -1,6 +1,11 @@
 const DEFAULT_HISTORY_LIMIT = 240;
 const DEFAULT_PING_INTERVAL_MS = 1000;
 const DEFAULT_SLOW_BUFFER_MS = 150;
+const DEFAULT_SLOW_SERVER_INTERVAL_MS = 80;
+const DEFAULT_SLOW_LOOP_DRIFT_MS = 40;
+const DEFAULT_SLOW_SNAPSHOT_BUILD_MS = 16;
+const DEFAULT_SLOW_PAYLOAD_MEASURE_MS = 8;
+const DEFAULT_LARGE_PAYLOAD_BYTES = 10000;
 
 export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) {
     const events = [];
@@ -138,7 +143,13 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             rttMs: data.ping.last && round(data.ping.last.roundTripMs),
             sendType: latestSnapshot && latestSnapshot.server && latestSnapshot.server.sendType,
             serverIntervalMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.serverSendIntervalMs),
+            loopDriftMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.loopDriftMs),
+            buildMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.snapshotBuildMs),
+            payloadMeasureMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.payloadMeasureMs),
             payloadBytes: latestSnapshot && latestSnapshot.server && latestSnapshot.server.basePayloadBytes,
+            territoryPayloads: latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown && latestSnapshot.server.snapshotBreakdown.territoryPayloadCount,
+            territoryOps: latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown && latestSnapshot.server.snapshotBreakdown.territoryOperationCount,
+            trailPatchPoints: latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown && latestSnapshot.server.snapshotBreakdown.trailPatchPointCount,
             transport: data.transport
         };
 
@@ -161,7 +172,13 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 estimatedTransitMs: round(event.estimatedTransitMs),
                 sendType: event.server && event.server.sendType,
                 serverIntervalMs: event.server && round(event.server.serverSendIntervalMs),
+                loopDriftMs: event.server && round(event.server.loopDriftMs),
+                buildMs: event.server && round(event.server.snapshotBuildMs),
+                payloadMeasureMs: event.server && round(event.server.payloadMeasureMs),
                 payloadBytes: event.server && event.server.basePayloadBytes,
+                territoryPayloads: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount,
+                territoryOps: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount,
+                trailPatchPoints: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount,
                 reliableRetryCount: event.server && event.server.reliableRetryCount,
                 preserveTrails: event.preserveTrails
             }));
@@ -243,6 +260,11 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const latest = current && current.lastSnapshot;
         const server = latest && latest.server;
         const slowBufferMs = getPositiveNumber(networkConfig.diagnosticsSlowBufferMs, DEFAULT_SLOW_BUFFER_MS);
+        const slowServerIntervalMs = getPositiveNumber(networkConfig.diagnosticsSlowServerIntervalMs, DEFAULT_SLOW_SERVER_INTERVAL_MS);
+        const slowLoopDriftMs = getPositiveNumber(networkConfig.diagnosticsSlowLoopDriftMs, DEFAULT_SLOW_LOOP_DRIFT_MS);
+        const slowSnapshotBuildMs = getPositiveNumber(networkConfig.diagnosticsSlowSnapshotBuildMs, DEFAULT_SLOW_SNAPSHOT_BUILD_MS);
+        const slowPayloadMeasureMs = getPositiveNumber(networkConfig.diagnosticsSlowPayloadMeasureMs, DEFAULT_SLOW_PAYLOAD_MEASURE_MS);
+        const largePayloadBytes = getPositiveNumber(networkConfig.diagnosticsLargePayloadBytes, DEFAULT_LARGE_PAYLOAD_BYTES);
 
         if (!latest) {
             return {
@@ -265,6 +287,34 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             };
         }
 
+        if (server && server.loopDriftMs >= slowLoopDriftMs) {
+            return {
+                reason: "server-loop-drift",
+                detail: "Server snapshot loop drift exceeded the expected cadence; event-loop or tick processing is delaying sends."
+            };
+        }
+
+        if (server && server.snapshotBuildMs >= slowSnapshotBuildMs) {
+            return {
+                reason: "server-snapshot-build",
+                detail: "Server spent too long building the snapshot before sending it."
+            };
+        }
+
+        if (server && server.payloadMeasureMs >= slowPayloadMeasureMs) {
+            return {
+                reason: "diagnostic-payload-measurement",
+                detail: "Diagnostic JSON payload measurement is itself taking noticeable time."
+            };
+        }
+
+        if (server && server.basePayloadBytes >= largePayloadBytes) {
+            return {
+                reason: "large-snapshot-payload",
+                detail: "Serialized snapshot payload is large; territory, trail, or full-sync data may be driving buffer growth."
+            };
+        }
+
         if (latest.bufferMs >= slowBufferMs && latest.jitterMs >= 25) {
             return {
                 reason: "client-jitter",
@@ -272,10 +322,20 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             };
         }
 
-        if (server && server.serverSendIntervalMs > 80) {
+        if (server && server.serverSendIntervalMs > slowServerIntervalMs) {
             return {
                 reason: "server-send-gap",
                 detail: "Server-side snapshot send interval exceeded the expected cadence."
+            };
+        }
+
+        if (
+            latest.snapshotInterArrivalMs > slowServerIntervalMs
+            && (!server || !Number.isFinite(server.serverSendIntervalMs) || server.serverSendIntervalMs <= slowServerIntervalMs)
+        ) {
+            return {
+                reason: "network-arrival-gap",
+                detail: "Client received snapshots late while server send cadence looked normal."
             };
         }
 

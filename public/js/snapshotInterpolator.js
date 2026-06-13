@@ -212,6 +212,15 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxJitterMs: maxFiniteValue(snapshotEvents.map(event => event.jitterMs)),
             averagePayloadBytes: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.basePayloadBytes)),
             maxPayloadBytes: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.basePayloadBytes)),
+            averageLoopDriftMs: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.loopDriftMs)),
+            maxLoopDriftMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.loopDriftMs)),
+            averageSnapshotBuildMs: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.snapshotBuildMs)),
+            maxSnapshotBuildMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBuildMs)),
+            averagePayloadMeasureMs: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.payloadMeasureMs)),
+            maxPayloadMeasureMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.payloadMeasureMs)),
+            maxTerritoryPayloadCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount)),
+            maxTerritoryOperationCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount)),
+            maxTrailPatchPointCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount)),
             reliableRetryEvents: snapshotEvents.filter(event => event.server && event.server.sendType === "reliable-retry").length,
             reliableBacklogEvents: snapshotEvents.filter(event => event.server && isReliableBacklog(event.server)).length,
             bufferSpikeEvents: snapshotEvents.filter(event => event.bufferMs >= getSlowBufferMs()).length,
@@ -234,8 +243,15 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             sendType: value.sendType,
             serverSentAt: finiteOrNull(value.serverSentAt),
             serverSendIntervalMs: finiteOrNull(value.serverSendIntervalMs),
+            loopTick: finiteOrNull(value.loopTick),
+            loopExpectedIntervalMs: finiteOrNull(value.loopExpectedIntervalMs),
+            loopIntervalMs: finiteOrNull(value.loopIntervalMs),
+            loopDriftMs: finiteOrNull(value.loopDriftMs),
+            snapshotBuildMs: finiteOrNull(value.snapshotBuildMs),
             snapshotTime: finiteOrNull(value.snapshotTime),
             basePayloadBytes: finiteOrNull(value.basePayloadBytes),
+            payloadMeasureMs: finiteOrNull(value.payloadMeasureMs),
+            snapshotBreakdown: normalizeSnapshotBreakdown(value.snapshotBreakdown),
             playerCount: finiteOrNull(value.playerCount),
             territoryCount: finiteOrNull(value.territoryCount),
             trailCount: finiteOrNull(value.trailCount),
@@ -248,6 +264,31 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             reliableAgeMs: finiteOrNull(value.reliableAgeMs),
             reliableAckTimeouts: finiteOrNull(value.reliableAckTimeouts),
             lastReliableAck: normalizeReliableAck(value.lastReliableAck)
+        };
+    }
+
+    function normalizeSnapshotBreakdown(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            playerPositionCount: finiteOrNull(value.playerPositionCount),
+            playerInfoCount: finiteOrNull(value.playerInfoCount),
+            territoryVersionCount: finiteOrNull(value.territoryVersionCount),
+            territoryPayloadCount: finiteOrNull(value.territoryPayloadCount),
+            territoryOperationCount: finiteOrNull(value.territoryOperationCount),
+            captureOperationCount: finiteOrNull(value.captureOperationCount),
+            captureOperationTrailPointCount: finiteOrNull(value.captureOperationTrailPointCount),
+            territoryPointDefinitionCount: finiteOrNull(value.territoryPointDefinitionCount),
+            territoryRingReferenceCount: finiteOrNull(value.territoryRingReferenceCount),
+            trailUpdateCount: finiteOrNull(value.trailUpdateCount),
+            fullTrailUpdateCount: finiteOrNull(value.fullTrailUpdateCount),
+            fullTrailPointCount: finiteOrNull(value.fullTrailPointCount),
+            trailPatchUpdateCount: finiteOrNull(value.trailPatchUpdateCount),
+            trailPatchPointCount: finiteOrNull(value.trailPatchPointCount),
+            leaderboardCount: finiteOrNull(value.leaderboardCount),
+            numberCount: finiteOrNull(value.numberCount)
         };
     }
 
