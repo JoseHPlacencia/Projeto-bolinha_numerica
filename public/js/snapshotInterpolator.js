@@ -28,6 +28,12 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         visibleTerritories: 0,
         visibleTrails: 0
     };
+    const networkDiagnosticsState = {
+        events: [],
+        lastServer: null,
+        lastSnapshot: null,
+        lastResync: null
+    };
     const pendingTerritoryOperations = new Map();
     const suppressedCaptureOperationResyncIds = new Set();
     let hasServerClockSync = false;
@@ -35,6 +41,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     return {
         getDebugState,
+        getNetworkDiagnostics,
         getRenderState,
         processSnapshot,
         reset
@@ -56,6 +63,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         debugState.visiblePlayers = 0;
         debugState.visibleTerritories = 0;
         debugState.visibleTrails = 0;
+        networkDiagnosticsState.events.length = 0;
+        networkDiagnosticsState.lastServer = null;
+        networkDiagnosticsState.lastSnapshot = null;
+        networkDiagnosticsState.lastResync = null;
         pendingTerritoryOperations.clear();
         suppressedCaptureOperationResyncIds.clear();
         hasServerClockSync = false;
@@ -70,6 +81,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         updateAdaptiveBuffer(now);
         syncServerClock(snapshot.time);
         saveSnapshot(snapshot);
+        recordSnapshotNetworkDiagnostics(rawSnapshot, snapshot, applyResult, now);
 
         return applyResult;
     }
@@ -88,11 +100,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const { previous, next } = findSnapshotPair(renderTime);
         const interval = next.time - previous.time || 1;
         const amount = clamp((renderTime - previous.time) / interval, 0, 1);
+        const players = interpolatePlayers(previous, next, amount);
 
         return createInterpolatedRenderState(
             previous,
             next,
-            interpolatePlayers(previous, next, amount)
+            players,
+            amount
         );
     }
 
@@ -108,6 +122,188 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             visibleTerritories: debugState.visibleTerritories,
             visibleTrails: debugState.visibleTrails
         };
+    }
+
+    function getNetworkDiagnostics() {
+        return {
+            current: {
+                ...getDebugState(),
+                lastServer: networkDiagnosticsState.lastServer,
+                lastSnapshot: networkDiagnosticsState.lastSnapshot,
+                lastResync: networkDiagnosticsState.lastResync
+            },
+            events: networkDiagnosticsState.events.slice(),
+            summary: createNetworkDiagnosticsSummary()
+        };
+    }
+
+    function recordSnapshotNetworkDiagnostics(rawSnapshot, snapshot, applyResult, receivedAt) {
+        const serverDiagnostics = normalizeServerNetworkDiagnostics(rawSnapshot && rawSnapshot.networkDiagnostics);
+        const invalidations = countInvalidations(applyResult && applyResult.invalidations);
+        const event = {
+            type: "snapshot",
+            at: Date.now(),
+            perfAt: receivedAt,
+            bufferMs: networkState.bufferMs,
+            snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
+            averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
+            jitterMs: networkState.jitterMs,
+            serverOffsetMs: networkState.serverOffset,
+            snapshotCount: snapshots.length,
+            visiblePlayers: debugState.visiblePlayers,
+            visibleTerritories: debugState.visibleTerritories,
+            visibleTrails: debugState.visibleTrails,
+            preserveTrails: Boolean(snapshot && snapshot.preserveTrails),
+            applied: !applyResult || applyResult.applied !== false,
+            invalidations,
+            server: serverDiagnostics
+        };
+
+        if (serverDiagnostics && Number.isFinite(serverDiagnostics.serverSentAt)) {
+            event.estimatedTransitMs = event.at - (serverDiagnostics.serverSentAt + networkState.serverOffset);
+        }
+
+        networkDiagnosticsState.lastServer = serverDiagnostics;
+        networkDiagnosticsState.lastSnapshot = event;
+        pushNetworkDiagnosticsEvent(event);
+    }
+
+    function recordNetworkDiagnosticsEvent(event) {
+        const entry = {
+            at: Date.now(),
+            perfAt: performance.now(),
+            ...event
+        };
+
+        pushNetworkDiagnosticsEvent(entry);
+
+        if (entry.type === "resyncRequested") {
+            networkDiagnosticsState.lastResync = entry;
+        }
+    }
+
+    function pushNetworkDiagnosticsEvent(event) {
+        const limit = getNetworkDiagnosticsHistoryLimit();
+
+        networkDiagnosticsState.events.push(event);
+
+        while (networkDiagnosticsState.events.length > limit) {
+            networkDiagnosticsState.events.shift();
+        }
+    }
+
+    function createNetworkDiagnosticsSummary() {
+        const snapshotEvents = networkDiagnosticsState.events
+            .filter(event => event.type === "snapshot");
+
+        if (snapshotEvents.length === 0) {
+            return {
+                samples: 0
+            };
+        }
+
+        return {
+            samples: snapshotEvents.length,
+            averageBufferMs: averageFiniteValues(snapshotEvents.map(event => event.bufferMs)),
+            maxBufferMs: maxFiniteValue(snapshotEvents.map(event => event.bufferMs)),
+            averageInterArrivalMs: averageFiniteValues(snapshotEvents.map(event => event.snapshotInterArrivalMs)),
+            maxInterArrivalMs: maxFiniteValue(snapshotEvents.map(event => event.snapshotInterArrivalMs)),
+            averageJitterMs: averageFiniteValues(snapshotEvents.map(event => event.jitterMs)),
+            maxJitterMs: maxFiniteValue(snapshotEvents.map(event => event.jitterMs)),
+            averagePayloadBytes: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.basePayloadBytes)),
+            maxPayloadBytes: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.basePayloadBytes)),
+            reliableRetryEvents: snapshotEvents.filter(event => event.server && event.server.sendType === "reliable-retry").length,
+            reliablePendingEvents: snapshotEvents.filter(event => event.server && event.server.reliablePending).length,
+            bufferSpikeEvents: snapshotEvents.filter(event => event.bufferMs >= getSlowBufferMs()).length,
+            resyncEvents: networkDiagnosticsState.events.filter(event => event.type === "resyncRequested").length
+        };
+    }
+
+    function normalizeServerNetworkDiagnostics(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            schema: value.schema,
+            sequence: value.sequence,
+            sendType: value.sendType,
+            serverSentAt: finiteOrNull(value.serverSentAt),
+            serverSendIntervalMs: finiteOrNull(value.serverSendIntervalMs),
+            snapshotTime: finiteOrNull(value.snapshotTime),
+            basePayloadBytes: finiteOrNull(value.basePayloadBytes),
+            playerCount: finiteOrNull(value.playerCount),
+            territoryCount: finiteOrNull(value.territoryCount),
+            trailCount: finiteOrNull(value.trailCount),
+            preserveTrails: Boolean(value.preserveTrails),
+            reliablePending: Boolean(value.reliablePending),
+            reliableId: finiteOrNull(value.reliableId),
+            reliableRetryCount: finiteOrNull(value.reliableRetryCount),
+            reliableAgeMs: finiteOrNull(value.reliableAgeMs),
+            reliableAckTimeouts: finiteOrNull(value.reliableAckTimeouts),
+            lastReliableAck: normalizeReliableAck(value.lastReliableAck)
+        };
+    }
+
+    function normalizeReliableAck(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            reliableId: finiteOrNull(value.reliableId),
+            acknowledgedAt: finiteOrNull(value.acknowledgedAt),
+            ackLatencyMs: finiteOrNull(value.ackLatencyMs),
+            applied: Boolean(value.applied),
+            invalidations: countInvalidations(value.invalidations)
+        };
+    }
+
+    function countInvalidations(invalidations) {
+        return {
+            playerInfo: countItems(invalidations && invalidations.playerInfo),
+            territories: countItems(invalidations && invalidations.territories),
+            trails: countItems(invalidations && invalidations.trails)
+        };
+    }
+
+    function countItems(value) {
+        return Array.isArray(value) ? value.length : 0;
+    }
+
+    function getNetworkDiagnosticsHistoryLimit() {
+        const configuredLimit = Number(networkConfig.diagnosticsHistoryLimit);
+
+        return Number.isInteger(configuredLimit) && configuredLimit > 0
+            ? configuredLimit
+            : 240;
+    }
+
+    function getSlowBufferMs() {
+        return getFiniteConfigNumber(
+            networkConfig.diagnosticsSlowBufferMs,
+            getFiniteConfigNumber(networkConfig.minBufferMs, 100) + 50
+        );
+    }
+
+    function averageFiniteValues(values) {
+        const finiteValues = values.filter(Number.isFinite);
+
+        if (finiteValues.length === 0) {
+            return null;
+        }
+
+        return finiteValues.reduce((sum, value) => sum + value, 0) / finiteValues.length;
+    }
+
+    function maxFiniteValue(values) {
+        const finiteValues = values.filter(Number.isFinite);
+
+        return finiteValues.length > 0 ? Math.max(...finiteValues) : null;
+    }
+
+    function finiteOrNull(value) {
+        return Number.isFinite(value) ? value : null;
     }
 
     function createApplyResult() {
@@ -175,6 +371,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             players,
             territories,
             trails,
+            trailIds: rawSnapshot.trailIds || Object.keys(trails),
+            preserveTrails: Boolean(rawSnapshot.preserveTrails),
             leaderboard: rawSnapshot.leaderboard || [],
             mode: rawSnapshot.mode || null,
             numbers: rawSnapshot.numbers || null
@@ -198,6 +396,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             players: snapshot.players || {},
             territories: snapshot.territories || {},
             trails: snapshot.trails || {},
+            trailIds: Object.keys(snapshot.trails || {}),
+            preserveTrails: false,
             leaderboard: snapshot.leaderboard || [],
             mode: snapshot.mode || null,
             numbers: snapshot.numbers || null
@@ -310,19 +510,166 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             mode: snapshot.mode || null,
             numbers: snapshot.numbers || null,
             territories: snapshot.territories,
-            trails: snapshot.trails
+            trails: snapshot.trails,
+            trailIds: snapshot.trailIds || Object.keys(snapshot.trails || {}),
+            preserveTrails: Boolean(snapshot.preserveTrails)
         };
     }
 
-    function createInterpolatedRenderState(previous, next, players) {
+    function createInterpolatedRenderState(previous, next, players, amount) {
         return {
             players,
             leaderboard: next.leaderboard || previous.leaderboard || [],
             mode: next.mode || previous.mode || null,
             numbers: next.numbers || previous.numbers || null,
             territories: next.territories,
-            trails: previous.trails
+            trails: createPredictedTrailState(previous, next, players, amount),
+            trailIds: previous.trailIds || Object.keys(previous.trails || {}),
+            preserveTrails: Boolean(previous.preserveTrails)
         };
+    }
+
+    function createPredictedTrailState(previous, next, players, amount) {
+        const baseTrails = previous.trails || {};
+
+        if (!shouldPredictTrails(amount) || next.preserveTrails) {
+            return baseTrails;
+        }
+
+        const activeNextTrailIds = new Set(next.trailIds || Object.keys(next.trails || {}));
+        let predictedTrails = null;
+
+        for (const [id, trail] of Object.entries(baseTrails)) {
+            if (!activeNextTrailIds.has(id) || !next.trails || !next.trails[id]) {
+                continue;
+            }
+
+            const predictedTrail = createPredictedTrail(trail, players[id]);
+
+            if (predictedTrail === trail) {
+                continue;
+            }
+
+            if (!predictedTrails) {
+                predictedTrails = { ...baseTrails };
+            }
+
+            predictedTrails[id] = predictedTrail;
+        }
+
+        return predictedTrails || baseTrails;
+    }
+
+    function shouldPredictTrails(amount) {
+        if (networkConfig.trailPredictionEnabled === false || amount <= 0) {
+            return false;
+        }
+
+        const maxBufferMs = getFiniteConfigNumber(
+            networkConfig.trailPredictionMaxBufferMs,
+            getFiniteConfigNumber(networkConfig.minBufferMs, 100) + 40
+        );
+
+        return networkState.bufferMs <= maxBufferMs;
+    }
+
+    function createPredictedTrail(trail, player) {
+        if (!trail || !player || !Number.isFinite(player.x) || !Number.isFinite(player.y) || !Number.isFinite(player.angle)) {
+            return trail;
+        }
+
+        const sample = createTrailPredictionSample(player);
+        const leftSegments = appendPredictedPointToLastSegment(trail.leftSegments, sample.leftPoint);
+        const rightSegments = appendPredictedPointToLastSegment(trail.rightSegments, sample.rightPoint);
+
+        if (leftSegments === trail.leftSegments || rightSegments === trail.rightSegments) {
+            return trail;
+        }
+
+        const leftFillPath = appendPredictedPointToFillPath(trail.leftFillPath, sample.leftPoint);
+        const rightFillPath = appendPredictedPointToFillPath(trail.rightFillPath, sample.rightPoint);
+        const fillChanged = leftFillPath !== trail.leftFillPath && rightFillPath !== trail.rightFillPath;
+
+        return {
+            id: trail.id,
+            color: trail.color,
+            leftSegments,
+            rightSegments,
+            leftFillPath,
+            rightFillPath,
+            fillPolygon: fillChanged
+                ? createTrailFillPolygon(leftFillPath, rightFillPath)
+                : trail.fillPolygon
+        };
+    }
+
+    function createTrailPredictionSample(player) {
+        const halfWidth = getFiniteConfigNumber(networkConfig.trailPredictionPlayerHalfWidth, 35);
+        const normalX = -Math.sin(player.angle);
+        const normalY = Math.cos(player.angle);
+
+        return {
+            leftPoint: {
+                x: player.x + normalX * halfWidth,
+                y: player.y + normalY * halfWidth
+            },
+            rightPoint: {
+                x: player.x - normalX * halfWidth,
+                y: player.y - normalY * halfWidth
+            }
+        };
+    }
+
+    function appendPredictedPointToLastSegment(segments, point) {
+        if (!Array.isArray(segments) || segments.length === 0) {
+            return segments;
+        }
+
+        const lastIndex = segments.length - 1;
+        const nextSegment = appendPredictedPoint(segments[lastIndex], point);
+
+        if (nextSegment === segments[lastIndex]) {
+            return segments;
+        }
+
+        const nextSegments = segments.slice();
+        nextSegments[lastIndex] = nextSegment;
+
+        return nextSegments;
+    }
+
+    function appendPredictedPointToFillPath(points, point) {
+        if (!Array.isArray(points) || points.length === 0) {
+            return points;
+        }
+
+        return appendPredictedPoint(points, point);
+    }
+
+    function appendPredictedPoint(points, point) {
+        if (!Array.isArray(points) || points.length === 0 || !isValidPoint(point)) {
+            return points;
+        }
+
+        const lastPoint = points[points.length - 1];
+
+        if (!isValidPoint(lastPoint) || !isPredictionDistanceAllowed(lastPoint, point)) {
+            return points;
+        }
+
+        return points.concat({
+            x: point.x,
+            y: point.y
+        });
+    }
+
+    function isPredictionDistanceAllowed(first, second) {
+        const distanceSquared = getDistanceSquared(first, second);
+        const minDistance = getFiniteConfigNumber(networkConfig.trailPredictionMinPointDistance, 2);
+        const maxDistance = getFiniteConfigNumber(networkConfig.trailPredictionMaxPointDistance, 180);
+
+        return distanceSquared >= minDistance * minDistance
+            && distanceSquared <= maxDistance * maxDistance;
     }
 
     function updatePlayerInfoCache(playerInfo) {
@@ -1103,6 +1450,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
 
         lastResyncRequestedAt = now;
+        recordNetworkDiagnosticsEvent({
+            type: "resyncRequested",
+            bufferMs: networkState.bufferMs,
+            snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
+            averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
+            jitterMs: networkState.jitterMs
+        });
         options.onResyncNeeded();
     }
 
@@ -1153,6 +1507,16 @@ function unpackPoint(point) {
         x: point[0],
         y: point[1]
     };
+}
+
+function isValidPoint(point) {
+    return point
+        && Number.isFinite(point.x)
+        && Number.isFinite(point.y);
+}
+
+function getFiniteConfigNumber(value, fallback) {
+    return Number.isFinite(value) ? value : fallback;
 }
 
 function createTrailFillPolygon(leftPath, rightPath) {

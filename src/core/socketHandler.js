@@ -12,6 +12,7 @@ function registerSocket(io, roomManager) {
 
         registerRoomEvents(socket, io, roomManager);
         registerInputEvents(socket, roomManager);
+        registerNetworkDiagnosticsEvents(socket);
         registerMenuBackgroundEvents(socket, io, roomManager);
 
         socket.on("disconnect", () => {
@@ -28,6 +29,45 @@ function registerSocket(io, roomManager) {
             io.emit("roomsList", buildRoomsList(roomManager));
         });
     });
+}
+
+function registerNetworkDiagnosticsEvents(socket) {
+    const diagnosticsGuard = createSocketRateGuard(socket, config.security.viewportRateLimit, () => true);
+
+    socket.on("networkDiagnostics", (rawOptions, acknowledge) => {
+        if (!diagnosticsGuard.canHandleInput()) return;
+
+        const enabled = !(rawOptions && rawOptions.enabled === false);
+        socket.data.networkDiagnosticsEnabled = enabled;
+
+        if (typeof acknowledge === "function") {
+            acknowledge({
+                enabled,
+                serverTime: Date.now(),
+                transport: getSocketTransportName(socket)
+            });
+        }
+    });
+
+    socket.on("networkDiagnosticsPing", (rawPayload, acknowledge) => {
+        if (!diagnosticsGuard.canHandleInput() || typeof acknowledge !== "function") return;
+
+        acknowledge({
+            clientSentAt: rawPayload && rawPayload.clientSentAt,
+            diagnosticsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
+            serverTime: Date.now(),
+            transport: getSocketTransportName(socket)
+        });
+    });
+}
+
+function getSocketTransportName(socket) {
+    return socket
+        && socket.conn
+        && socket.conn.transport
+        && socket.conn.transport.name
+        ? socket.conn.transport.name
+        : null;
 }
 
 function buildRoomsList(roomManager) {

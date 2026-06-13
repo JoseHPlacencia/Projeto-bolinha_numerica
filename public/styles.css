@@ -111,11 +111,6 @@ button:disabled {
     line-height: 1;
 }
 
-.logo-tag .io {
-    font-size: 55%;
-    opacity: 0.76;
-}
-
 .logo-sub {
     color: var(--muted);
     font-size: 0.78rem;

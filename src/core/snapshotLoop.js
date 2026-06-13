@@ -52,7 +52,7 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         }
 
         socket.data.snapshotState = nextSnapshotState;
-        socket.volatile.emit("gameState", snapshot);
+        emitVolatileSnapshot(socket, snapshot, "volatile");
     }
 }
 
@@ -91,7 +91,7 @@ function sendVolatileSnapshotWhileReliablePending(socket, players, territories, 
         snapshot.spectator = { followId: viewerId };
     }
     const volatileSnapshot = createVolatileSnapshotForPendingReliableState(snapshot, clientState);
-    socket.volatile.emit("gameState", volatileSnapshot);
+    emitVolatileSnapshot(socket, volatileSnapshot, "volatile-pending", socket.data.pendingReliableSnapshot);
 }
 
 function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
@@ -114,8 +114,11 @@ function filterKnownIds(ids, knownStates) {
 
 function queueReliableSnapshot(socket, snapshot, nextSnapshotState) {
     const pending = {
+        createdAt: Date.now(),
         id: getNextReliableSnapshotId(socket),
+        lastSentAt: null,
         nextRetryAt: 0,
+        sentCount: 0,
         snapshot,
         snapshotState: nextSnapshotState
     };
@@ -124,12 +127,19 @@ function queueReliableSnapshot(socket, snapshot, nextSnapshotState) {
 }
 
 function sendReliableSnapshot(socket, pending) {
-    pending.nextRetryAt = Date.now() + getReliableSnapshotRetryMs();
+    const sendType = pending.sentCount > 0 ? "reliable-retry" : "reliable";
+    pending.sentCount++;
+    pending.lastSentAt = Date.now();
+    pending.nextRetryAt = pending.lastSentAt + getReliableSnapshotRetryMs();
     const emitter = typeof socket.timeout === "function"
         ? socket.timeout(getReliableSnapshotAckTimeoutMs())
         : socket;
-    emitter.emit("gameState", pending.snapshot, (error, acknowledgement) => {
-        if (error) return;
+    emitter.emit("gameState", createSnapshotForNetworkSend(socket, pending.snapshot, sendType, pending), (error, acknowledgement) => {
+        if (error) {
+            pending.ackTimeouts = (pending.ackTimeouts || 0) + 1;
+            pending.lastAckErrorAt = Date.now();
+            return;
+        }
         acknowledgeReliableSnapshot(socket, pending.id, acknowledgement);
     });
 }
@@ -137,6 +147,7 @@ function sendReliableSnapshot(socket, pending) {
 function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { applied: true }) {
     const pending = socket.data.pendingReliableSnapshot;
     if (!pending || pending.id !== pendingId) return;
+    recordReliableSnapshotAcknowledgement(socket, pending, acknowledgement);
     if (!acknowledgement || acknowledgement.applied !== false) {
         socket.data.snapshotState = pending.snapshotState;
         socket.data.pendingReliableSnapshot = null;
@@ -150,6 +161,66 @@ function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { appl
     socket.data.snapshotState = pending.snapshotState;
     invalidateSnapshotState(socket.data.snapshotState, acknowledgement.invalidations);
     socket.data.pendingReliableSnapshot = null;
+}
+
+function emitVolatileSnapshot(socket, snapshot, sendType, pending = null) {
+    socket.volatile.emit("gameState", createSnapshotForNetworkSend(socket, snapshot, sendType, pending));
+}
+
+function createSnapshotForNetworkSend(socket, snapshot, sendType, pending = null) {
+    if (!isNetworkDiagnosticsEnabled(socket)) {
+        return snapshot;
+    }
+
+    return {
+        ...snapshot,
+        networkDiagnostics: createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending)
+    };
+}
+
+function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = null) {
+    const now = Date.now();
+    const previousSentAt = Number.isFinite(socket.data.networkDiagnosticsLastSentAt)
+        ? socket.data.networkDiagnosticsLastSentAt
+        : null;
+    const sequence = (socket.data.networkDiagnosticsSequence || 0) + 1;
+
+    socket.data.networkDiagnosticsSequence = sequence;
+    socket.data.networkDiagnosticsLastSentAt = now;
+
+    return {
+        schema: 1,
+        sequence,
+        sendType,
+        serverSentAt: now,
+        serverSendIntervalMs: previousSentAt === null ? null : now - previousSentAt,
+        snapshotTime: snapshot.time,
+        basePayloadBytes: getSnapshotPayloadBytes(snapshot),
+        playerCount: countObjectKeys(snapshot.players),
+        territoryCount: countArrayItems(snapshot.territoryIds),
+        trailCount: countArrayItems(snapshot.trailIds),
+        preserveTrails: Boolean(snapshot.preserveTrails),
+        reliablePending: Boolean(pending),
+        reliableId: pending ? pending.id : null,
+        reliableRetryCount: pending ? Math.max(0, (pending.sentCount || 1) - 1) : 0,
+        reliableAgeMs: pending && Number.isFinite(pending.createdAt) ? now - pending.createdAt : null,
+        reliableAckTimeouts: pending ? pending.ackTimeouts || 0 : 0,
+        lastReliableAck: socket.data.networkDiagnosticsLastReliableAck || null
+    };
+}
+
+function recordReliableSnapshotAcknowledgement(socket, pending, acknowledgement) {
+    const acknowledgedAt = Date.now();
+
+    socket.data.networkDiagnosticsLastReliableAck = {
+        reliableId: pending.id,
+        acknowledgedAt,
+        ackLatencyMs: Number.isFinite(pending.lastSentAt)
+            ? acknowledgedAt - pending.lastSentAt
+            : null,
+        applied: !acknowledgement || acknowledgement.applied !== false,
+        invalidations: countInvalidations(acknowledgement && acknowledgement.invalidations)
+    };
 }
 
 function invalidateSnapshotCache(socket, invalidations) {
@@ -236,6 +307,34 @@ function hasReliableTrailUpdate(trails) {
         return hasEntries(trails);
     }
     return hasFullTrailUpdate(trails);
+}
+
+function isNetworkDiagnosticsEnabled(socket) {
+    return Boolean(socket && socket.data && socket.data.networkDiagnosticsEnabled);
+}
+
+function getSnapshotPayloadBytes(snapshot) {
+    try {
+        return Buffer.byteLength(JSON.stringify(snapshot), "utf8");
+    } catch (error) {
+        return null;
+    }
+}
+
+function countObjectKeys(value) {
+    return value && typeof value === "object" ? Object.keys(value).length : 0;
+}
+
+function countArrayItems(value) {
+    return Array.isArray(value) ? value.length : 0;
+}
+
+function countInvalidations(invalidations) {
+    return {
+        playerInfo: countArrayItems(invalidations && invalidations.playerInfo),
+        territories: countArrayItems(invalidations && invalidations.territories),
+        trails: countArrayItems(invalidations && invalidations.trails)
+    };
 }
 
 module.exports = startSnapshotLoop;

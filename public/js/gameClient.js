@@ -2,6 +2,7 @@ import { createFrameMonitor, getDebugLevel } from "./debug.js";
 import { createHud } from "./hud.js";
 import { createInputControls } from "./input.js";
 import { createNumberHud } from "./numberHud.js";
+import { createNetworkDiagnostics } from "./networkDiagnostics.js";
 import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createRoomUi } from "./roomUi.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
@@ -23,6 +24,7 @@ export function startClient(gameConfig, options = {}) {
     const snapshots = createSnapshotInterpolator(gameConfig.network, {
         onResyncNeeded: () => socket.emit("snapshotResync")
     });
+    const networkDiagnostics = createNetworkDiagnostics(socket, snapshots, gameConfig.network);
     const debugLevel = getDebugLevel();
     const hud = createHud({ debugLevel });
     const numberHud = createNumberHud({
@@ -92,6 +94,7 @@ export function startClient(gameConfig, options = {}) {
     render();
 
     return {
+        networkDiagnostics,
         roomUi,
         socket
     };
