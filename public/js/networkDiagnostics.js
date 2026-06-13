@@ -258,7 +258,7 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             };
         }
 
-        if (server && server.reliablePending) {
+        if (server && isReliableBacklog(server)) {
             return {
                 reason: "reliable-snapshot-pending",
                 detail: "A reliable snapshot is pending and volatile snapshots are preserving cached state."
@@ -306,6 +306,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             averageRoundTripMs: averageFiniteValues(pings.map(sample => sample.roundTripMs)),
             maxRoundTripMs: maxFiniteValue(pings.map(sample => sample.roundTripMs))
         };
+    }
+
+    function isReliableBacklog(server) {
+        return Boolean(server && (server.reliableBacklog || server.sendType === "volatile-pending"));
     }
 
     function recordEvent(type, detail = {}) {

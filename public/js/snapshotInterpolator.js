@@ -213,10 +213,14 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             averagePayloadBytes: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.basePayloadBytes)),
             maxPayloadBytes: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.basePayloadBytes)),
             reliableRetryEvents: snapshotEvents.filter(event => event.server && event.server.sendType === "reliable-retry").length,
-            reliablePendingEvents: snapshotEvents.filter(event => event.server && event.server.reliablePending).length,
+            reliableBacklogEvents: snapshotEvents.filter(event => event.server && isReliableBacklog(event.server)).length,
             bufferSpikeEvents: snapshotEvents.filter(event => event.bufferMs >= getSlowBufferMs()).length,
             resyncEvents: networkDiagnosticsState.events.filter(event => event.type === "resyncRequested").length
         };
+    }
+
+    function isReliableBacklog(server) {
+        return Boolean(server && (server.reliableBacklog || server.sendType === "volatile-pending"));
     }
 
     function normalizeServerNetworkDiagnostics(value) {
@@ -236,6 +240,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             territoryCount: finiteOrNull(value.territoryCount),
             trailCount: finiteOrNull(value.trailCount),
             preserveTrails: Boolean(value.preserveTrails),
+            reliableInFlight: Boolean(value.reliableInFlight),
+            reliableBacklog: Boolean(value.reliableBacklog),
             reliablePending: Boolean(value.reliablePending),
             reliableId: finiteOrNull(value.reliableId),
             reliableRetryCount: finiteOrNull(value.reliableRetryCount),

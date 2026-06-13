@@ -200,6 +200,8 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         territoryCount: countArrayItems(snapshot.territoryIds),
         trailCount: countArrayItems(snapshot.trailIds),
         preserveTrails: Boolean(snapshot.preserveTrails),
+        reliableInFlight: Boolean(pending && (sendType === "reliable" || sendType === "reliable-retry")),
+        reliableBacklog: Boolean(pending && sendType === "volatile-pending"),
         reliablePending: Boolean(pending),
         reliableId: pending ? pending.id : null,
         reliableRetryCount: pending ? Math.max(0, (pending.sentCount || 1) - 1) : 0,
