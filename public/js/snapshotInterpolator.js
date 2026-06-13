@@ -426,7 +426,17 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
         const average = calculateAverage(networkState.deltas);
         const jitter = calculateStandardDeviation(networkState.deltas, average);
-        const nextBuffer = average + jitter * networkConfig.jitterMultiplier;
+        const adaptiveSamples = getAdaptiveBufferSamples(networkState.deltas, networkConfig);
+        const adaptiveAverage = calculateAverage(adaptiveSamples);
+        const adaptiveJitter = calculateStandardDeviation(adaptiveSamples, adaptiveAverage);
+        const percentileBuffer = calculatePercentile(
+            networkState.deltas,
+            getAdaptiveBufferPercentile(networkConfig)
+        );
+        const nextBuffer = Math.max(
+            percentileBuffer,
+            adaptiveAverage + adaptiveJitter * networkConfig.jitterMultiplier
+        );
 
         networkState.lastSnapshotDeltaMs = delta;
         networkState.averageSnapshotDeltaMs = average;
@@ -1863,4 +1873,84 @@ function calculateStandardDeviation(values, average) {
         .reduce((sum, value) => sum + value, 0) / values.length;
 
     return Math.sqrt(variance);
+}
+
+function getAdaptiveBufferSamples(values, config) {
+    if (!Array.isArray(values) || values.length === 0) {
+        return [0];
+    }
+
+    const minSamplesForTrim = getPositiveIntegerConfigValue(
+        config,
+        "adaptiveBufferMinSamplesForTrim",
+        10
+    );
+
+    if (values.length < minSamplesForTrim) {
+        return values;
+    }
+
+    const trimRatio = clamp(
+        getFiniteConfigNumberFromNetworkConfig(config, "adaptiveBufferTrimRatio", 0.1),
+        0,
+        0.4
+    );
+    const trimCount = Math.floor(values.length * trimRatio);
+
+    if (trimCount <= 0) {
+        return values;
+    }
+
+    return values
+        .slice()
+        .sort((first, second) => first - second)
+        .slice(0, Math.max(1, values.length - trimCount));
+}
+
+function calculatePercentile(values, percentile) {
+    if (!Array.isArray(values) || values.length === 0) {
+        return 0;
+    }
+
+    const sortedValues = values
+        .slice()
+        .sort((first, second) => first - second);
+    const safePercentile = clamp(percentile, 0, 1);
+    const index = Math.min(
+        sortedValues.length - 1,
+        Math.ceil(sortedValues.length * safePercentile) - 1
+    );
+
+    return sortedValues[Math.max(0, index)];
+}
+
+function getAdaptiveBufferPercentile(config) {
+    return clamp(
+        getFiniteConfigNumberFromNetworkConfig(config, "adaptiveBufferPercentile", 0.9),
+        0.5,
+        1
+    );
+}
+
+function getPositiveIntegerConfigValue(config, key, fallback) {
+    const value = Number(networkConfigValue(config, key));
+
+    return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function getFiniteConfigNumberFromNetworkConfig(config, key, fallback) {
+    return getFiniteConfigNumberFromValue(networkConfigValue(config, key), fallback);
+}
+
+function getFiniteConfigNumberFromValue(value, fallback) {
+    const number = Number(value);
+
+    return Number.isFinite(number) ? number : fallback;
+}
+
+function networkConfigValue(config, key) {
+    return config
+        && Object.prototype.hasOwnProperty.call(config, key)
+        ? config[key]
+        : null;
 }

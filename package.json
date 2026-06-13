@@ -9,7 +9,7 @@
     "dev": "node --watch server.js",
     "check": "npm run check:server && npm run check:client && npm run check:shared",
     "check:server": "node --check server.js && node --check src/server.js && node --check src/config/gameConfig.js && node --check src/core/roomManager.js && node --check src/core/roomSettings.js && node --check src/core/socketHandler.js && node --check src/systems/trailSystem.js && node --check src/systems/numberSystem.js && node --check src/systems/catchModeSystem.js",
-    "check:client": "node --check public/client.js && node --check public/js/gameClient.js && node --check public/js/roomUi.js && node --check public/js/snapshotInterpolator.js && node --check public/js/worldRenderer.js && node --check public/js/renderWorker.js",
+    "check:client": "node --check public/client.js && node --check public/js/gameClient.js && node --check public/js/roomUi.js && node --check public/js/snapshotInterpolator.js && node --check public/js/networkDiagnostics.js && node --check public/js/worldRenderer.js && node --check public/js/renderWorker.js",
     "check:shared": "node --check src/utils/math.js && node --check public/js/sharedMath.js"
   },
   "engines": {
