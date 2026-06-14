@@ -356,6 +356,9 @@ function cloneBotDiagnostics(botDiagnostics) {
         pendingAfter: botDiagnostics.pendingAfter,
         pendingBefore: botDiagnostics.pendingBefore,
         phases: { ...(botDiagnostics.phases || {}) },
+        selfTrailSafety: botDiagnostics.selfTrailSafety
+            ? { ...botDiagnostics.selfTrailSafety }
+            : null,
         slowestPhase: botDiagnostics.slowestPhase
             ? { ...botDiagnostics.slowestPhase }
             : null
@@ -373,7 +376,34 @@ function normalizeBotDiagnostics(botDiagnostics) {
         pendingAfter: finiteOrNull(botDiagnostics.pendingAfter),
         pendingBefore: finiteOrNull(botDiagnostics.pendingBefore),
         phases: normalizeGameLoopPhases(botDiagnostics.phases),
+        selfTrailSafety: normalizeSelfTrailSafetyDiagnostics(botDiagnostics.selfTrailSafety),
         slowestPhase: normalizeGameLoopSlowestPhase(botDiagnostics.slowestPhase)
+    };
+}
+
+function normalizeSelfTrailSafetyDiagnostics(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        budgetHitCount: finiteOrNull(diagnostics.budgetHitCount),
+        bypassCount: finiteOrNull(diagnostics.bypassCount),
+        candidateCount: finiteOrNull(diagnostics.candidateCount),
+        decisionCount: finiteOrNull(diagnostics.decisionCount),
+        evaluatedCandidateCount: finiteOrNull(diagnostics.evaluatedCandidateCount),
+        evaluatedLocalCandidateCount: finiteOrNull(diagnostics.evaluatedLocalCandidateCount),
+        filteredTrailPointCount: finiteOrNull(diagnostics.filteredTrailPointCount),
+        filteredTrailSegmentCount: finiteOrNull(diagnostics.filteredTrailSegmentCount),
+        localCandidateCount: finiteOrNull(diagnostics.localCandidateCount),
+        maxBudgetElapsedMs: finiteOrNull(diagnostics.maxBudgetElapsedMs),
+        pathEvaluationCount: finiteOrNull(diagnostics.pathEvaluationCount),
+        pointDistanceCheckCount: finiteOrNull(diagnostics.pointDistanceCheckCount),
+        sampleCount: finiteOrNull(diagnostics.sampleCount),
+        segmentCrossCheckCount: finiteOrNull(diagnostics.segmentCrossCheckCount),
+        trailPointCount: finiteOrNull(diagnostics.trailPointCount),
+        trailSegmentCount: finiteOrNull(diagnostics.trailSegmentCount),
+        unsafeTargetCount: finiteOrNull(diagnostics.unsafeTargetCount)
     };
 }
 

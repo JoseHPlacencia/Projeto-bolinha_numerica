@@ -145,7 +145,34 @@ function normalizeBotDiagnostics(diagnostics) {
         pendingAfter: finiteOrNull(diagnostics.pendingAfter),
         pendingBefore: finiteOrNull(diagnostics.pendingBefore),
         phases: normalizePhaseDurations(diagnostics.phases),
+        selfTrailSafety: normalizeSelfTrailSafetyDiagnostics(diagnostics.selfTrailSafety),
         slowestPhase: normalizeSlowestPhase(diagnostics.slowestPhase)
+    };
+}
+
+function normalizeSelfTrailSafetyDiagnostics(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        budgetHitCount: finiteOrNull(diagnostics.budgetHitCount),
+        bypassCount: finiteOrNull(diagnostics.bypassCount),
+        candidateCount: finiteOrNull(diagnostics.candidateCount),
+        decisionCount: finiteOrNull(diagnostics.decisionCount),
+        evaluatedCandidateCount: finiteOrNull(diagnostics.evaluatedCandidateCount),
+        evaluatedLocalCandidateCount: finiteOrNull(diagnostics.evaluatedLocalCandidateCount),
+        filteredTrailPointCount: finiteOrNull(diagnostics.filteredTrailPointCount),
+        filteredTrailSegmentCount: finiteOrNull(diagnostics.filteredTrailSegmentCount),
+        localCandidateCount: finiteOrNull(diagnostics.localCandidateCount),
+        maxBudgetElapsedMs: finiteOrNull(diagnostics.maxBudgetElapsedMs),
+        pathEvaluationCount: finiteOrNull(diagnostics.pathEvaluationCount),
+        pointDistanceCheckCount: finiteOrNull(diagnostics.pointDistanceCheckCount),
+        sampleCount: finiteOrNull(diagnostics.sampleCount),
+        segmentCrossCheckCount: finiteOrNull(diagnostics.segmentCrossCheckCount),
+        trailPointCount: finiteOrNull(diagnostics.trailPointCount),
+        trailSegmentCount: finiteOrNull(diagnostics.trailSegmentCount),
+        unsafeTargetCount: finiteOrNull(diagnostics.unsafeTargetCount)
     };
 }
 

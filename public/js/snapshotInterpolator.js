@@ -226,6 +226,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxGameLoopBotsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.bots)),
             maxBotDecisionMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.decisions)),
             maxBotSelfTrailSafetyMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.selfTrailSafety)),
+            maxBotSelfTrailBudgetHits: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.budgetHitCount)),
+            maxBotSelfTrailBudgetElapsedMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.maxBudgetElapsedMs)),
+            maxBotSelfTrailCandidates: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.candidateCount)),
+            maxBotSelfTrailEvaluatedCandidates: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.evaluatedCandidateCount)),
+            maxBotSelfTrailFilteredPoints: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.filteredTrailPointCount)),
+            maxBotSelfTrailFilteredSegments: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.filteredTrailSegmentCount)),
+            maxBotSelfTrailSamples: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.sampleCount)),
             maxBotTargetingMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.targeting)),
             maxGameLoopNumberEventsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.numberEvents)),
             maxTerritoryPayloadCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount)),
@@ -315,7 +322,34 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             pendingAfter: finiteOrNull(value.pendingAfter),
             pendingBefore: finiteOrNull(value.pendingBefore),
             phases: normalizeGameLoopPhases(value.phases),
+            selfTrailSafety: normalizeSelfTrailSafetyDiagnostics(value.selfTrailSafety),
             slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase)
+        };
+    }
+
+    function normalizeSelfTrailSafetyDiagnostics(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            budgetHitCount: finiteOrNull(value.budgetHitCount),
+            bypassCount: finiteOrNull(value.bypassCount),
+            candidateCount: finiteOrNull(value.candidateCount),
+            decisionCount: finiteOrNull(value.decisionCount),
+            evaluatedCandidateCount: finiteOrNull(value.evaluatedCandidateCount),
+            evaluatedLocalCandidateCount: finiteOrNull(value.evaluatedLocalCandidateCount),
+            filteredTrailPointCount: finiteOrNull(value.filteredTrailPointCount),
+            filteredTrailSegmentCount: finiteOrNull(value.filteredTrailSegmentCount),
+            localCandidateCount: finiteOrNull(value.localCandidateCount),
+            maxBudgetElapsedMs: finiteOrNull(value.maxBudgetElapsedMs),
+            pathEvaluationCount: finiteOrNull(value.pathEvaluationCount),
+            pointDistanceCheckCount: finiteOrNull(value.pointDistanceCheckCount),
+            sampleCount: finiteOrNull(value.sampleCount),
+            segmentCrossCheckCount: finiteOrNull(value.segmentCrossCheckCount),
+            trailPointCount: finiteOrNull(value.trailPointCount),
+            trailSegmentCount: finiteOrNull(value.trailSegmentCount),
+            unsafeTargetCount: finiteOrNull(value.unsafeTargetCount)
         };
     }
 

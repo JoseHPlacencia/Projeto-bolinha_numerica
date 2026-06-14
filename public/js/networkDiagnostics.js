@@ -140,6 +140,7 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const gameLoopPhases = gameLoop && gameLoop.phases || {};
         const botDiagnostics = gameLoop && gameLoop.bot;
         const botPhases = botDiagnostics && botDiagnostics.phases || {};
+        const botSelfTrail = botDiagnostics && botDiagnostics.selfTrailSafety || {};
         const row = {
             diagnosis: data.diagnosis.reason,
             bufferMs: latestSnapshot && round(latestSnapshot.bufferMs),
@@ -158,6 +159,13 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             botPending: botDiagnostics && botDiagnostics.pendingAfter,
             botTargetingMs: round(botPhases.targeting),
             botSelfTrailMs: round(botPhases.selfTrailSafety),
+            botSelfTrailBudgetHits: botSelfTrail.budgetHitCount,
+            botSelfTrailBudgetMs: round(botSelfTrail.maxBudgetElapsedMs),
+            botSelfTrailCandidates: botSelfTrail.candidateCount,
+            botSelfTrailEvaluated: botSelfTrail.evaluatedCandidateCount,
+            botSelfTrailSamples: botSelfTrail.sampleCount,
+            botSelfTrailFilteredPoints: botSelfTrail.filteredTrailPointCount,
+            botSelfTrailFilteredSegments: botSelfTrail.filteredTrailSegmentCount,
             numbersMs: round(gameLoopPhases.numbers),
             buildMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.snapshotBuildMs),
             payloadMeasureMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.payloadMeasureMs),
@@ -198,6 +206,13 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 botSlowest: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.slowestPhase && event.server.gameLoop.bot.slowestPhase.name,
                 botTargetingMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && round(event.server.gameLoop.bot.phases.targeting),
                 botSelfTrailMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && round(event.server.gameLoop.bot.phases.selfTrailSafety),
+                botSelfTrailBudgetHits: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.budgetHitCount,
+                botSelfTrailBudgetMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && round(event.server.gameLoop.bot.selfTrailSafety.maxBudgetElapsedMs),
+                botSelfTrailCandidates: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.candidateCount,
+                botSelfTrailEvaluated: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.evaluatedCandidateCount,
+                botSelfTrailSamples: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.sampleCount,
+                botSelfTrailFilteredPoints: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.filteredTrailPointCount,
+                botSelfTrailFilteredSegments: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.filteredTrailSegmentCount,
                 numbersMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.numbers),
                 buildMs: event.server && round(event.server.snapshotBuildMs),
                 payloadMeasureMs: event.server && round(event.server.payloadMeasureMs),
