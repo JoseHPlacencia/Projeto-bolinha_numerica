@@ -32,6 +32,7 @@ const trailSides = Object.freeze({
 function createTrailUpdateDiagnostics() {
     return {
         activeTrailPlayers: 0,
+        captureApply: createCaptureApplyDiagnostics(),
         captureAttempts: 0,
         captureChangedPlayerCount: 0,
         captures: 0,
@@ -48,6 +49,33 @@ function createTrailUpdateDiagnostics() {
         slowestPhase: null,
         trailOwnerChecks: 0,
         trailOwnerHits: 0
+    };
+}
+
+function createCaptureApplyDiagnostics() {
+    return {
+        boundsOverlapCount: 0,
+        boundsRejectedCount: 0,
+        calls: 0,
+        candidateCount: 0,
+        changedTerritoryCount: 0,
+        emptyCapturedBoundsCount: 0,
+        maxCapturedArea: 0,
+        maxCapturedBoundsArea: 0,
+        maxCapturedPointCount: 0,
+        maxOwnerArea: 0,
+        maxOwnerPointCount: 0,
+        maxTerritoryCount: 0,
+        missingOwnerTerritoryCount: 0,
+        overlapCount: 0,
+        overlapRejectedCount: 0,
+        ownerChangedCount: 0,
+        slowestOverlap: null,
+        slowestSubtract: null,
+        subtractChangedCount: 0,
+        subtractCount: 0,
+        subtractPointCount: 0,
+        subtractResultPointCount: 0
     };
 }
 

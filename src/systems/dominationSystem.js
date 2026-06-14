@@ -46,6 +46,7 @@ function captureClosedTrail(player, territories, players, context = {}) {
     ));
     const changedPlayerIds = measureTrailPhase(diagnostics, "captureApplyTerritory", () => (
         applyCapturedPolygon(territories, player.id, newlyCapturedPolygon, {
+            diagnostics,
             ownerPolygon
         })
     ));
