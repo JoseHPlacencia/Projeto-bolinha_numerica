@@ -4,29 +4,52 @@ const { updateTrails } = require("../systems/trailSystem");
 const { handleNumberCollected } = require("../systems/catchModeSystem");
 const { getHighResolutionTime } = require("../utils/time");
 
-function startGameLoop(players, territories, io, roomCode, numberSystem, botManager = null, runtimeConfig = null) {
+function startGameLoop(players, territories, io, roomCode, numberSystem, botManager = null, runtimeConfig = null, diagnostics = null) {
     const intervalMs = 1000 / config.loop.tickRate;
     let previousTime = getHighResolutionTime();
+    let tick = 0;
+
+    initializeGameLoopDiagnostics(diagnostics, intervalMs);
 
     return setInterval(() => {
         const now = getHighResolutionTime();
+        const tickStartedAt = now;
+        const tickIntervalMs = now - previousTime;
+        const phaseDurations = {};
         const deltaTime = Math.min((now - previousTime) / 1000, config.loop.maxDeltaTime);
         previousTime = now;
+        tick++;
 
-        if (botManager) {
-            botManager.update(Date.now());
-        }
+        measurePhase(phaseDurations, "bots", () => {
+            if (botManager) {
+                botManager.update(Date.now());
+            }
+        });
 
-        updatePlayers(players, deltaTime, runtimeConfig);
-        updateTrails(players, territories, { io, roomCode });
+        measurePhase(phaseDurations, "movement", () => {
+            updatePlayers(players, deltaTime, runtimeConfig);
+        });
 
-        const result = numberSystem
-            ? numberSystem.update(Date.now())
-            : { collisions: [], themeChanged: false };
+        measurePhase(phaseDurations, "trails", () => {
+            updateTrails(players, territories, { io, roomCode });
+        });
 
-        if (result.collisions.length > 0 && io) {
-            for (const col of result.collisions) {
-                handleNumberCollected(players, territories, col, { io, roomCode });
+        const result = measurePhase(phaseDurations, "numbers", () => (
+            numberSystem
+                ? numberSystem.update(Date.now())
+                : { collisions: [], themeChanged: false }
+        ));
+        const collisions = Array.isArray(result && result.collisions) ? result.collisions : [];
+
+        measurePhase(phaseDurations, "numberEvents", () => {
+            if (collisions.length <= 0 || !io) {
+                return;
+            }
+
+            for (const col of collisions) {
+                measurePhase(phaseDurations, "numberCollected", () => {
+                    handleNumberCollected(players, territories, col, { io, roomCode });
+                }, true);
 
                 const socket = io.sockets.sockets.get(col.playerId);
                 if (socket) {
@@ -44,12 +67,124 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
                     });
                 }
             }
+        });
+
+        measurePhase(phaseDurations, "themeEvents", () => {
+            if (result && result.themeChanged && io && roomCode) {
+                io.to(roomCode).emit("themeChanged");
+            }
+        });
+
+        updateGameLoopDiagnostics(diagnostics, {
+            collisionCount: collisions.length,
+            deltaTimeMs: deltaTime * 1000,
+            expectedIntervalMs: intervalMs,
+            numberCount: getNumberCount(numberSystem),
+            phaseDurations,
+            playerCount: players.size,
+            roomCode,
+            territoryCount: territories.size,
+            themeChanged: Boolean(result && result.themeChanged),
+            tick,
+            tickDurationMs: getHighResolutionTime() - tickStartedAt,
+            tickDriftMs: tickIntervalMs - intervalMs,
+            tickIntervalMs
+        });
+    }, intervalMs);
+}
+
+function initializeGameLoopDiagnostics(diagnostics, expectedIntervalMs) {
+    if (!diagnostics) {
+        return;
+    }
+
+    diagnostics.schema = 1;
+    diagnostics.expectedIntervalMs = expectedIntervalMs;
+    diagnostics.tick = 0;
+    diagnostics.tickIntervalMs = null;
+    diagnostics.tickDriftMs = null;
+    diagnostics.tickDurationMs = null;
+    diagnostics.phases = {};
+    diagnostics.slowestPhase = null;
+}
+
+function updateGameLoopDiagnostics(diagnostics, sample) {
+    if (!diagnostics) {
+        return;
+    }
+
+    diagnostics.schema = 1;
+    diagnostics.updatedAt = Date.now();
+    diagnostics.roomCode = sample.roomCode;
+    diagnostics.tick = sample.tick;
+    diagnostics.expectedIntervalMs = sample.expectedIntervalMs;
+    diagnostics.tickIntervalMs = sample.tickIntervalMs;
+    diagnostics.tickDriftMs = sample.tickDriftMs;
+    diagnostics.tickDurationMs = sample.tickDurationMs;
+    diagnostics.deltaTimeMs = sample.deltaTimeMs;
+    diagnostics.playerCount = sample.playerCount;
+    diagnostics.territoryCount = sample.territoryCount;
+    diagnostics.numberCount = sample.numberCount;
+    diagnostics.collisionCount = sample.collisionCount;
+    diagnostics.themeChanged = sample.themeChanged;
+    diagnostics.phases = roundPhaseDurations(sample.phaseDurations);
+    diagnostics.slowestPhase = getSlowestPhase(diagnostics.phases);
+}
+
+function measurePhase(phaseDurations, name, callback, accumulate = false) {
+    const startedAt = getHighResolutionTime();
+
+    try {
+        return callback();
+    } finally {
+        const durationMs = getHighResolutionTime() - startedAt;
+        phaseDurations[name] = accumulate
+            ? (phaseDurations[name] || 0) + durationMs
+            : durationMs;
+    }
+}
+
+function roundPhaseDurations(phaseDurations) {
+    const rounded = {};
+
+    for (const [name, durationMs] of Object.entries(phaseDurations || {})) {
+        rounded[name] = roundToMilliseconds(durationMs);
+    }
+
+    return rounded;
+}
+
+function getSlowestPhase(phaseDurations) {
+    let slowest = null;
+
+    for (const [name, durationMs] of Object.entries(phaseDurations || {})) {
+        if (!Number.isFinite(durationMs)) {
+            continue;
         }
 
-        if (result.themeChanged && io && roomCode) {
-            io.to(roomCode).emit("themeChanged");
+        if (!slowest || durationMs > slowest.durationMs) {
+            slowest = {
+                name,
+                durationMs
+            };
         }
-    }, intervalMs);
+    }
+
+    return slowest;
+}
+
+function getNumberCount(numberSystem) {
+    if (!numberSystem || typeof numberSystem.getNumbersMap !== "function") {
+        return null;
+    }
+
+    const numbers = numberSystem.getNumbersMap();
+
+    return numbers && typeof numbers.size === "number" ? numbers.size : null;
+}
+
+function roundToMilliseconds(value) {
+    return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null;
 }
 
 module.exports = { startGameLoop };

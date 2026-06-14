@@ -218,6 +218,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxSnapshotBuildMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBuildMs)),
             averagePayloadMeasureMs: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.payloadMeasureMs)),
             maxPayloadMeasureMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.payloadMeasureMs)),
+            averageGameLoopDurationMs: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.tickDurationMs)),
+            maxGameLoopDurationMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.tickDurationMs)),
+            averageGameLoopDriftMs: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.tickDriftMs)),
+            maxGameLoopDriftMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.tickDriftMs)),
+            maxGameLoopTrailsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.trails)),
+            maxGameLoopBotsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.bots)),
+            maxGameLoopNumberEventsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.numberEvents)),
             maxTerritoryPayloadCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount)),
             maxTerritoryOperationCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount)),
             maxTrailPatchPointCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount)),
@@ -247,6 +254,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             loopExpectedIntervalMs: finiteOrNull(value.loopExpectedIntervalMs),
             loopIntervalMs: finiteOrNull(value.loopIntervalMs),
             loopDriftMs: finiteOrNull(value.loopDriftMs),
+            gameLoop: normalizeGameLoopDiagnostics(value.gameLoop),
             snapshotBuildMs: finiteOrNull(value.snapshotBuildMs),
             snapshotTime: finiteOrNull(value.snapshotTime),
             basePayloadBytes: finiteOrNull(value.basePayloadBytes),
@@ -264,6 +272,52 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             reliableAgeMs: finiteOrNull(value.reliableAgeMs),
             reliableAckTimeouts: finiteOrNull(value.reliableAckTimeouts),
             lastReliableAck: normalizeReliableAck(value.lastReliableAck)
+        };
+    }
+
+    function normalizeGameLoopDiagnostics(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            schema: value.schema,
+            updatedAt: finiteOrNull(value.updatedAt),
+            roomCode: typeof value.roomCode === "string" ? value.roomCode : null,
+            tick: finiteOrNull(value.tick),
+            expectedIntervalMs: finiteOrNull(value.expectedIntervalMs),
+            tickIntervalMs: finiteOrNull(value.tickIntervalMs),
+            tickDriftMs: finiteOrNull(value.tickDriftMs),
+            tickDurationMs: finiteOrNull(value.tickDurationMs),
+            deltaTimeMs: finiteOrNull(value.deltaTimeMs),
+            playerCount: finiteOrNull(value.playerCount),
+            territoryCount: finiteOrNull(value.territoryCount),
+            numberCount: finiteOrNull(value.numberCount),
+            collisionCount: finiteOrNull(value.collisionCount),
+            themeChanged: Boolean(value.themeChanged),
+            phases: normalizeGameLoopPhases(value.phases),
+            slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase)
+        };
+    }
+
+    function normalizeGameLoopPhases(value) {
+        const phases = {};
+
+        for (const [name, durationMs] of Object.entries(value || {})) {
+            phases[name] = finiteOrNull(durationMs);
+        }
+
+        return phases;
+    }
+
+    function normalizeGameLoopSlowestPhase(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            name: typeof value.name === "string" ? value.name : null,
+            durationMs: finiteOrNull(value.durationMs)
         };
     }
 

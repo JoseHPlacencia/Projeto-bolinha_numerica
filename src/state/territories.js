@@ -2,6 +2,7 @@ const config = require("../config/gameConfig");
 const {
     calculatePolygonArea,
     createCirclePolygon,
+    getPolygonBounds,
     isPointInPolygon,
     serializePolygon,
     subtractPolygon,
@@ -73,8 +74,14 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         changedPlayerIds.add(ownerId);
     }
 
+    const capturedBounds = getPolygonBounds(capturedPolygon);
+
     for (const [playerId, otherTerritory] of territories.entries()) {
         if (playerId === ownerId) {
+            continue;
+        }
+
+        if (!capturedBounds || !boundsOverlap(getPolygonBounds(otherTerritory.polygon), capturedBounds)) {
             continue;
         }
 
@@ -86,6 +93,15 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
     }
 
     return changedPlayerIds;
+}
+
+function boundsOverlap(first, second) {
+    return first
+        && second
+        && first.minX <= second.maxX
+        && first.maxX >= second.minX
+        && first.minY <= second.maxY
+        && first.maxY >= second.minY;
 }
 
 function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolygon) {

@@ -55,6 +55,9 @@ function createRoom(io, options = {}) {
         createdAt: Date.now(),
         lastActivity: Date.now(),
         difficulty: difficultyKey,
+        diagnostics: {
+            gameLoop: {}
+        },
         gameLoopInterval: null,
         hiddenFromList: Boolean(options.hiddenFromList),
         snapshotLoopInterval: null,
@@ -91,8 +94,8 @@ function createRoom(io, options = {}) {
         runtimeConfig
     });
     room.botManager.ensureBots();
-    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem, room.botManager, runtimeConfig);
-    room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig);
+    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem, room.botManager, runtimeConfig, room.diagnostics.gameLoop);
+    room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig, room.diagnostics);
 
     rooms.set(roomCode, room);
     return { success: true, room };

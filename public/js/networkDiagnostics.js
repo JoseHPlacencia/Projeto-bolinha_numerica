@@ -3,6 +3,7 @@ const DEFAULT_PING_INTERVAL_MS = 1000;
 const DEFAULT_SLOW_BUFFER_MS = 150;
 const DEFAULT_SLOW_SERVER_INTERVAL_MS = 80;
 const DEFAULT_SLOW_LOOP_DRIFT_MS = 40;
+const DEFAULT_SLOW_GAME_LOOP_MS = 12;
 const DEFAULT_SLOW_SNAPSHOT_BUILD_MS = 16;
 const DEFAULT_SLOW_PAYLOAD_MEASURE_MS = 8;
 const DEFAULT_LARGE_PAYLOAD_BYTES = 10000;
@@ -135,6 +136,8 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const latestSnapshot = data.snapshots && data.snapshots.current
             ? data.snapshots.current.lastSnapshot
             : null;
+        const gameLoop = latestSnapshot && latestSnapshot.server && latestSnapshot.server.gameLoop;
+        const gameLoopPhases = gameLoop && gameLoop.phases || {};
         const row = {
             diagnosis: data.diagnosis.reason,
             bufferMs: latestSnapshot && round(latestSnapshot.bufferMs),
@@ -144,6 +147,12 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             sendType: latestSnapshot && latestSnapshot.server && latestSnapshot.server.sendType,
             serverIntervalMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.serverSendIntervalMs),
             loopDriftMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.loopDriftMs),
+            gameLoopMs: gameLoop && round(gameLoop.tickDurationMs),
+            gameLoopDriftMs: gameLoop && round(gameLoop.tickDriftMs),
+            slowestPhase: gameLoop && gameLoop.slowestPhase && gameLoop.slowestPhase.name,
+            trailsMs: round(gameLoopPhases.trails),
+            botsMs: round(gameLoopPhases.bots),
+            numbersMs: round(gameLoopPhases.numbers),
             buildMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.snapshotBuildMs),
             payloadMeasureMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.payloadMeasureMs),
             payloadBytes: latestSnapshot && latestSnapshot.server && latestSnapshot.server.basePayloadBytes,
@@ -173,6 +182,12 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 sendType: event.server && event.server.sendType,
                 serverIntervalMs: event.server && round(event.server.serverSendIntervalMs),
                 loopDriftMs: event.server && round(event.server.loopDriftMs),
+                gameLoopMs: event.server && event.server.gameLoop && round(event.server.gameLoop.tickDurationMs),
+                gameLoopDriftMs: event.server && event.server.gameLoop && round(event.server.gameLoop.tickDriftMs),
+                slowestPhase: event.server && event.server.gameLoop && event.server.gameLoop.slowestPhase && event.server.gameLoop.slowestPhase.name,
+                trailsMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.trails),
+                botsMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.bots),
+                numbersMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.numbers),
                 buildMs: event.server && round(event.server.snapshotBuildMs),
                 payloadMeasureMs: event.server && round(event.server.payloadMeasureMs),
                 payloadBytes: event.server && event.server.basePayloadBytes,
@@ -262,9 +277,11 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const slowBufferMs = getPositiveNumber(networkConfig.diagnosticsSlowBufferMs, DEFAULT_SLOW_BUFFER_MS);
         const slowServerIntervalMs = getPositiveNumber(networkConfig.diagnosticsSlowServerIntervalMs, DEFAULT_SLOW_SERVER_INTERVAL_MS);
         const slowLoopDriftMs = getPositiveNumber(networkConfig.diagnosticsSlowLoopDriftMs, DEFAULT_SLOW_LOOP_DRIFT_MS);
+        const slowGameLoopMs = getPositiveNumber(networkConfig.diagnosticsSlowGameLoopMs, DEFAULT_SLOW_GAME_LOOP_MS);
         const slowSnapshotBuildMs = getPositiveNumber(networkConfig.diagnosticsSlowSnapshotBuildMs, DEFAULT_SLOW_SNAPSHOT_BUILD_MS);
         const slowPayloadMeasureMs = getPositiveNumber(networkConfig.diagnosticsSlowPayloadMeasureMs, DEFAULT_SLOW_PAYLOAD_MEASURE_MS);
         const largePayloadBytes = getPositiveNumber(networkConfig.diagnosticsLargePayloadBytes, DEFAULT_LARGE_PAYLOAD_BYTES);
+        const gameLoop = server && server.gameLoop;
 
         if (!latest) {
             return {
@@ -284,6 +301,20 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             return {
                 reason: "reliable-snapshot-pending",
                 detail: "A reliable snapshot is pending and volatile snapshots are preserving cached state."
+            };
+        }
+
+        if (gameLoop && gameLoop.tickDurationMs >= slowGameLoopMs) {
+            return {
+                reason: "server-game-loop-work",
+                detail: createGameLoopDiagnosisDetail(gameLoop)
+            };
+        }
+
+        if (server && server.loopDriftMs >= slowLoopDriftMs && gameLoop && gameLoop.tickDriftMs >= slowLoopDriftMs) {
+            return {
+                reason: "server-event-loop-drift",
+                detail: createGameLoopDriftDetail(gameLoop)
             };
         }
 
@@ -357,6 +388,26 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             reason: "network-stable",
             detail: "Latest network samples are within the configured thresholds."
         };
+    }
+
+    function createGameLoopDiagnosisDetail(gameLoop) {
+        const slowestPhase = gameLoop && gameLoop.slowestPhase;
+
+        if (!slowestPhase || !slowestPhase.name) {
+            return "Server game loop work exceeded the expected per-tick budget.";
+        }
+
+        return `Server game loop exceeded budget; slowest phase: ${slowestPhase.name} (${round(slowestPhase.durationMs)}ms).`;
+    }
+
+    function createGameLoopDriftDetail(gameLoop) {
+        const slowestPhase = gameLoop && gameLoop.slowestPhase;
+
+        if (!slowestPhase || !slowestPhase.name) {
+            return "Server game loop tick drift was high; another synchronous task may be blocking the event loop.";
+        }
+
+        return `Server game loop tick drift was high; last slowest phase: ${slowestPhase.name} (${round(slowestPhase.durationMs)}ms).`;
     }
 
     function createPingSummary() {

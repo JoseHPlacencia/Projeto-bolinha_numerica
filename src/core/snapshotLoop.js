@@ -6,7 +6,7 @@ const {
     createSnapshot
 } = require("./snapshotSerializer");
 
-function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null) {
+function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null, roomDiagnostics = null) {
     const intervalMs = 1000 / config.loop.snapshotRate;
     const loopDiagnostics = {
         expectedIntervalMs: intervalMs,
@@ -27,11 +27,11 @@ function startSnapshotLoop(io, players, territories, roomCode, numberSystem, run
             : null;
         loopDiagnostics.lastTickAt = tickAt;
 
-        sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig, loopDiagnostics);
+        sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig, loopDiagnostics, roomDiagnostics);
     }, intervalMs);
 }
 
-function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null, loopDiagnostics = null) {
+function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
     for (const socket of io.sockets.sockets.values()) {
         const isPlayerSocket = roomCode && socket.data.roomCode === roomCode && players.has(socket.id);
         const isSpectatorSocket = roomCode && socket.data.spectatorRoomCode === roomCode;
@@ -53,7 +53,7 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         }
 
         if (retryPendingReliableSnapshot(socket)) {
-            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig, loopDiagnostics);
+            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig, loopDiagnostics, roomDiagnostics);
             continue;
         }
 
@@ -68,7 +68,7 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
             isNetworkDiagnosticsEnabled(socket)
         );
         const snapshot = measuredSnapshot.snapshot;
-        const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics);
+        const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDiagnostics);
 
         if (isSpectatorSocket) {
             snapshot.spectator = { followId: viewerId };
@@ -110,7 +110,7 @@ function retryPendingReliableSnapshot(socket) {
     return true;
 }
 
-function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig = null, loopDiagnostics = null) {
+function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
     if (config.network.volatileSnapshotsWhileReliablePendingEnabled === false) return;
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
@@ -124,7 +124,7 @@ function sendVolatileSnapshotWhileReliablePending(socket, players, territories, 
         isNetworkDiagnosticsEnabled(socket)
     );
     const snapshot = measuredSnapshot.snapshot;
-    const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics);
+    const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDiagnostics);
 
     if (socket.data && socket.data.spectatorRoomCode) {
         snapshot.spectator = { followId: viewerId };
@@ -239,6 +239,7 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         loopExpectedIntervalMs: finiteOrNull(sendDiagnostics && sendDiagnostics.loopExpectedIntervalMs),
         loopIntervalMs: finiteOrNull(sendDiagnostics && sendDiagnostics.loopIntervalMs),
         loopDriftMs: finiteOrNull(sendDiagnostics && sendDiagnostics.loopDriftMs),
+        gameLoop: normalizeGameLoopDiagnostics(sendDiagnostics && sendDiagnostics.gameLoop),
         snapshotBuildMs: finiteOrNull(sendDiagnostics && sendDiagnostics.snapshotBuildMs),
         snapshotTime: snapshot.time,
         basePayloadBytes: payloadMeasurement.bytes,
@@ -269,7 +270,7 @@ function createMeasuredSnapshot(players, territories, viewerId, clientState, num
     };
 }
 
-function createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics) {
+function createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDiagnostics) {
     if (!measuredSnapshot || !Number.isFinite(measuredSnapshot.buildMs)) {
         return null;
     }
@@ -285,7 +286,81 @@ function createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics) {
         loopDriftMs: loopDiagnostics && Number.isFinite(loopDiagnostics.tickDriftMs)
             ? loopDiagnostics.tickDriftMs
             : null,
+        gameLoop: cloneGameLoopDiagnostics(roomDiagnostics && roomDiagnostics.gameLoop),
         snapshotBuildMs: measuredSnapshot.buildMs
+    };
+}
+
+function cloneGameLoopDiagnostics(gameLoop) {
+    if (!gameLoop || typeof gameLoop !== "object") {
+        return null;
+    }
+
+    return {
+        schema: gameLoop.schema,
+        updatedAt: gameLoop.updatedAt,
+        roomCode: gameLoop.roomCode,
+        tick: gameLoop.tick,
+        expectedIntervalMs: gameLoop.expectedIntervalMs,
+        tickIntervalMs: gameLoop.tickIntervalMs,
+        tickDriftMs: gameLoop.tickDriftMs,
+        tickDurationMs: gameLoop.tickDurationMs,
+        deltaTimeMs: gameLoop.deltaTimeMs,
+        playerCount: gameLoop.playerCount,
+        territoryCount: gameLoop.territoryCount,
+        numberCount: gameLoop.numberCount,
+        collisionCount: gameLoop.collisionCount,
+        themeChanged: gameLoop.themeChanged,
+        phases: { ...(gameLoop.phases || {}) },
+        slowestPhase: gameLoop.slowestPhase
+            ? { ...gameLoop.slowestPhase }
+            : null
+    };
+}
+
+function normalizeGameLoopDiagnostics(gameLoop) {
+    if (!gameLoop || typeof gameLoop !== "object") {
+        return null;
+    }
+
+    return {
+        schema: gameLoop.schema,
+        updatedAt: finiteOrNull(gameLoop.updatedAt),
+        roomCode: typeof gameLoop.roomCode === "string" ? gameLoop.roomCode : null,
+        tick: finiteOrNull(gameLoop.tick),
+        expectedIntervalMs: finiteOrNull(gameLoop.expectedIntervalMs),
+        tickIntervalMs: finiteOrNull(gameLoop.tickIntervalMs),
+        tickDriftMs: finiteOrNull(gameLoop.tickDriftMs),
+        tickDurationMs: finiteOrNull(gameLoop.tickDurationMs),
+        deltaTimeMs: finiteOrNull(gameLoop.deltaTimeMs),
+        playerCount: finiteOrNull(gameLoop.playerCount),
+        territoryCount: finiteOrNull(gameLoop.territoryCount),
+        numberCount: finiteOrNull(gameLoop.numberCount),
+        collisionCount: finiteOrNull(gameLoop.collisionCount),
+        themeChanged: Boolean(gameLoop.themeChanged),
+        phases: normalizeGameLoopPhases(gameLoop.phases),
+        slowestPhase: normalizeGameLoopSlowestPhase(gameLoop.slowestPhase)
+    };
+}
+
+function normalizeGameLoopPhases(phases) {
+    const normalized = {};
+
+    for (const [name, durationMs] of Object.entries(phases || {})) {
+        normalized[name] = finiteOrNull(durationMs);
+    }
+
+    return normalized;
+}
+
+function normalizeGameLoopSlowestPhase(slowestPhase) {
+    if (!slowestPhase || typeof slowestPhase !== "object") {
+        return null;
+    }
+
+    return {
+        name: typeof slowestPhase.name === "string" ? slowestPhase.name : null,
+        durationMs: finiteOrNull(slowestPhase.durationMs)
     };
 }
 
