@@ -115,7 +115,7 @@ function getPointPolygonDistance(polygon, point) {
 }
 
 function calculatePolygonArea(polygon) {
-    if (!polygon[0]) {
+    if (!polygon || !polygon[0]) {
         return 0;
     }
 
@@ -160,7 +160,7 @@ function serializePolygon(polygon) {
 }
 
 function getPolygonBounds(polygon) {
-    const ring = getOpenRing(polygon[0]);
+    const ring = getOpenRing(polygon && polygon[0]);
 
     if (ring.length === 0) {
         return null;
@@ -184,6 +184,82 @@ function getPolygonBounds(polygon) {
         maxX,
         maxY
     };
+}
+
+function doBoundsOverlap(first, second, padding = 0) {
+    return first
+        && second
+        && first.minX <= second.maxX + padding
+        && first.maxX >= second.minX - padding
+        && first.minY <= second.maxY + padding
+        && first.maxY >= second.minY - padding;
+}
+
+function doBoundsContainPoint(bounds, x, y, padding = 0) {
+    return Boolean(
+        bounds
+        && Number.isFinite(x)
+        && Number.isFinite(y)
+        && x >= bounds.minX - padding
+        && x <= bounds.maxX + padding
+        && y >= bounds.minY - padding
+        && y <= bounds.maxY + padding
+    );
+}
+
+function doPolygonsOverlap(first, second, firstBounds = null, secondBounds = null) {
+    if (!hasPolygon(first) || !hasPolygon(second)) {
+        return false;
+    }
+
+    const resolvedFirstBounds = firstBounds || getPolygonBounds(first);
+    const resolvedSecondBounds = secondBounds || getPolygonBounds(second);
+
+    if (!doBoundsOverlap(resolvedFirstBounds, resolvedSecondBounds)) {
+        return false;
+    }
+
+    const firstRing = getOpenRing(first[0]);
+    const secondRing = getOpenRing(second[0]);
+
+    if (firstRing.some(([x, y]) => isPointInPolygon(second, x, y))) {
+        return true;
+    }
+
+    if (secondRing.some(([x, y]) => isPointInPolygon(first, x, y))) {
+        return true;
+    }
+
+    return doPolygonBoundariesIntersect(firstRing, secondRing);
+}
+
+function doPolygonBoundariesIntersect(firstRing, secondRing) {
+    for (let firstIndex = 0; firstIndex < firstRing.length; firstIndex++) {
+        const firstStart = firstRing[firstIndex];
+        const firstEnd = firstRing[(firstIndex + 1) % firstRing.length];
+
+        for (let secondIndex = 0; secondIndex < secondRing.length; secondIndex++) {
+            const secondStart = secondRing[secondIndex];
+            const secondEnd = secondRing[(secondIndex + 1) % secondRing.length];
+
+            if (!doCoordinateSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd)) {
+                continue;
+            }
+
+            if (segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function doCoordinateSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
+    return Math.max(Math.min(firstStart[0], firstEnd[0]), Math.min(secondStart[0], secondEnd[0]))
+        <= Math.min(Math.max(firstStart[0], firstEnd[0]), Math.max(secondStart[0], secondEnd[0])) + geometryEpsilon
+        && Math.max(Math.min(firstStart[1], firstEnd[1]), Math.min(secondStart[1], secondEnd[1]))
+        <= Math.min(Math.max(firstStart[1], firstEnd[1]), Math.max(secondStart[1], secondEnd[1])) + geometryEpsilon;
 }
 
 function findSegmentPolygonBoundaryContact(polygon, startPoint, endPoint) {
@@ -605,6 +681,9 @@ module.exports = {
     createCirclePolygon,
     createKnownSimplePolygonFromPoints,
     createPolygonFromPoints,
+    doBoundsContainPoint,
+    doBoundsOverlap,
+    doPolygonsOverlap,
     findClosestPolygonBoundaryContact,
     findSegmentPolygonBoundaryContact,
     getPolygonBounds,

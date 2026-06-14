@@ -7,7 +7,10 @@ const { getHighResolutionTime } = require("../utils/time");
 const {
     calculatePolygonArea,
     createKnownSimplePolygonFromPoints,
+    doBoundsContainPoint,
+    doBoundsOverlap,
     findClosestPolygonBoundaryContact,
+    getPolygonBounds,
     isPointInPolygon,
     subtractPolygon
 } = require("../utils/geometry");
@@ -125,7 +128,9 @@ function createNewlyCapturedPolygon(capture, previousTerritory) {
 }
 
 function damagePlayersInsideCapturedPolygon(players, territories, attacker, capturedPolygon, context) {
-    if (getPolygonArea(capturedPolygon) <= geometryEpsilon) {
+    const capturedBounds = getPolygonBounds(capturedPolygon);
+
+    if (!capturedBounds || getPolygonArea(capturedPolygon) <= geometryEpsilon) {
         return;
     }
 
@@ -134,8 +139,11 @@ function damagePlayersInsideCapturedPolygon(players, territories, attacker, capt
             continue;
         }
 
-        if (!isPointInPolygon(capturedPolygon, target.x, target.y)
-            && !doesTrailTouchCapturedPolygon(target, capturedPolygon)) {
+        const isTargetInsideCapture = doBoundsContainPoint(capturedBounds, target.x, target.y)
+            && isPointInPolygon(capturedPolygon, target.x, target.y);
+
+        if (!isTargetInsideCapture
+            && !doesTrailTouchCapturedPolygon(target, capturedPolygon, capturedBounds)) {
             continue;
         }
 
@@ -146,12 +154,12 @@ function damagePlayersInsideCapturedPolygon(players, territories, attacker, capt
     }
 }
 
-function doesTrailTouchCapturedPolygon(player, capturedPolygon) {
-    return doSegmentsTouchPolygon(player.trailLeftSegments, capturedPolygon)
-        || doSegmentsTouchPolygon(player.trailRightSegments, capturedPolygon);
+function doesTrailTouchCapturedPolygon(player, capturedPolygon, capturedBounds) {
+    return doSegmentsTouchPolygon(player.trailLeftSegments, capturedPolygon, capturedBounds)
+        || doSegmentsTouchPolygon(player.trailRightSegments, capturedPolygon, capturedBounds);
 }
 
-function doSegmentsTouchPolygon(segments, polygon) {
+function doSegmentsTouchPolygon(segments, polygon, polygonBounds) {
     if (!Array.isArray(segments) || !polygon || !polygon[0]) {
         return false;
     }
@@ -161,11 +169,24 @@ function doSegmentsTouchPolygon(segments, polygon) {
             continue;
         }
 
-        if (segment.some(point => isPointInPolygon(polygon, point.x, point.y))) {
+        const segmentBounds = getPointListBounds(segment);
+
+        if (!doBoundsOverlap(segmentBounds, polygonBounds)) {
+            continue;
+        }
+
+        if (segment.some(point => (
+            doBoundsContainPoint(polygonBounds, point.x, point.y)
+            && isPointInPolygon(polygon, point.x, point.y)
+        ))) {
             return true;
         }
 
         for (let index = 0; index < segment.length - 1; index++) {
+            if (!doBoundsOverlap(getLineSegmentBounds(segment[index], segment[index + 1]), polygonBounds)) {
+                continue;
+            }
+
             if (doesSegmentCrossPolygon(segment[index], segment[index + 1], polygon)) {
                 return true;
             }
@@ -173,6 +194,37 @@ function doSegmentsTouchPolygon(segments, polygon) {
     }
 
     return false;
+}
+
+function getPointListBounds(points) {
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (const point of points || []) {
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+            continue;
+        }
+
+        minX = Math.min(minX, point.x);
+        minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x);
+        maxY = Math.max(maxY, point.y);
+    }
+
+    return Number.isFinite(minX)
+        ? { minX, minY, maxX, maxY }
+        : null;
+}
+
+function getLineSegmentBounds(startPoint, endPoint) {
+    return {
+        minX: Math.min(startPoint.x, endPoint.x),
+        minY: Math.min(startPoint.y, endPoint.y),
+        maxX: Math.max(startPoint.x, endPoint.x),
+        maxY: Math.max(startPoint.y, endPoint.y)
+    };
 }
 
 function doesSegmentCrossPolygon(startPoint, endPoint, polygon) {

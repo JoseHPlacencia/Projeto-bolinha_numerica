@@ -2,6 +2,8 @@ const config = require("../config/gameConfig");
 const {
     calculatePolygonArea,
     createCirclePolygon,
+    doBoundsOverlap,
+    doPolygonsOverlap,
     getPolygonBounds,
     isPointInPolygon,
     serializePolygon,
@@ -20,7 +22,7 @@ function initializePlayerTerritory(territories, player, runtimeConfig = config) 
     const worldConfig = runtimeConfig && runtimeConfig.world ? runtimeConfig.world : config.world;
     const previousTerritory = territories.get(player.id);
 
-    territories.set(player.id, {
+    territories.set(player.id, createTerritoryState({
         id: player.id,
         color: player.color,
         version: previousTerritory ? (previousTerritory.version || 0) + 1 : 1,
@@ -33,7 +35,7 @@ function initializePlayerTerritory(territories, player, runtimeConfig = config) 
             worldConfig.initialTerritoryRadius,
             territoryConfig.circleSegments
         )
-    });
+    }));
 }
 
 function deletePlayerTerritory(territories, playerId) {
@@ -81,7 +83,13 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
             continue;
         }
 
-        if (!capturedBounds || !boundsOverlap(getPolygonBounds(otherTerritory.polygon), capturedBounds)) {
+        const otherBounds = getTerritoryBounds(otherTerritory);
+
+        if (!capturedBounds || !doBoundsOverlap(otherBounds, capturedBounds)) {
+            continue;
+        }
+
+        if (!doPolygonsOverlap(otherTerritory.polygon, capturedPolygon, otherBounds, capturedBounds)) {
             continue;
         }
 
@@ -95,13 +103,28 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
     return changedPlayerIds;
 }
 
-function boundsOverlap(first, second) {
-    return first
-        && second
-        && first.minX <= second.maxX
-        && first.maxX >= second.minX
-        && first.minY <= second.maxY
-        && first.maxY >= second.minY;
+function createTerritoryState(territory) {
+    return updateTerritoryMetrics({
+        ...territory
+    });
+}
+
+function updateTerritoryMetrics(territory) {
+    territory.area = calculatePolygonArea(territory.polygon);
+    territory.bounds = getPolygonBounds(territory.polygon);
+    return territory;
+}
+
+function getTerritoryArea(territory) {
+    return Number.isFinite(territory && territory.area)
+        ? territory.area
+        : calculatePolygonArea(territory && territory.polygon);
+}
+
+function getTerritoryBounds(territory) {
+    return territory && territory.bounds
+        ? territory.bounds
+        : getPolygonBounds(territory && territory.polygon);
 }
 
 function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolygon) {
@@ -111,7 +134,7 @@ function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolyg
 }
 
 function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
-    const previousArea = calculatePolygonArea(territory.polygon);
+    const previousArea = getTerritoryArea(territory);
     const nextArea = calculatePolygonArea(nextPolygon);
 
     if (Math.abs(previousArea - nextArea) <= territoryChangeAreaEpsilon) {
@@ -125,6 +148,8 @@ function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     }
 
     territory.polygon = nextPolygon;
+    territory.area = nextArea;
+    territory.bounds = getPolygonBounds(nextPolygon);
     territory.version = (territory.version || 0) + 1;
 
     return true;

@@ -2,10 +2,12 @@ const config = require("../config/gameConfig");
 const {
     calculatePolygonArea,
     calculatePolygonCentroid,
+    doBoundsContainPoint,
     getPolygonBounds,
     isCircleInsidePolygon
 } = require("../utils/geometry");
 
+const coarseGridSideSamples = 17;
 const gridSideSamples = 41;
 
 function relocatePlayersAfterTerritoryChange(players, territories, playerIds) {
@@ -29,11 +31,33 @@ function relocatePlayersAfterTerritoryChange(players, territories, playerIds) {
 function relocatePlayerAfterTerritoryChange(territories, player) {
     const territory = territories.get(player.id);
 
-    if (!territory || calculatePolygonArea(territory.polygon) <= 0) {
+    if (!territory || getTerritoryArea(territory) <= 0) {
         return false;
     }
 
-    const point = findSpawnPointInsideTerritory(territory.polygon);
+    const currentSpawnPoint = {
+        x: player.territoryX,
+        y: player.territoryY
+    };
+    const territoryBounds = getTerritoryBounds(territory);
+
+    if (isPlayerFullyInsideTerritory(territory.polygon, currentSpawnPoint, territoryBounds)) {
+        territory.baseX = currentSpawnPoint.x;
+        territory.baseY = currentSpawnPoint.y;
+        territory.color = player.color;
+        return true;
+    }
+
+    const point = findSpawnPointInsideTerritory(territory.polygon, {
+        bounds: territoryBounds,
+        preferredPoints: [
+            currentSpawnPoint,
+            {
+                x: territory.baseX,
+                y: territory.baseY
+            }
+        ]
+    });
 
     if (!point) {
         return false;
@@ -46,36 +70,44 @@ function relocatePlayerAfterTerritoryChange(territories, player) {
     return true;
 }
 
-function findSpawnPointInsideTerritory(polygon) {
-    const bounds = getPolygonBounds(polygon);
+function findSpawnPointInsideTerritory(polygon, options = {}) {
+    const bounds = options.bounds || getPolygonBounds(polygon);
 
     if (!bounds) {
         return null;
     }
 
     const center = calculatePolygonCentroid(polygon) || getBoundsCenter(bounds);
+    const preferredPoints = [
+        ...(Array.isArray(options.preferredPoints) ? options.preferredPoints : []),
+        center,
+        getBoundsCenter(bounds)
+    ];
 
-    if (isPlayerFullyInsideTerritory(polygon, center)) {
-        return center;
+    for (const point of preferredPoints) {
+        if (isPlayerFullyInsideTerritory(polygon, point, bounds)) {
+            return point;
+        }
     }
 
-    return findClosestGridPointInsideTerritory(polygon, bounds, center);
+    return findClosestGridPointInsideTerritory(polygon, bounds, center, coarseGridSideSamples)
+        || findClosestGridPointInsideTerritory(polygon, bounds, center, gridSideSamples);
 }
 
-function findClosestGridPointInsideTerritory(polygon, bounds, center) {
+function findClosestGridPointInsideTerritory(polygon, bounds, center, sampleCount) {
     let closestPoint = null;
     let closestDistanceSquared = Infinity;
-    const stepX = getGridStep(bounds.minX, bounds.maxX);
-    const stepY = getGridStep(bounds.minY, bounds.maxY);
+    const stepX = getGridStep(bounds.minX, bounds.maxX, sampleCount);
+    const stepY = getGridStep(bounds.minY, bounds.maxY, sampleCount);
 
-    for (let row = 0; row < gridSideSamples; row++) {
-        const y = interpolateBoundsValue(bounds.minY, bounds.maxY, row, gridSideSamples);
+    for (let row = 0; row < sampleCount; row++) {
+        const y = interpolateBoundsValue(bounds.minY, bounds.maxY, row, sampleCount);
 
-        for (let column = 0; column < gridSideSamples; column++) {
-            const x = interpolateBoundsValue(bounds.minX, bounds.maxX, column, gridSideSamples);
+        for (let column = 0; column < sampleCount; column++) {
+            const x = interpolateBoundsValue(bounds.minX, bounds.maxX, column, sampleCount);
             const point = { x, y };
 
-            if (!isPlayerFullyInsideTerritory(polygon, point)) {
+            if (!isPlayerFullyInsideTerritory(polygon, point, bounds)) {
                 continue;
             }
 
@@ -127,12 +159,12 @@ function refineClosestPointInsideTerritory(polygon, center, startPoint, initialS
     return closestPoint;
 }
 
-function getGridStep(min, max) {
-    if (gridSideSamples <= 1) {
+function getGridStep(min, max, sampleCount) {
+    if (sampleCount <= 1) {
         return 0;
     }
 
-    return (max - min) / (gridSideSamples - 1);
+    return (max - min) / (sampleCount - 1);
 }
 
 function getBoundsCenter(bounds) {
@@ -150,13 +182,33 @@ function interpolateBoundsValue(min, max, index, count) {
     return min + (max - min) * (index / (count - 1));
 }
 
-function isPlayerFullyInsideTerritory(polygon, point) {
+function isPlayerFullyInsideTerritory(polygon, point, bounds = null) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        return false;
+    }
+
+    if (bounds && !doBoundsContainPoint(bounds, point.x, point.y)) {
+        return false;
+    }
+
     return isCircleInsidePolygon(
         polygon,
         point.x,
         point.y,
         config.world.playerSize / 2
     );
+}
+
+function getTerritoryArea(territory) {
+    return Number.isFinite(territory && territory.area)
+        ? territory.area
+        : calculatePolygonArea(territory && territory.polygon);
+}
+
+function getTerritoryBounds(territory) {
+    return territory && territory.bounds
+        ? territory.bounds
+        : getPolygonBounds(territory && territory.polygon);
 }
 
 function getDistanceSquared(first, second) {

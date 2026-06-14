@@ -74,7 +74,21 @@ function handlePlayerLifeLoss(players, territories, target, context = {}, option
 function findRespawnPointForPlayer(territories, player) {
     const territory = territories.get(player.id);
 
-    return territory ? findSpawnPointInsideTerritory(territory.polygon) : null;
+    return territory
+        ? findSpawnPointInsideTerritory(territory.polygon, {
+            bounds: territory.bounds,
+            preferredPoints: [
+                {
+                    x: player.territoryX,
+                    y: player.territoryY
+                },
+                {
+                    x: territory.baseX,
+                    y: territory.baseY
+                }
+            ]
+        })
+        : null;
 }
 
 function setPlayerRespawnPoint(territories, player, point) {
