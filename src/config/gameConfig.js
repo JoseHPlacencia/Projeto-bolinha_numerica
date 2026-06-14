@@ -114,6 +114,7 @@ const bots = Object.freeze({
     enabled: true,
     count: 2,
     decisionIntervalMs: 180,
+    maxDecisionsPerTick: 2,
     difficulty: "easy",
     mistakeChance: 0.08,
     angleNoiseRadians: 0.04,
@@ -288,7 +289,7 @@ const menuBackground = Object.freeze({
     enabled: true,
     roomCode: "BOTS",
     difficulty: "hard",
-    botCount: 5
+    botCount: 8
 });
 
 module.exports = Object.freeze({

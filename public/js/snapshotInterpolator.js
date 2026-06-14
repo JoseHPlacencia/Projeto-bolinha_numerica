@@ -224,6 +224,9 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxGameLoopDriftMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.tickDriftMs)),
             maxGameLoopTrailsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.trails)),
             maxGameLoopBotsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.bots)),
+            maxBotDecisionMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.decisions)),
+            maxBotSelfTrailSafetyMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.selfTrailSafety)),
+            maxBotTargetingMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.targeting)),
             maxGameLoopNumberEventsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.numberEvents)),
             maxTerritoryPayloadCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount)),
             maxTerritoryOperationCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount)),
@@ -295,6 +298,22 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             numberCount: finiteOrNull(value.numberCount),
             collisionCount: finiteOrNull(value.collisionCount),
             themeChanged: Boolean(value.themeChanged),
+            bot: normalizeBotDiagnostics(value.bot),
+            phases: normalizeGameLoopPhases(value.phases),
+            slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase)
+        };
+    }
+
+    function normalizeBotDiagnostics(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            cycle: finiteOrNull(value.cycle),
+            decisionsProcessed: finiteOrNull(value.decisionsProcessed),
+            pendingAfter: finiteOrNull(value.pendingAfter),
+            pendingBefore: finiteOrNull(value.pendingBefore),
             phases: normalizeGameLoopPhases(value.phases),
             slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase)
         };

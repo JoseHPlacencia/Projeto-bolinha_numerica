@@ -17,12 +17,13 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
         const tickIntervalMs = now - previousTime;
         const phaseDurations = {};
         const deltaTime = Math.min((now - previousTime) / 1000, config.loop.maxDeltaTime);
+        let botDiagnostics = null;
         previousTime = now;
         tick++;
 
         measurePhase(phaseDurations, "bots", () => {
             if (botManager) {
-                botManager.update(Date.now());
+                botDiagnostics = botManager.update(Date.now());
             }
         });
 
@@ -77,6 +78,7 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
 
         updateGameLoopDiagnostics(diagnostics, {
             collisionCount: collisions.length,
+            botDiagnostics,
             deltaTimeMs: deltaTime * 1000,
             expectedIntervalMs: intervalMs,
             numberCount: getNumberCount(numberSystem),
@@ -126,9 +128,50 @@ function updateGameLoopDiagnostics(diagnostics, sample) {
     diagnostics.territoryCount = sample.territoryCount;
     diagnostics.numberCount = sample.numberCount;
     diagnostics.collisionCount = sample.collisionCount;
+    diagnostics.bot = normalizeBotDiagnostics(sample.botDiagnostics);
     diagnostics.themeChanged = sample.themeChanged;
     diagnostics.phases = roundPhaseDurations(sample.phaseDurations);
     diagnostics.slowestPhase = getSlowestPhase(diagnostics.phases);
+}
+
+function normalizeBotDiagnostics(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        cycle: finiteOrNull(diagnostics.cycle),
+        decisionsProcessed: finiteOrNull(diagnostics.decisionsProcessed),
+        pendingAfter: finiteOrNull(diagnostics.pendingAfter),
+        pendingBefore: finiteOrNull(diagnostics.pendingBefore),
+        phases: normalizePhaseDurations(diagnostics.phases),
+        slowestPhase: normalizeSlowestPhase(diagnostics.slowestPhase)
+    };
+}
+
+function normalizePhaseDurations(phases) {
+    const normalized = {};
+
+    for (const [name, durationMs] of Object.entries(phases || {})) {
+        normalized[name] = finiteOrNull(durationMs);
+    }
+
+    return normalized;
+}
+
+function normalizeSlowestPhase(slowestPhase) {
+    if (!slowestPhase || typeof slowestPhase !== "object") {
+        return null;
+    }
+
+    return {
+        name: typeof slowestPhase.name === "string" ? slowestPhase.name : null,
+        durationMs: finiteOrNull(slowestPhase.durationMs)
+    };
+}
+
+function finiteOrNull(value) {
+    return Number.isFinite(value) ? value : null;
 }
 
 function measurePhase(phaseDurations, name, callback, accumulate = false) {

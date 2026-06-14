@@ -2,6 +2,7 @@ const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
 const { initializePlayerTerritory } = require("../state/territories");
 const { clamp, distanceBetween, lerpAngle } = require("../utils/math");
+const { getHighResolutionTime } = require("../utils/time");
 
 const BOT_ID_PREFIX = "bot:";
 const geometryEpsilon = 1e-7;
@@ -11,12 +12,17 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
         botCount,
         botDifficulty,
         botIds: new Set(),
+        decisionContext: null,
+        decisionCycle: 0,
         lastDecisionAt: Number.NEGATIVE_INFINITY,
-        nextBotNumber: 1
+        nextBotNumber: 1,
+        pendingDecisionIds: [],
+        diagnostics: createEmptyBotDiagnostics()
     };
 
     return {
         ensureBots,
+        getDiagnostics,
         update
     };
 
@@ -38,25 +44,142 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
         }
     }
 
-    function update(nowMs) {
-        ensureBots();
+    function getDiagnostics() {
+        return state.diagnostics;
+    }
 
-        if (nowMs - state.lastDecisionAt < config.bots.decisionIntervalMs) {
-            return;
+    function update(nowMs) {
+        const diagnostics = createBotUpdateDiagnostics(state);
+
+        measureBotPhase(diagnostics, "ensureBots", ensureBots);
+        state.pendingDecisionIds = state.pendingDecisionIds.filter(botId => state.botIds.has(botId));
+
+        if (state.pendingDecisionIds.length === 0 && nowMs - state.lastDecisionAt >= config.bots.decisionIntervalMs) {
+            state.lastDecisionAt = nowMs;
+            state.pendingDecisionIds = [...state.botIds];
+            state.decisionCycle++;
+            diagnostics.cycle = state.decisionCycle;
+            state.decisionContext = measureBotPhase(diagnostics, "correctNumbers", () => createBotDecisionContext(numberSystem));
         }
 
-        state.lastDecisionAt = nowMs;
+        if (state.pendingDecisionIds.length > 0 && !state.decisionContext) {
+            state.decisionContext = measureBotPhase(diagnostics, "correctNumbers", () => createBotDecisionContext(numberSystem));
+        }
 
-        for (const botId of state.botIds) {
-            const bot = players.get(botId);
+        diagnostics.pendingBefore = state.pendingDecisionIds.length;
 
-            if (!bot) {
-                continue;
+        measureBotPhase(diagnostics, "decisions", () => {
+            const tickContext = createBotDecisionTickContext(state.decisionContext, diagnostics);
+            const maxDecisions = getMaxBotDecisionsPerTick();
+            let processed = 0;
+
+            while (processed < maxDecisions && state.pendingDecisionIds.length > 0) {
+                const botId = state.pendingDecisionIds.shift();
+                const bot = players.get(botId);
+
+                if (!bot) {
+                    continue;
+                }
+
+                updateBotDecision(bot, players, territories, numberSystem, tickContext);
+                processed++;
             }
 
-            updateBotDecision(bot, players, territories, numberSystem);
+            diagnostics.decisionsProcessed = processed;
+        });
+
+        if (state.pendingDecisionIds.length === 0) {
+            state.decisionContext = null;
+        }
+
+        diagnostics.pendingAfter = state.pendingDecisionIds.length;
+        diagnostics.slowestPhase = getSlowestBotPhase(diagnostics.phases);
+        state.diagnostics = diagnostics;
+
+        return diagnostics;
+    }
+}
+
+function createEmptyBotDiagnostics() {
+    return {
+        cycle: 0,
+        decisionsProcessed: 0,
+        pendingAfter: 0,
+        pendingBefore: 0,
+        phases: {},
+        slowestPhase: null
+    };
+}
+
+function createBotUpdateDiagnostics(state) {
+    return {
+        cycle: state.decisionCycle,
+        decisionsProcessed: 0,
+        pendingAfter: 0,
+        pendingBefore: 0,
+        phases: {},
+        slowestPhase: null
+    };
+}
+
+function createBotDecisionContext(numberSystem) {
+    return {
+        correctNumbers: getCorrectNumbers(numberSystem)
+    };
+}
+
+function createBotDecisionTickContext(decisionContext, diagnostics) {
+    return {
+        correctNumbers: decisionContext && Array.isArray(decisionContext.correctNumbers)
+            ? decisionContext.correctNumbers
+            : [],
+        diagnostics,
+        selfTrailSegmentCache: new Map(),
+        trailPointCache: new Map()
+    };
+}
+
+function measureBotPhase(diagnostics, name, callback) {
+    const startedAt = getHighResolutionTime();
+
+    try {
+        return callback();
+    } finally {
+        const durationMs = getHighResolutionTime() - startedAt;
+
+        if (diagnostics && diagnostics.phases) {
+            diagnostics.phases[name] = (diagnostics.phases[name] || 0) + durationMs;
         }
     }
+}
+
+function getSlowestBotPhase(phases) {
+    let slowestPhase = null;
+
+    for (const [name, durationMs] of Object.entries(phases || {})) {
+        if (!Number.isFinite(durationMs)) {
+            continue;
+        }
+
+        if (!slowestPhase || durationMs > slowestPhase.durationMs) {
+            slowestPhase = {
+                name,
+                durationMs: roundToMilliseconds(durationMs)
+            };
+        }
+    }
+
+    return slowestPhase;
+}
+
+function getMaxBotDecisionsPerTick() {
+    const value = Number(config.bots.maxDecisionsPerTick);
+
+    return Number.isInteger(value) && value > 0 ? value : 2;
+}
+
+function roundToMilliseconds(value) {
+    return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null;
 }
 
 function createBot(roomCode, players, territories, botNumber, botDifficulty = null, runtimeConfig = null) {
@@ -89,8 +212,11 @@ function createBot(roomCode, players, territories, botNumber, botDifficulty = nu
     return bot;
 }
 
-function updateBotDecision(bot, players, territories, numberSystem) {
-    const target = chooseBotTarget(bot, players, territories, numberSystem);
+function updateBotDecision(bot, players, territories, numberSystem, context = null) {
+    const diagnostics = context && context.diagnostics;
+    const target = measureBotPhase(diagnostics, "targeting", () => (
+        chooseBotTarget(bot, players, territories, numberSystem, context)
+    ));
 
     if (!target) {
         bot.clearDirectionAngle();
@@ -99,10 +225,10 @@ function updateBotDecision(bot, players, territories, numberSystem) {
 
     const targetAngle = Math.atan2(target.y - bot.y, target.x - bot.x);
     const targetDistance = distanceBetween(bot.x, bot.y, target.x, target.y);
-    const decision = chooseSelfTrailSafeAngle(bot, targetAngle, {
+    const decision = measureBotPhase(diagnostics, "selfTrailSafety", () => chooseSelfTrailSafeAngle(bot, targetAngle, {
         allowReverse: isReturnTarget(bot, target),
         targetDistance
-    });
+    }, context));
     const angle = applyDecisionNoise(decision.angle, {
         avoidingSelfTrail: decision.avoidingSelfTrail
     });
@@ -110,8 +236,11 @@ function updateBotDecision(bot, players, territories, numberSystem) {
     bot.setDirectionAngle(angle, "bot");
 }
 
-function chooseBotTarget(bot, players, territories, numberSystem) {
-    const correctNumbers = getCorrectNumbers(bot, territories, numberSystem);
+function chooseBotTarget(bot, players, territories, numberSystem, context = null) {
+    const diagnostics = context && context.diagnostics;
+    const correctNumbers = context && Array.isArray(context.correctNumbers)
+        ? context.correctNumbers
+        : getCorrectNumbers(numberSystem);
     const nearestCorrect = findNearestPoint(bot, correctNumbers);
     const pendingTarget = choosePendingEliminationTarget(bot, correctNumbers);
 
@@ -119,7 +248,9 @@ function chooseBotTarget(bot, players, territories, numberSystem) {
         return pendingTarget;
     }
 
-    const threat = evaluateThreat(bot, players, correctNumbers);
+    const threat = measureBotPhase(diagnostics, "threat", () => (
+        evaluateThreat(bot, players, correctNumbers, context)
+    ));
 
     if (bot.catchBalance <= 0) {
         return nearestCorrect || getWanderTarget(bot);
@@ -129,7 +260,9 @@ function chooseBotTarget(bot, players, territories, numberSystem) {
         return getReturnTarget(bot);
     }
 
-    const huntTarget = chooseHuntTarget(bot, players, correctNumbers);
+    const huntTarget = measureBotPhase(diagnostics, "hunt", () => (
+        chooseHuntTarget(bot, players, correctNumbers, context)
+    ));
 
     if (huntTarget && Math.random() >= config.bots.mistakeChance) {
         return huntTarget;
@@ -150,7 +283,7 @@ function choosePendingEliminationTarget(bot, correctNumbers) {
     return findNearestPoint(bot, correctNumbers);
 }
 
-function getCorrectNumbers(bot, territories, numberSystem) {
+function getCorrectNumbers(numberSystem) {
     if (!numberSystem || typeof numberSystem.getTheme !== "function") {
         return [];
     }
@@ -168,8 +301,8 @@ function getCorrectNumbers(bot, territories, numberSystem) {
         .filter(number => theme.check(number));
 }
 
-function evaluateThreat(bot, players, correctNumbers) {
-    const trailPoints = getTrailPoints(bot);
+function evaluateThreat(bot, players, correctNumbers, context = null) {
+    const trailPoints = getTrailPointsCached(context, bot);
 
     if (trailPoints.length === 0 || correctNumbers.length === 0) {
         return {
@@ -226,7 +359,7 @@ function estimatePunishTime(enemy, trailPoints, correctNumbers) {
     return bestTime;
 }
 
-function chooseHuntTarget(bot, players, correctNumbers) {
+function chooseHuntTarget(bot, players, correctNumbers, context = null) {
     if (correctNumbers.length === 0) {
         return null;
     }
@@ -234,11 +367,17 @@ function chooseHuntTarget(bot, players, correctNumbers) {
     let bestHunt = null;
 
     for (const enemy of players.values()) {
-        if (enemy.id === bot.id || !hasAnyTrail(enemy)) {
+        if (enemy.id === bot.id) {
             continue;
         }
 
-        const enemyTrailPoint = findNearestPoint(bot, getTrailPoints(enemy));
+        const enemyTrailPoints = getTrailPointsCached(context, enemy);
+
+        if (enemyTrailPoints.length < 2) {
+            continue;
+        }
+
+        const enemyTrailPoint = findNearestPoint(bot, enemyTrailPoints);
 
         if (!enemyTrailPoint) {
             continue;
@@ -395,14 +534,16 @@ function isReturnTarget(bot, target) {
 
 function findNearestPoint(origin, points) {
     let nearest = null;
-    let nearestDistance = Infinity;
+    let nearestDistanceSquared = Infinity;
 
     for (const point of points || []) {
-        const distance = distanceBetween(origin.x, origin.y, point.x, point.y);
+        const deltaX = origin.x - point.x;
+        const deltaY = origin.y - point.y;
+        const distanceSquared = deltaX * deltaX + deltaY * deltaY;
 
-        if (distance < nearestDistance) {
+        if (distanceSquared < nearestDistanceSquared) {
             nearest = point;
-            nearestDistance = distance;
+            nearestDistanceSquared = distanceSquared;
         }
     }
 
@@ -450,11 +591,21 @@ function applyDecisionNoise(angle, options = {}) {
     return angle + (Math.random() * 2 - 1) * config.bots.angleNoiseRadians * noiseScale;
 }
 
-function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}) {
-    const trailPoints = getTrailPoints(bot, { skipRecent: getSelfTrailClearanceRecentPointSkip() });
-    const trailSegments = getSelfTrailSegments(bot, { skipRecent: getSelfTrailCollisionRecentPointSkip() });
+function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null) {
+    const trailPoints = getTrailPointsCached(context, bot, { skipRecent: getSelfTrailClearanceRecentPointSkip() });
+    const trailSegments = getSelfTrailSegmentsCached(context, bot, { skipRecent: getSelfTrailCollisionRecentPointSkip() });
 
     if ((trailPoints.length === 0 && trailSegments.length === 0) || !Number.isFinite(targetAngle)) {
+        return {
+            angle: targetAngle,
+            avoidingSelfTrail: false
+        };
+    }
+
+    const nearestSelfTrailDistanceSquared = getNearestDistanceSquared(bot, trailPoints);
+    const bypassDistance = getSelfTrailLookaheadDistance(options) + config.bots.selfTrailAvoidDistance;
+
+    if (nearestSelfTrailDistanceSquared > bypassDistance * bypassDistance) {
         return {
             angle: targetAngle,
             avoidingSelfTrail: false
@@ -716,6 +867,36 @@ function getSelfTrailClearanceRecentPointSkip() {
 
 function getSelfTrailCollisionRecentPointSkip() {
     return Math.max(4, Math.ceil((config.world.playerSize * 1.2) / config.territory.trailPointSpacing));
+}
+
+function getTrailPointsCached(context, player, options = {}) {
+    if (!context || !context.trailPointCache || !player) {
+        return getTrailPoints(player, options);
+    }
+
+    const skipRecent = Number.isFinite(options.skipRecent) ? options.skipRecent : 0;
+    const cacheKey = `${player.id}:${skipRecent}`;
+
+    if (!context.trailPointCache.has(cacheKey)) {
+        context.trailPointCache.set(cacheKey, getTrailPoints(player, options));
+    }
+
+    return context.trailPointCache.get(cacheKey);
+}
+
+function getSelfTrailSegmentsCached(context, player, options = {}) {
+    if (!context || !context.selfTrailSegmentCache || !player) {
+        return getSelfTrailSegments(player, options);
+    }
+
+    const skipRecent = Number.isFinite(options.skipRecent) ? options.skipRecent : 0;
+    const cacheKey = `${player.id}:${skipRecent}`;
+
+    if (!context.selfTrailSegmentCache.has(cacheKey)) {
+        context.selfTrailSegmentCache.set(cacheKey, getSelfTrailSegments(player, options));
+    }
+
+    return context.selfTrailSegmentCache.get(cacheKey);
 }
 
 function getTrailPoints(player, options = {}) {

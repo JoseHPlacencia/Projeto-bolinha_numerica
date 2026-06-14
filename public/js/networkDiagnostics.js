@@ -138,6 +138,8 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             : null;
         const gameLoop = latestSnapshot && latestSnapshot.server && latestSnapshot.server.gameLoop;
         const gameLoopPhases = gameLoop && gameLoop.phases || {};
+        const botDiagnostics = gameLoop && gameLoop.bot;
+        const botPhases = botDiagnostics && botDiagnostics.phases || {};
         const row = {
             diagnosis: data.diagnosis.reason,
             bufferMs: latestSnapshot && round(latestSnapshot.bufferMs),
@@ -152,6 +154,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             slowestPhase: gameLoop && gameLoop.slowestPhase && gameLoop.slowestPhase.name,
             trailsMs: round(gameLoopPhases.trails),
             botsMs: round(gameLoopPhases.bots),
+            botDecisions: botDiagnostics && botDiagnostics.decisionsProcessed,
+            botPending: botDiagnostics && botDiagnostics.pendingAfter,
+            botTargetingMs: round(botPhases.targeting),
+            botSelfTrailMs: round(botPhases.selfTrailSafety),
             numbersMs: round(gameLoopPhases.numbers),
             buildMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.snapshotBuildMs),
             payloadMeasureMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.payloadMeasureMs),
@@ -187,6 +193,11 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 slowestPhase: event.server && event.server.gameLoop && event.server.gameLoop.slowestPhase && event.server.gameLoop.slowestPhase.name,
                 trailsMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.trails),
                 botsMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.bots),
+                botDecisions: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.decisionsProcessed,
+                botPending: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.pendingAfter,
+                botSlowest: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.slowestPhase && event.server.gameLoop.bot.slowestPhase.name,
+                botTargetingMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && round(event.server.gameLoop.bot.phases.targeting),
+                botSelfTrailMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && round(event.server.gameLoop.bot.phases.selfTrailSafety),
                 numbersMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.numbers),
                 buildMs: event.server && round(event.server.snapshotBuildMs),
                 payloadMeasureMs: event.server && round(event.server.payloadMeasureMs),
@@ -397,6 +408,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             return "Server game loop work exceeded the expected per-tick budget.";
         }
 
+        if (slowestPhase.name === "bots" && gameLoop.bot && gameLoop.bot.slowestPhase) {
+            return `Server game loop exceeded budget; bots phase was slowest, subphase: ${gameLoop.bot.slowestPhase.name} (${round(gameLoop.bot.slowestPhase.durationMs)}ms).`;
+        }
+
         return `Server game loop exceeded budget; slowest phase: ${slowestPhase.name} (${round(slowestPhase.durationMs)}ms).`;
     }
 
@@ -405,6 +420,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
 
         if (!slowestPhase || !slowestPhase.name) {
             return "Server game loop tick drift was high; another synchronous task may be blocking the event loop.";
+        }
+
+        if (slowestPhase.name === "bots" && gameLoop.bot && gameLoop.bot.slowestPhase) {
+            return `Server game loop tick drift was high; bots subphase: ${gameLoop.bot.slowestPhase.name} (${round(gameLoop.bot.slowestPhase.durationMs)}ms).`;
         }
 
         return `Server game loop tick drift was high; last slowest phase: ${slowestPhase.name} (${round(slowestPhase.durationMs)}ms).`;

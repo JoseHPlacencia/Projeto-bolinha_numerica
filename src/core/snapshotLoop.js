@@ -311,6 +311,7 @@ function cloneGameLoopDiagnostics(gameLoop) {
         numberCount: gameLoop.numberCount,
         collisionCount: gameLoop.collisionCount,
         themeChanged: gameLoop.themeChanged,
+        bot: cloneBotDiagnostics(gameLoop.bot),
         phases: { ...(gameLoop.phases || {}) },
         slowestPhase: gameLoop.slowestPhase
             ? { ...gameLoop.slowestPhase }
@@ -338,8 +339,41 @@ function normalizeGameLoopDiagnostics(gameLoop) {
         numberCount: finiteOrNull(gameLoop.numberCount),
         collisionCount: finiteOrNull(gameLoop.collisionCount),
         themeChanged: Boolean(gameLoop.themeChanged),
+        bot: normalizeBotDiagnostics(gameLoop.bot),
         phases: normalizeGameLoopPhases(gameLoop.phases),
         slowestPhase: normalizeGameLoopSlowestPhase(gameLoop.slowestPhase)
+    };
+}
+
+function cloneBotDiagnostics(botDiagnostics) {
+    if (!botDiagnostics || typeof botDiagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        cycle: botDiagnostics.cycle,
+        decisionsProcessed: botDiagnostics.decisionsProcessed,
+        pendingAfter: botDiagnostics.pendingAfter,
+        pendingBefore: botDiagnostics.pendingBefore,
+        phases: { ...(botDiagnostics.phases || {}) },
+        slowestPhase: botDiagnostics.slowestPhase
+            ? { ...botDiagnostics.slowestPhase }
+            : null
+    };
+}
+
+function normalizeBotDiagnostics(botDiagnostics) {
+    if (!botDiagnostics || typeof botDiagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        cycle: finiteOrNull(botDiagnostics.cycle),
+        decisionsProcessed: finiteOrNull(botDiagnostics.decisionsProcessed),
+        pendingAfter: finiteOrNull(botDiagnostics.pendingAfter),
+        pendingBefore: finiteOrNull(botDiagnostics.pendingBefore),
+        phases: normalizeGameLoopPhases(botDiagnostics.phases),
+        slowestPhase: normalizeGameLoopSlowestPhase(botDiagnostics.slowestPhase)
     };
 }
 
