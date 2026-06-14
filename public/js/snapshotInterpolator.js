@@ -223,6 +223,18 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             averageGameLoopDriftMs: averageFiniteValues(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.tickDriftMs)),
             maxGameLoopDriftMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.tickDriftMs)),
             maxGameLoopTrailsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.trails)),
+            maxTrailSideUpdateMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.sideUpdate)),
+            maxTrailSelfCollisionMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.selfCollision)),
+            maxTrailOwnerCrossingMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.ownerCrossing)),
+            maxTrailFillMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.fill)),
+            maxTrailCaptureMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.capture)),
+            maxTrailCaptureCreateMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureCreate)),
+            maxTrailCaptureApplyTerritoryMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureApplyTerritory)),
+            maxTrailCaptureDamagePlayersMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureDamagePlayers)),
+            maxTrailCaptureRelocatePlayersMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureRelocatePlayers)),
+            maxTrailOwnerSegmentChecks: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.ownerTrailSegmentChecks)),
+            maxTrailSelfSegmentChecks: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.selfTrailSegmentChecks)),
+            maxTrailCaptures: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.captures)),
             maxGameLoopBotsMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.phases && event.server.gameLoop.phases.bots)),
             maxBotDecisionMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.decisions)),
             maxBotSelfTrailSafetyMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && event.server.gameLoop.bot.phases.selfTrailSafety)),
@@ -306,8 +318,35 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             collisionCount: finiteOrNull(value.collisionCount),
             themeChanged: Boolean(value.themeChanged),
             bot: normalizeBotDiagnostics(value.bot),
+            trails: normalizeTrailDiagnostics(value.trails),
             phases: normalizeGameLoopPhases(value.phases),
             slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase)
+        };
+    }
+
+    function normalizeTrailDiagnostics(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            activeTrailPlayers: finiteOrNull(value.activeTrailPlayers),
+            captureAttempts: finiteOrNull(value.captureAttempts),
+            captureChangedPlayerCount: finiteOrNull(value.captureChangedPlayerCount),
+            captures: finiteOrNull(value.captures),
+            clearTrailCount: finiteOrNull(value.clearTrailCount),
+            closedTrailReturns: finiteOrNull(value.closedTrailReturns),
+            fillPathCount: finiteOrNull(value.fillPathCount),
+            fillPolygonCount: finiteOrNull(value.fillPolygonCount),
+            ownerTrailSegmentChecks: finiteOrNull(value.ownerTrailSegmentChecks),
+            phases: normalizeGameLoopPhases(value.phases),
+            playersProcessed: finiteOrNull(value.playersProcessed),
+            selfCollisionTests: finiteOrNull(value.selfCollisionTests),
+            selfCollisions: finiteOrNull(value.selfCollisions),
+            selfTrailSegmentChecks: finiteOrNull(value.selfTrailSegmentChecks),
+            slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase),
+            trailOwnerChecks: finiteOrNull(value.trailOwnerChecks),
+            trailOwnerHits: finiteOrNull(value.trailOwnerHits)
         };
     }
 

@@ -138,6 +138,8 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             : null;
         const gameLoop = latestSnapshot && latestSnapshot.server && latestSnapshot.server.gameLoop;
         const gameLoopPhases = gameLoop && gameLoop.phases || {};
+        const trailDiagnostics = gameLoop && gameLoop.trails;
+        const trailPhases = trailDiagnostics && trailDiagnostics.phases || {};
         const botDiagnostics = gameLoop && gameLoop.bot;
         const botPhases = botDiagnostics && botDiagnostics.phases || {};
         const botSelfTrail = botDiagnostics && botDiagnostics.selfTrailSafety || {};
@@ -154,6 +156,17 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             gameLoopDriftMs: gameLoop && round(gameLoop.tickDriftMs),
             slowestPhase: gameLoop && gameLoop.slowestPhase && gameLoop.slowestPhase.name,
             trailsMs: round(gameLoopPhases.trails),
+            trailSlowest: trailDiagnostics && trailDiagnostics.slowestPhase && trailDiagnostics.slowestPhase.name,
+            trailSlowestMs: trailDiagnostics && trailDiagnostics.slowestPhase && round(trailDiagnostics.slowestPhase.durationMs),
+            trailCaptureMs: round(trailPhases.capture),
+            trailCaptureCreateMs: round(trailPhases.captureCreate),
+            trailCaptureApplyMs: round(trailPhases.captureApplyTerritory),
+            trailFillMs: round(trailPhases.fill),
+            trailOwnerCrossingMs: round(trailPhases.ownerCrossing),
+            trailSelfCollisionMs: round(trailPhases.selfCollision),
+            trailOwnerSegmentChecks: trailDiagnostics && trailDiagnostics.ownerTrailSegmentChecks,
+            trailSelfSegmentChecks: trailDiagnostics && trailDiagnostics.selfTrailSegmentChecks,
+            trailCaptures: trailDiagnostics && trailDiagnostics.captures,
             botsMs: round(gameLoopPhases.bots),
             botDecisions: botDiagnostics && botDiagnostics.decisionsProcessed,
             botPending: botDiagnostics && botDiagnostics.pendingAfter,
@@ -200,6 +213,17 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 gameLoopDriftMs: event.server && event.server.gameLoop && round(event.server.gameLoop.tickDriftMs),
                 slowestPhase: event.server && event.server.gameLoop && event.server.gameLoop.slowestPhase && event.server.gameLoop.slowestPhase.name,
                 trailsMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.trails),
+                trailSlowest: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.slowestPhase && event.server.gameLoop.trails.slowestPhase.name,
+                trailSlowestMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.slowestPhase && round(event.server.gameLoop.trails.slowestPhase.durationMs),
+                trailCaptureMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.capture),
+                trailCaptureCreateMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.captureCreate),
+                trailCaptureApplyMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.captureApplyTerritory),
+                trailFillMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.fill),
+                trailOwnerCrossingMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.ownerCrossing),
+                trailSelfCollisionMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.selfCollision),
+                trailOwnerSegmentChecks: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.ownerTrailSegmentChecks,
+                trailSelfSegmentChecks: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.selfTrailSegmentChecks,
+                trailCaptures: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.captures,
                 botsMs: event.server && event.server.gameLoop && event.server.gameLoop.phases && round(event.server.gameLoop.phases.bots),
                 botDecisions: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.decisionsProcessed,
                 botPending: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.pendingAfter,
@@ -427,6 +451,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             return `Server game loop exceeded budget; bots phase was slowest, subphase: ${gameLoop.bot.slowestPhase.name} (${round(gameLoop.bot.slowestPhase.durationMs)}ms).`;
         }
 
+        if (slowestPhase.name === "trails" && gameLoop.trails && gameLoop.trails.slowestPhase) {
+            return `Server game loop exceeded budget; trails phase was slowest, subphase: ${gameLoop.trails.slowestPhase.name} (${round(gameLoop.trails.slowestPhase.durationMs)}ms).`;
+        }
+
         return `Server game loop exceeded budget; slowest phase: ${slowestPhase.name} (${round(slowestPhase.durationMs)}ms).`;
     }
 
@@ -439,6 +467,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
 
         if (slowestPhase.name === "bots" && gameLoop.bot && gameLoop.bot.slowestPhase) {
             return `Server game loop tick drift was high; bots subphase: ${gameLoop.bot.slowestPhase.name} (${round(gameLoop.bot.slowestPhase.durationMs)}ms).`;
+        }
+
+        if (slowestPhase.name === "trails" && gameLoop.trails && gameLoop.trails.slowestPhase) {
+            return `Server game loop tick drift was high; trails subphase: ${gameLoop.trails.slowestPhase.name} (${round(gameLoop.trails.slowestPhase.durationMs)}ms).`;
         }
 
         return `Server game loop tick drift was high; last slowest phase: ${slowestPhase.name} (${round(slowestPhase.durationMs)}ms).`;

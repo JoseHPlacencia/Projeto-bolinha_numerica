@@ -8,6 +8,7 @@ const {
     isPointInPolygon
 } = require("../utils/geometry");
 const { distanceBetween } = require("../utils/math");
+const { getHighResolutionTime } = require("../utils/time");
 const { handlePlayerLifeLoss } = require("./catchModeSystem");
 const { captureClosedTrail } = require("./dominationSystem");
 
@@ -28,29 +29,130 @@ const trailSides = Object.freeze({
     })
 });
 
-function updateTrails(players, territories, context = {}) {
-    for (const player of players.values()) {
-        updatePlayerTrail(player, territories, players, context);
+function createTrailUpdateDiagnostics() {
+    return {
+        activeTrailPlayers: 0,
+        captureAttempts: 0,
+        captureChangedPlayerCount: 0,
+        captures: 0,
+        clearTrailCount: 0,
+        closedTrailReturns: 0,
+        fillPathCount: 0,
+        fillPolygonCount: 0,
+        ownerTrailSegmentChecks: 0,
+        phases: {},
+        playersProcessed: 0,
+        selfCollisionTests: 0,
+        selfCollisions: 0,
+        selfTrailSegmentChecks: 0,
+        slowestPhase: null,
+        trailOwnerChecks: 0,
+        trailOwnerHits: 0
+    };
+}
+
+function getTrailDiagnostics(context) {
+    return context && context.trailDiagnostics || null;
+}
+
+function measureTrailPhase(diagnostics, name, callback) {
+    if (!diagnostics || !diagnostics.phases) {
+        return callback();
+    }
+
+    const startedAt = getHighResolutionTime();
+
+    try {
+        return callback();
+    } finally {
+        const durationMs = getHighResolutionTime() - startedAt;
+        diagnostics.phases[name] = (diagnostics.phases[name] || 0) + durationMs;
     }
 }
 
+function addTrailDiagnosticCount(diagnostics, name, value) {
+    if (!diagnostics || !Number.isFinite(value) || value <= 0) {
+        return;
+    }
+
+    diagnostics[name] = (diagnostics[name] || 0) + value;
+}
+
+function getSlowestTrailPhase(phases) {
+    let slowestPhase = null;
+
+    for (const [name, durationMs] of Object.entries(phases || {})) {
+        if (!Number.isFinite(durationMs)) {
+            continue;
+        }
+
+        if (!slowestPhase || durationMs > slowestPhase.durationMs) {
+            slowestPhase = {
+                name,
+                durationMs: roundToMilliseconds(durationMs)
+            };
+        }
+    }
+
+    return slowestPhase;
+}
+
+function roundToMilliseconds(value) {
+    return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null;
+}
+
+function updateTrails(players, territories, context = {}) {
+    const diagnostics = createTrailUpdateDiagnostics();
+    const nextContext = {
+        ...context,
+        trailDiagnostics: diagnostics
+    };
+
+    for (const player of players.values()) {
+        updatePlayerTrail(player, territories, players, nextContext);
+    }
+
+    diagnostics.slowestPhase = getSlowestTrailPhase(diagnostics.phases);
+    return diagnostics;
+}
+
 function updatePlayerTrail(player, territories, players = new Map([[player.id, player]]), context = {}) {
-    const territoryPolygon = getPlayerTerritoryPolygon(territories, player.id);
-    const sample = createTrailSample(player);
+    const diagnostics = getTrailDiagnostics(context);
+
+    addTrailDiagnosticCount(diagnostics, "playersProcessed", 1);
+
+    const territoryPolygon = measureTrailPhase(diagnostics, "territoryLookup", () => (
+        getPlayerTerritoryPolygon(territories, player.id)
+    ));
+    const sample = measureTrailPhase(diagnostics, "sample", () => createTrailSample(player));
     const previousSample = {
         leftPoint: player.lastLeftTrailPoint,
         rightPoint: player.lastRightTrailPoint
     };
-    const leftUpdate = updateTrailSide(player, trailSides.left, sample.leftPoint, territoryPolygon);
-    const rightUpdate = updateTrailSide(player, trailSides.right, sample.rightPoint, territoryPolygon);
+    const sideUpdates = measureTrailPhase(diagnostics, "sideUpdate", () => ({
+        left: updateTrailSide(player, trailSides.left, sample.leftPoint, territoryPolygon),
+        right: updateTrailSide(player, trailSides.right, sample.rightPoint, territoryPolygon)
+    }));
+    const leftUpdate = sideUpdates.left;
+    const rightUpdate = sideUpdates.right;
     const leftInside = leftUpdate.inside;
     const rightInside = rightUpdate.inside;
     const isInsideOwnTerritory = leftInside && rightInside;
+    const hasTrailSegment = hasAnyTrailSegment(player);
+
+    if (hasTrailSegment) {
+        addTrailDiagnosticCount(diagnostics, "activeTrailPlayers", 1);
+    }
 
     player.lastLeftTrailPoint = clonePoint(sample.leftPoint);
     player.lastRightTrailPoint = clonePoint(sample.rightPoint);
 
-    if (!isInsideOwnTerritory && hasSelfTrailCollision(player, previousSample, sample)) {
+    const selfTrailCollision = !isInsideOwnTerritory && measureTrailPhase(diagnostics, "selfCollision", () => (
+        hasSelfTrailCollision(player, previousSample, sample, diagnostics)
+    ));
+
+    if (selfTrailCollision) {
+        addTrailDiagnosticCount(diagnostics, "selfCollisions", 1);
         handlePlayerLifeLoss(players, territories, player, context, {
             reason: "selfTrail"
         });
@@ -58,29 +160,42 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
     }
 
     if (!isInsideOwnTerritory) {
-        markCrossedTrailOwners(player, players, previousSample, sample);
+        measureTrailPhase(diagnostics, "ownerCrossing", () => {
+            markCrossedTrailOwners(player, players, previousSample, sample, diagnostics);
+        });
     }
 
-    if (isInsideOwnTerritory && hasAnyTrailSegment(player)) {
+    if (isInsideOwnTerritory && hasTrailSegment) {
+        addTrailDiagnosticCount(diagnostics, "closedTrailReturns", 1);
         let capturedPolygon = null;
 
         if (canCaptureClosedTrail(player)) {
-            capturedPolygon = captureClosedTrail(player, territories, players, context);
+            capturedPolygon = measureTrailPhase(diagnostics, "capture", () => (
+                captureClosedTrail(player, territories, players, context)
+            ));
 
             if (capturedPolygon) {
+                addTrailDiagnosticCount(diagnostics, "captures", 1);
                 player.consumeCatchBalance(1);
             }
         }
 
         if (!capturedPolygon) {
-            clearCatchEliminationMarksForTrailOwner(players, player.id);
+            measureTrailPhase(diagnostics, "clearEliminationMarks", () => {
+                clearCatchEliminationMarksForTrailOwner(players, player.id);
+            });
         }
 
-        clearTrail(player);
+        measureTrailPhase(diagnostics, "clearTrail", () => {
+            addTrailDiagnosticCount(diagnostics, "clearTrailCount", 1);
+            clearTrail(player);
+        });
         return;
     }
 
-    updateTrailFill(player, sample, previousSample, territoryPolygon, leftUpdate, rightUpdate);
+    measureTrailPhase(diagnostics, "fill", () => {
+        updateTrailFill(player, sample, previousSample, territoryPolygon, leftUpdate, rightUpdate, diagnostics);
+    });
 }
 
 function updateTrailSide(player, side, currentPoint, territoryPolygon) {
@@ -171,7 +286,7 @@ function appendPointToActiveSegment(player, side, point, force) {
     return previousPoint ? [previousPoint, point] : [point];
 }
 
-function updateTrailFill(player, sample, previousSample, territoryPolygon, leftUpdate, rightUpdate) {
+function updateTrailFill(player, sample, previousSample, territoryPolygon, leftUpdate, rightUpdate, diagnostics = null) {
     if (!hasAnyTrailSegment(player)) {
         clearTrailFill(player);
         return;
@@ -202,9 +317,12 @@ function updateTrailFill(player, sample, previousSample, territoryPolygon, leftU
         return;
     }
 
+    addTrailDiagnosticCount(diagnostics, "fillPathCount", 1);
+
     const stepPolygon = createTrailFillPolygon(leftPath, rightPath);
 
     if (calculatePolygonArea(stepPolygon) > geometryEpsilon) {
+        addTrailDiagnosticCount(diagnostics, "fillPolygonCount", 1);
         appendFillPath(player, trailSides.left, leftPath);
         appendFillPath(player, trailSides.right, rightPath);
     }
@@ -254,25 +372,29 @@ function hasVisibleSegment(segments) {
     return segments.some(segment => segment.length >= 2);
 }
 
-function hasSelfTrailCollision(player, previousSample, sample) {
+function hasSelfTrailCollision(player, previousSample, sample, diagnostics = null) {
     if (!previousSample.leftPoint || !previousSample.rightPoint) {
         return false;
     }
+
+    addTrailDiagnosticCount(diagnostics, "selfCollisionTests", 1);
 
     return doesMovementLineCrossTrail(
         player,
         trailSides.left,
         previousSample.leftPoint,
-        sample.leftPoint
+        sample.leftPoint,
+        diagnostics
     ) || doesMovementLineCrossTrail(
         player,
         trailSides.right,
         previousSample.rightPoint,
-        sample.rightPoint
+        sample.rightPoint,
+        diagnostics
     );
 }
 
-function markCrossedTrailOwners(player, players, previousSample, sample) {
+function markCrossedTrailOwners(player, players, previousSample, sample, diagnostics = null) {
     if (!previousSample.leftPoint || !previousSample.rightPoint) {
         return;
     }
@@ -282,7 +404,10 @@ function markCrossedTrailOwners(player, players, previousSample, sample) {
             continue;
         }
 
-        if (doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner)) {
+        addTrailDiagnosticCount(diagnostics, "trailOwnerChecks", 1);
+
+        if (doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner, diagnostics)) {
+            addTrailDiagnosticCount(diagnostics, "trailOwnerHits", 1);
             player.queueCatchEliminationTarget(trailOwner.id);
         }
     }
@@ -300,57 +425,69 @@ function canCaptureClosedTrail(player) {
     return config.gameMode.mode !== "catch" || player.catchBalance > 0;
 }
 
-function doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner) {
+function doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner, diagnostics = null) {
     return doesMovementLineCrossStoredSegments(
         previousSample.leftPoint,
         sample.leftPoint,
-        trailOwner.trailLeftSegments
+        trailOwner.trailLeftSegments,
+        diagnostics
     ) || doesMovementLineCrossStoredSegments(
         previousSample.leftPoint,
         sample.leftPoint,
-        trailOwner.trailRightSegments
+        trailOwner.trailRightSegments,
+        diagnostics
     ) || doesMovementLineCrossStoredSegments(
         previousSample.rightPoint,
         sample.rightPoint,
-        trailOwner.trailLeftSegments
+        trailOwner.trailLeftSegments,
+        diagnostics
     ) || doesMovementLineCrossStoredSegments(
         previousSample.rightPoint,
         sample.rightPoint,
-        trailOwner.trailRightSegments
+        trailOwner.trailRightSegments,
+        diagnostics
     );
 }
 
-function doesMovementLineCrossStoredSegments(startPoint, endPoint, segments) {
+function doesMovementLineCrossStoredSegments(startPoint, endPoint, segments, diagnostics = null) {
     if (arePointsEqual(startPoint, endPoint) || !Array.isArray(segments)) {
         return false;
     }
 
+    let checkedSegmentCount = 0;
+
     for (const segment of segments) {
         for (let index = 0; index < segment.length - 1; index++) {
+            checkedSegmentCount++;
+
             if (segmentsCross(startPoint, endPoint, segment[index], segment[index + 1])) {
+                addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedSegmentCount);
                 return true;
             }
         }
     }
 
+    addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedSegmentCount);
     return false;
 }
 
-function doesMovementLineCrossTrail(player, movingSide, startPoint, endPoint) {
+function doesMovementLineCrossTrail(player, movingSide, startPoint, endPoint, diagnostics = null) {
     if (arePointsEqual(startPoint, endPoint)) {
         return false;
     }
 
-    return doesLineCrossSideTrails(player, movingSide, trailSides.left, startPoint, endPoint)
-        || doesLineCrossSideTrails(player, movingSide, trailSides.right, startPoint, endPoint);
+    return doesLineCrossSideTrails(player, movingSide, trailSides.left, startPoint, endPoint, diagnostics)
+        || doesLineCrossSideTrails(player, movingSide, trailSides.right, startPoint, endPoint, diagnostics);
 }
 
-function doesLineCrossSideTrails(player, movingSide, storedSide, startPoint, endPoint) {
+function doesLineCrossSideTrails(player, movingSide, storedSide, startPoint, endPoint, diagnostics = null) {
     const segments = player[storedSide.segmentsKey];
 
     if (!Array.isArray(segments)) {
         return false;
     }
+
+    let checkedSegmentCount = 0;
 
     for (const segment of segments) {
         for (let index = 0; index < segment.length - 1; index++) {
@@ -358,12 +495,16 @@ function doesLineCrossSideTrails(player, movingSide, storedSide, startPoint, end
                 continue;
             }
 
+            checkedSegmentCount++;
+
             if (segmentsCross(startPoint, endPoint, segment[index], segment[index + 1])) {
+                addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedSegmentCount);
                 return true;
             }
         }
     }
 
+    addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedSegmentCount);
     return false;
 }
 

@@ -18,6 +18,7 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
         const phaseDurations = {};
         const deltaTime = Math.min((now - previousTime) / 1000, config.loop.maxDeltaTime);
         let botDiagnostics = null;
+        let trailDiagnostics = null;
         previousTime = now;
         tick++;
 
@@ -32,7 +33,7 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
         });
 
         measurePhase(phaseDurations, "trails", () => {
-            updateTrails(players, territories, { io, roomCode });
+            trailDiagnostics = updateTrails(players, territories, { io, roomCode });
         });
 
         const result = measurePhase(phaseDurations, "numbers", () => (
@@ -90,7 +91,8 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
             tick,
             tickDurationMs: getHighResolutionTime() - tickStartedAt,
             tickDriftMs: tickIntervalMs - intervalMs,
-            tickIntervalMs
+            tickIntervalMs,
+            trailDiagnostics
         });
     }, intervalMs);
 }
@@ -129,9 +131,36 @@ function updateGameLoopDiagnostics(diagnostics, sample) {
     diagnostics.numberCount = sample.numberCount;
     diagnostics.collisionCount = sample.collisionCount;
     diagnostics.bot = normalizeBotDiagnostics(sample.botDiagnostics);
+    diagnostics.trails = normalizeTrailDiagnostics(sample.trailDiagnostics);
     diagnostics.themeChanged = sample.themeChanged;
     diagnostics.phases = roundPhaseDurations(sample.phaseDurations);
     diagnostics.slowestPhase = getSlowestPhase(diagnostics.phases);
+}
+
+function normalizeTrailDiagnostics(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        activeTrailPlayers: finiteOrNull(diagnostics.activeTrailPlayers),
+        captureAttempts: finiteOrNull(diagnostics.captureAttempts),
+        captureChangedPlayerCount: finiteOrNull(diagnostics.captureChangedPlayerCount),
+        captures: finiteOrNull(diagnostics.captures),
+        clearTrailCount: finiteOrNull(diagnostics.clearTrailCount),
+        closedTrailReturns: finiteOrNull(diagnostics.closedTrailReturns),
+        fillPathCount: finiteOrNull(diagnostics.fillPathCount),
+        fillPolygonCount: finiteOrNull(diagnostics.fillPolygonCount),
+        ownerTrailSegmentChecks: finiteOrNull(diagnostics.ownerTrailSegmentChecks),
+        phases: normalizePhaseDurations(diagnostics.phases),
+        playersProcessed: finiteOrNull(diagnostics.playersProcessed),
+        selfCollisionTests: finiteOrNull(diagnostics.selfCollisionTests),
+        selfCollisions: finiteOrNull(diagnostics.selfCollisions),
+        selfTrailSegmentChecks: finiteOrNull(diagnostics.selfTrailSegmentChecks),
+        slowestPhase: normalizeSlowestPhase(diagnostics.slowestPhase),
+        trailOwnerChecks: finiteOrNull(diagnostics.trailOwnerChecks),
+        trailOwnerHits: finiteOrNull(diagnostics.trailOwnerHits)
+    };
 }
 
 function normalizeBotDiagnostics(diagnostics) {

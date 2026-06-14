@@ -3,6 +3,7 @@ const {
     applyCapturedPolygon,
     getPlayerTerritoryPolygon
 } = require("../state/territories");
+const { getHighResolutionTime } = require("../utils/time");
 const {
     calculatePolygonArea,
     createKnownSimplePolygonFromPoints,
@@ -20,7 +21,13 @@ const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSyste
 const geometryEpsilon = 1e-7;
 
 function captureClosedTrail(player, territories, players, context = {}) {
-    const capture = createExternalTrailCapture(player, territories);
+    const diagnostics = getTrailDiagnostics(context);
+
+    addTrailDiagnosticCount(diagnostics, "captureAttempts", 1);
+
+    const capture = measureTrailPhase(diagnostics, "captureCreate", () => (
+        createExternalTrailCapture(player, territories)
+    ));
 
     if (!capture) {
         return null;
@@ -28,23 +35,69 @@ function captureClosedTrail(player, territories, players, context = {}) {
 
     const territory = territories.get(player.id);
     const baseVersion = territory ? territory.version || 0 : 0;
-    const ownerPolygon = getCaptureOwnerPolygon(capture);
-    const newlyCapturedPolygon = createNewlyCapturedPolygon(capture, territory);
-    const changedPlayerIds = applyCapturedPolygon(territories, player.id, newlyCapturedPolygon, {
-        ownerPolygon
-    });
+    const ownerPolygon = measureTrailPhase(diagnostics, "captureOwnerPolygon", () => (
+        getCaptureOwnerPolygon(capture)
+    ));
+    const newlyCapturedPolygon = measureTrailPhase(diagnostics, "captureNewPolygon", () => (
+        createNewlyCapturedPolygon(capture, territory)
+    ));
+    const changedPlayerIds = measureTrailPhase(diagnostics, "captureApplyTerritory", () => (
+        applyCapturedPolygon(territories, player.id, newlyCapturedPolygon, {
+            ownerPolygon
+        })
+    ));
 
-    storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
-    damagePlayersInsideCapturedPolygon(players, territories, player, newlyCapturedPolygon, context);
+    addTrailDiagnosticCount(diagnostics, "captureChangedPlayerCount", changedPlayerIds.size);
+
+    measureTrailPhase(diagnostics, "captureStoreOperation", () => {
+        storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
+    });
+    measureTrailPhase(diagnostics, "captureDamagePlayers", () => {
+        damagePlayersInsideCapturedPolygon(players, territories, player, newlyCapturedPolygon, context);
+    });
 
     const relocationPlayerIds = new Set(changedPlayerIds);
     relocationPlayerIds.delete(player.id);
 
-    const noRespawnPlayerIds = relocatePlayersAfterTerritoryChange(players, territories, relocationPlayerIds);
-    endPlayersWithoutRespawn(players, territories, noRespawnPlayerIds, player, context);
-    maybeEndGameWithVictory(players, territories, player, context);
+    const noRespawnPlayerIds = measureTrailPhase(diagnostics, "captureRelocatePlayers", () => (
+        relocatePlayersAfterTerritoryChange(players, territories, relocationPlayerIds)
+    ));
+
+    measureTrailPhase(diagnostics, "captureEndNoRespawn", () => {
+        endPlayersWithoutRespawn(players, territories, noRespawnPlayerIds, player, context);
+    });
+    measureTrailPhase(diagnostics, "captureVictoryCheck", () => {
+        maybeEndGameWithVictory(players, territories, player, context);
+    });
 
     return capture.polygon;
+}
+
+function getTrailDiagnostics(context) {
+    return context && context.trailDiagnostics || null;
+}
+
+function measureTrailPhase(diagnostics, name, callback) {
+    if (!diagnostics || !diagnostics.phases) {
+        return callback();
+    }
+
+    const startedAt = getHighResolutionTime();
+
+    try {
+        return callback();
+    } finally {
+        const durationMs = getHighResolutionTime() - startedAt;
+        diagnostics.phases[name] = (diagnostics.phases[name] || 0) + durationMs;
+    }
+}
+
+function addTrailDiagnosticCount(diagnostics, name, value) {
+    if (!diagnostics || !Number.isFinite(value) || value <= 0) {
+        return;
+    }
+
+    diagnostics[name] = (diagnostics[name] || 0) + value;
 }
 
 function getCaptureOwnerPolygon(capture) {

@@ -312,6 +312,7 @@ function cloneGameLoopDiagnostics(gameLoop) {
         collisionCount: gameLoop.collisionCount,
         themeChanged: gameLoop.themeChanged,
         bot: cloneBotDiagnostics(gameLoop.bot),
+        trails: cloneTrailDiagnostics(gameLoop.trails),
         phases: { ...(gameLoop.phases || {}) },
         slowestPhase: gameLoop.slowestPhase
             ? { ...gameLoop.slowestPhase }
@@ -340,8 +341,63 @@ function normalizeGameLoopDiagnostics(gameLoop) {
         collisionCount: finiteOrNull(gameLoop.collisionCount),
         themeChanged: Boolean(gameLoop.themeChanged),
         bot: normalizeBotDiagnostics(gameLoop.bot),
+        trails: normalizeTrailDiagnostics(gameLoop.trails),
         phases: normalizeGameLoopPhases(gameLoop.phases),
         slowestPhase: normalizeGameLoopSlowestPhase(gameLoop.slowestPhase)
+    };
+}
+
+function cloneTrailDiagnostics(trailDiagnostics) {
+    if (!trailDiagnostics || typeof trailDiagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        activeTrailPlayers: trailDiagnostics.activeTrailPlayers,
+        captureAttempts: trailDiagnostics.captureAttempts,
+        captureChangedPlayerCount: trailDiagnostics.captureChangedPlayerCount,
+        captures: trailDiagnostics.captures,
+        clearTrailCount: trailDiagnostics.clearTrailCount,
+        closedTrailReturns: trailDiagnostics.closedTrailReturns,
+        fillPathCount: trailDiagnostics.fillPathCount,
+        fillPolygonCount: trailDiagnostics.fillPolygonCount,
+        ownerTrailSegmentChecks: trailDiagnostics.ownerTrailSegmentChecks,
+        phases: { ...(trailDiagnostics.phases || {}) },
+        playersProcessed: trailDiagnostics.playersProcessed,
+        selfCollisionTests: trailDiagnostics.selfCollisionTests,
+        selfCollisions: trailDiagnostics.selfCollisions,
+        selfTrailSegmentChecks: trailDiagnostics.selfTrailSegmentChecks,
+        slowestPhase: trailDiagnostics.slowestPhase
+            ? { ...trailDiagnostics.slowestPhase }
+            : null,
+        trailOwnerChecks: trailDiagnostics.trailOwnerChecks,
+        trailOwnerHits: trailDiagnostics.trailOwnerHits
+    };
+}
+
+function normalizeTrailDiagnostics(trailDiagnostics) {
+    if (!trailDiagnostics || typeof trailDiagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        activeTrailPlayers: finiteOrNull(trailDiagnostics.activeTrailPlayers),
+        captureAttempts: finiteOrNull(trailDiagnostics.captureAttempts),
+        captureChangedPlayerCount: finiteOrNull(trailDiagnostics.captureChangedPlayerCount),
+        captures: finiteOrNull(trailDiagnostics.captures),
+        clearTrailCount: finiteOrNull(trailDiagnostics.clearTrailCount),
+        closedTrailReturns: finiteOrNull(trailDiagnostics.closedTrailReturns),
+        fillPathCount: finiteOrNull(trailDiagnostics.fillPathCount),
+        fillPolygonCount: finiteOrNull(trailDiagnostics.fillPolygonCount),
+        ownerTrailSegmentChecks: finiteOrNull(trailDiagnostics.ownerTrailSegmentChecks),
+        phases: normalizeGameLoopPhases(trailDiagnostics.phases),
+        playersProcessed: finiteOrNull(trailDiagnostics.playersProcessed),
+        selfCollisionTests: finiteOrNull(trailDiagnostics.selfCollisionTests),
+        selfCollisions: finiteOrNull(trailDiagnostics.selfCollisions),
+        selfTrailSegmentChecks: finiteOrNull(trailDiagnostics.selfTrailSegmentChecks),
+        slowestPhase: normalizeGameLoopSlowestPhase(trailDiagnostics.slowestPhase),
+        trailOwnerChecks: finiteOrNull(trailDiagnostics.trailOwnerChecks),
+        trailOwnerHits: finiteOrNull(trailDiagnostics.trailOwnerHits)
     };
 }
 
