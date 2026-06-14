@@ -1,6 +1,8 @@
 const polygonClipping = require("polygon-clipping");
 const coordinatePrecision = 1000;
 const geometryEpsilon = 1e-7;
+const redundantPointDistanceTolerance = 0.05;
+const redundantPointDistanceToleranceSquared = redundantPointDistanceTolerance * redundantPointDistanceTolerance;
 
 function createCirclePolygon(x, y, radius, segments) {
     const ring = [];
@@ -207,6 +209,17 @@ function doBoundsContainPoint(bounds, x, y, padding = 0) {
     );
 }
 
+function doBoundsContainBounds(outer, inner, padding = 0) {
+    return Boolean(
+        outer
+        && inner
+        && inner.minX >= outer.minX - padding
+        && inner.maxX <= outer.maxX + padding
+        && inner.minY >= outer.minY - padding
+        && inner.maxY <= outer.maxY + padding
+    );
+}
+
 function doPolygonsOverlap(first, second, firstBounds = null, secondBounds = null) {
     if (!hasPolygon(first) || !hasPolygon(second)) {
         return false;
@@ -231,6 +244,32 @@ function doPolygonsOverlap(first, second, firstBounds = null, secondBounds = nul
     }
 
     return doPolygonBoundariesIntersect(firstRing, secondRing);
+}
+
+function isPolygonInsidePolygon(inner, outer, innerBounds = null, outerBounds = null) {
+    if (!hasPolygon(inner) || !hasPolygon(outer)) {
+        return false;
+    }
+
+    const resolvedInnerBounds = innerBounds || getPolygonBounds(inner);
+    const resolvedOuterBounds = outerBounds || getPolygonBounds(outer);
+
+    if (!doBoundsContainBounds(resolvedOuterBounds, resolvedInnerBounds)) {
+        return false;
+    }
+
+    const innerRing = getOpenRing(inner[0]);
+    const outerRing = getOpenRing(outer[0]);
+
+    if (innerRing.length < 3 || outerRing.length < 3) {
+        return false;
+    }
+
+    if (!innerRing.every(([x, y]) => isPointInPolygon(outer, x, y))) {
+        return false;
+    }
+
+    return !doPolygonBoundariesIntersect(innerRing, outerRing);
 }
 
 function doPolygonBoundariesIntersect(firstRing, secondRing) {
@@ -587,12 +626,37 @@ function roundCoordinate(value) {
 }
 
 function isCollinear(first, second, third) {
-    return Math.abs(crossCoordinates(first, second, third)) <= geometryEpsilon;
+    if (!isCoordinateBetween(first, second, third)) {
+        return false;
+    }
+
+    const segmentLengthSquared = getCoordinateDistanceSquared(first, third);
+
+    if (segmentLengthSquared <= geometryEpsilon) {
+        return getCoordinateDistanceSquared(first, second) <= redundantPointDistanceToleranceSquared;
+    }
+
+    const cross = crossCoordinates(first, second, third);
+    const distanceSquared = (cross * cross) / segmentLengthSquared;
+
+    return distanceSquared <= redundantPointDistanceToleranceSquared;
 }
 
 function crossCoordinates(first, second, third) {
     return (second[0] - first[0]) * (third[1] - first[1])
         - (second[1] - first[1]) * (third[0] - first[0]);
+}
+
+function isCoordinateBetween(first, second, third) {
+    return (second[0] - first[0]) * (second[0] - third[0])
+        + (second[1] - first[1]) * (second[1] - third[1]) <= geometryEpsilon;
+}
+
+function getCoordinateDistanceSquared(first, second) {
+    const x = first[0] - second[0];
+    const y = first[1] - second[1];
+
+    return x * x + y * y;
 }
 
 function coordinatesToPoint(coordinates) {
@@ -681,6 +745,7 @@ module.exports = {
     createCirclePolygon,
     createKnownSimplePolygonFromPoints,
     createPolygonFromPoints,
+    doBoundsContainBounds,
     doBoundsContainPoint,
     doBoundsOverlap,
     doPolygonsOverlap,
@@ -690,6 +755,7 @@ module.exports = {
     getPointPolygonDistance,
     isCircleInsidePolygon,
     isPointInPolygon,
+    isPolygonInsidePolygon,
     serializePolygon,
     subtractPolygon,
     unionPolygons

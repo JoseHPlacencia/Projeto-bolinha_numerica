@@ -2,10 +2,12 @@ const config = require("../config/gameConfig");
 const {
     calculatePolygonArea,
     createCirclePolygon,
+    doBoundsContainBounds,
     doBoundsOverlap,
     doPolygonsOverlap,
     getPolygonBounds,
     isPointInPolygon,
+    isPolygonInsidePolygon,
     serializePolygon,
     subtractPolygon,
     unionPolygons
@@ -142,17 +144,35 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         }
 
         addCaptureApplyCount(captureApply, "overlapCount", 1);
-        addCaptureApplyCount(captureApply, "subtractCount", 1);
         const subjectPointCount = getPolygonPointCount(otherTerritory.polygon);
-        addCaptureApplyCount(captureApply, "subtractPointCount", subjectPointCount);
 
+        if (doBoundsContainBounds(capturedBounds, otherBounds)) {
+            const containsTerritory = measureCaptureApplyPhase(diagnostics, "captureApplyContainmentFilter", () => (
+                isPolygonInsidePolygon(otherTerritory.polygon, capturedPolygon, otherBounds, capturedBounds)
+            ));
+
+            if (containsTerritory) {
+                const changed = measureCaptureApplyPhase(diagnostics, "captureApplyUpdateTerritory", () => (
+                    updateTerritoryPolygon(otherTerritory, [])
+                ));
+
+                if (changed) {
+                    addCaptureApplyCount(captureApply, "changedTerritoryCount", 1);
+                    changedPlayerIds.add(playerId);
+                }
+
+                continue;
+            }
+        }
+
+        addCaptureApplyCount(captureApply, "subtractCount", 1);
+        addCaptureApplyCount(captureApply, "subtractPointCount", subjectPointCount);
         const previousArea = getTerritoryArea(otherTerritory);
         const subtract = measureCaptureApplyOperation(diagnostics, "captureApplySubtract", () => (
             subtractPolygon(otherTerritory.polygon, capturedPolygon)
         ));
         const resultPointCount = getPolygonPointCount(subtract.value);
         addCaptureApplyCount(captureApply, "subtractResultPointCount", resultPointCount);
-
         const changed = measureCaptureApplyPhase(diagnostics, "captureApplyUpdateTerritory", () => (
             updateTerritoryPolygon(otherTerritory, subtract.value)
         ));
@@ -190,7 +210,7 @@ function getCaptureApplyMetrics(diagnostics) {
         diagnostics.captureApply = createCaptureApplyMetrics();
     }
 
-    return diagnostics.captureApply;
+    return ensureCaptureApplyMetrics(diagnostics.captureApply);
 }
 
 function createCaptureApplyMetrics() {
@@ -218,6 +238,18 @@ function createCaptureApplyMetrics() {
         subtractPointCount: 0,
         subtractResultPointCount: 0
     };
+}
+
+function ensureCaptureApplyMetrics(metrics) {
+    const defaults = createCaptureApplyMetrics();
+
+    for (const [name, value] of Object.entries(defaults)) {
+        if (!(name in metrics)) {
+            metrics[name] = value;
+        }
+    }
+
+    return metrics;
 }
 
 function measureCaptureApplyPhase(diagnostics, name, callback) {
