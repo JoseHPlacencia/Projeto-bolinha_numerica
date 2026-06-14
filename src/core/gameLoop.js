@@ -144,6 +144,7 @@ function normalizeTrailDiagnostics(diagnostics) {
 
     return {
         activeTrailPlayers: finiteOrNull(diagnostics.activeTrailPlayers),
+        captureApply: normalizeCaptureApplyDiagnostics(diagnostics.captureApply),
         captureAttempts: finiteOrNull(diagnostics.captureAttempts),
         captureChangedPlayerCount: finiteOrNull(diagnostics.captureChangedPlayerCount),
         captures: finiteOrNull(diagnostics.captures),
@@ -160,6 +161,66 @@ function normalizeTrailDiagnostics(diagnostics) {
         slowestPhase: normalizeSlowestPhase(diagnostics.slowestPhase),
         trailOwnerChecks: finiteOrNull(diagnostics.trailOwnerChecks),
         trailOwnerHits: finiteOrNull(diagnostics.trailOwnerHits)
+    };
+}
+
+function normalizeCaptureApplyDiagnostics(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        boundsOverlapCount: finiteOrNull(diagnostics.boundsOverlapCount),
+        boundsRejectedCount: finiteOrNull(diagnostics.boundsRejectedCount),
+        calls: finiteOrNull(diagnostics.calls),
+        candidateCount: finiteOrNull(diagnostics.candidateCount),
+        changedTerritoryCount: finiteOrNull(diagnostics.changedTerritoryCount),
+        emptyCapturedBoundsCount: finiteOrNull(diagnostics.emptyCapturedBoundsCount),
+        maxCapturedArea: finiteOrNull(diagnostics.maxCapturedArea),
+        maxCapturedBoundsArea: finiteOrNull(diagnostics.maxCapturedBoundsArea),
+        maxCapturedPointCount: finiteOrNull(diagnostics.maxCapturedPointCount),
+        maxOwnerArea: finiteOrNull(diagnostics.maxOwnerArea),
+        maxOwnerPointCount: finiteOrNull(diagnostics.maxOwnerPointCount),
+        maxTerritoryCount: finiteOrNull(diagnostics.maxTerritoryCount),
+        missingOwnerTerritoryCount: finiteOrNull(diagnostics.missingOwnerTerritoryCount),
+        overlapCount: finiteOrNull(diagnostics.overlapCount),
+        overlapRejectedCount: finiteOrNull(diagnostics.overlapRejectedCount),
+        ownerChangedCount: finiteOrNull(diagnostics.ownerChangedCount),
+        slowestOverlap: normalizeCaptureApplyOverlap(diagnostics.slowestOverlap),
+        slowestSubtract: normalizeCaptureApplySubtract(diagnostics.slowestSubtract),
+        subtractChangedCount: finiteOrNull(diagnostics.subtractChangedCount),
+        subtractCount: finiteOrNull(diagnostics.subtractCount),
+        subtractPointCount: finiteOrNull(diagnostics.subtractPointCount),
+        subtractResultPointCount: finiteOrNull(diagnostics.subtractResultPointCount)
+    };
+}
+
+function normalizeCaptureApplyOverlap(detail) {
+    if (!detail || typeof detail !== "object") {
+        return null;
+    }
+
+    return {
+        durationMs: finiteOrNull(detail.durationMs),
+        hit: Boolean(detail.hit),
+        playerId: typeof detail.playerId === "string" ? detail.playerId : null,
+        subjectPointCount: finiteOrNull(detail.subjectPointCount)
+    };
+}
+
+function normalizeCaptureApplySubtract(detail) {
+    if (!detail || typeof detail !== "object") {
+        return null;
+    }
+
+    return {
+        changed: Boolean(detail.changed),
+        durationMs: finiteOrNull(detail.durationMs),
+        playerId: typeof detail.playerId === "string" ? detail.playerId : null,
+        resultArea: finiteOrNull(detail.resultArea),
+        resultPointCount: finiteOrNull(detail.resultPointCount),
+        subjectArea: finiteOrNull(detail.subjectArea),
+        subjectPointCount: finiteOrNull(detail.subjectPointCount)
     };
 }
 

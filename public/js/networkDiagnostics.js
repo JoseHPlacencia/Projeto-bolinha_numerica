@@ -140,6 +140,9 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const gameLoopPhases = gameLoop && gameLoop.phases || {};
         const trailDiagnostics = gameLoop && gameLoop.trails;
         const trailPhases = trailDiagnostics && trailDiagnostics.phases || {};
+        const captureApply = trailDiagnostics && trailDiagnostics.captureApply || {};
+        const captureApplySlowestOverlap = captureApply.slowestOverlap || {};
+        const captureApplySlowestSubtract = captureApply.slowestSubtract || {};
         const botDiagnostics = gameLoop && gameLoop.bot;
         const botPhases = botDiagnostics && botDiagnostics.phases || {};
         const botSelfTrail = botDiagnostics && botDiagnostics.selfTrailSafety || {};
@@ -161,6 +164,21 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             trailCaptureMs: round(trailPhases.capture),
             trailCaptureCreateMs: round(trailPhases.captureCreate),
             trailCaptureApplyMs: round(trailPhases.captureApplyTerritory),
+            captureApplyCalls: captureApply.calls,
+            captureApplyCandidates: captureApply.candidateCount,
+            captureApplyBoundsRejected: captureApply.boundsRejectedCount,
+            captureApplyBoundsOverlaps: captureApply.boundsOverlapCount,
+            captureApplyOverlaps: captureApply.overlapCount,
+            captureApplyOverlapRejected: captureApply.overlapRejectedCount,
+            captureApplySubtractions: captureApply.subtractCount,
+            captureApplyChangedTerritories: captureApply.changedTerritoryCount,
+            captureApplyCapturedPoints: captureApply.maxCapturedPointCount,
+            captureApplySubtractPoints: captureApply.subtractPointCount,
+            captureApplySlowestOverlapMs: round(captureApplySlowestOverlap.durationMs),
+            captureApplySlowestOverlapPoints: captureApplySlowestOverlap.subjectPointCount,
+            captureApplySlowestSubtractMs: round(captureApplySlowestSubtract.durationMs),
+            captureApplySlowestSubtractPoints: captureApplySlowestSubtract.subjectPointCount,
+            captureApplySlowestSubtractResultPoints: captureApplySlowestSubtract.resultPointCount,
             trailFillMs: round(trailPhases.fill),
             trailOwnerCrossingMs: round(trailPhases.ownerCrossing),
             trailSelfCollisionMs: round(trailPhases.selfCollision),
@@ -218,6 +236,21 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 trailCaptureMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.capture),
                 trailCaptureCreateMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.captureCreate),
                 trailCaptureApplyMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.captureApplyTerritory),
+                captureApplyCalls: getEventCaptureApply(event) && getEventCaptureApply(event).calls,
+                captureApplyCandidates: getEventCaptureApply(event) && getEventCaptureApply(event).candidateCount,
+                captureApplyBoundsRejected: getEventCaptureApply(event) && getEventCaptureApply(event).boundsRejectedCount,
+                captureApplyBoundsOverlaps: getEventCaptureApply(event) && getEventCaptureApply(event).boundsOverlapCount,
+                captureApplyOverlaps: getEventCaptureApply(event) && getEventCaptureApply(event).overlapCount,
+                captureApplyOverlapRejected: getEventCaptureApply(event) && getEventCaptureApply(event).overlapRejectedCount,
+                captureApplySubtractions: getEventCaptureApply(event) && getEventCaptureApply(event).subtractCount,
+                captureApplyChangedTerritories: getEventCaptureApply(event) && getEventCaptureApply(event).changedTerritoryCount,
+                captureApplyCapturedPoints: getEventCaptureApply(event) && getEventCaptureApply(event).maxCapturedPointCount,
+                captureApplySubtractPoints: getEventCaptureApply(event) && getEventCaptureApply(event).subtractPointCount,
+                captureApplySlowestOverlapMs: getEventCaptureApply(event) && getEventCaptureApply(event).slowestOverlap && round(getEventCaptureApply(event).slowestOverlap.durationMs),
+                captureApplySlowestOverlapPoints: getEventCaptureApply(event) && getEventCaptureApply(event).slowestOverlap && getEventCaptureApply(event).slowestOverlap.subjectPointCount,
+                captureApplySlowestSubtractMs: getEventCaptureApply(event) && getEventCaptureApply(event).slowestSubtract && round(getEventCaptureApply(event).slowestSubtract.durationMs),
+                captureApplySlowestSubtractPoints: getEventCaptureApply(event) && getEventCaptureApply(event).slowestSubtract && getEventCaptureApply(event).slowestSubtract.subjectPointCount,
+                captureApplySlowestSubtractResultPoints: getEventCaptureApply(event) && getEventCaptureApply(event).slowestSubtract && getEventCaptureApply(event).slowestSubtract.resultPointCount,
                 trailFillMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.fill),
                 trailOwnerCrossingMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.ownerCrossing),
                 trailSelfCollisionMs: event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && round(event.server.gameLoop.trails.phases.selfCollision),
@@ -250,6 +283,14 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
 
         console.table(rows);
         return rows;
+    }
+
+    function getEventCaptureApply(event) {
+        return event
+            && event.server
+            && event.server.gameLoop
+            && event.server.gameLoop.trails
+            && event.server.gameLoop.trails.captureApply;
     }
 
     function clear() {

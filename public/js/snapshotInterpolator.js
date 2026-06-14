@@ -230,6 +230,18 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxTrailCaptureMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.capture)),
             maxTrailCaptureCreateMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureCreate)),
             maxTrailCaptureApplyTerritoryMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureApplyTerritory)),
+            maxCaptureApplyCalls: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).calls)),
+            maxCaptureApplyCandidates: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).candidateCount)),
+            maxCaptureApplyBoundsRejected: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).boundsRejectedCount)),
+            maxCaptureApplyBoundsOverlaps: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).boundsOverlapCount)),
+            maxCaptureApplyOverlaps: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).overlapCount)),
+            maxCaptureApplyOverlapRejected: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).overlapRejectedCount)),
+            maxCaptureApplySubtractions: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).subtractCount)),
+            maxCaptureApplyChangedTerritories: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).changedTerritoryCount)),
+            maxCaptureApplyCapturedPoints: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).maxCapturedPointCount)),
+            maxCaptureApplySubtractPoints: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).subtractPointCount)),
+            maxCaptureApplySlowestOverlapMs: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).slowestOverlap && getEventCaptureApply(event).slowestOverlap.durationMs)),
+            maxCaptureApplySlowestSubtractMs: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).slowestSubtract && getEventCaptureApply(event).slowestSubtract.durationMs)),
             maxTrailCaptureDamagePlayersMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureDamagePlayers)),
             maxTrailCaptureRelocatePlayersMs: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.phases && event.server.gameLoop.trails.phases.captureRelocatePlayers)),
             maxTrailOwnerSegmentChecks: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.ownerTrailSegmentChecks)),
@@ -255,6 +267,14 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             bufferSpikeEvents: snapshotEvents.filter(event => event.bufferMs >= getSlowBufferMs()).length,
             resyncEvents: networkDiagnosticsState.events.filter(event => event.type === "resyncRequested").length
         };
+    }
+
+    function getEventCaptureApply(event) {
+        return event
+            && event.server
+            && event.server.gameLoop
+            && event.server.gameLoop.trails
+            && event.server.gameLoop.trails.captureApply;
     }
 
     function isReliableBacklog(server) {
@@ -331,6 +351,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
         return {
             activeTrailPlayers: finiteOrNull(value.activeTrailPlayers),
+            captureApply: normalizeCaptureApplyDiagnostics(value.captureApply),
             captureAttempts: finiteOrNull(value.captureAttempts),
             captureChangedPlayerCount: finiteOrNull(value.captureChangedPlayerCount),
             captures: finiteOrNull(value.captures),
@@ -347,6 +368,66 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase),
             trailOwnerChecks: finiteOrNull(value.trailOwnerChecks),
             trailOwnerHits: finiteOrNull(value.trailOwnerHits)
+        };
+    }
+
+    function normalizeCaptureApplyDiagnostics(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            boundsOverlapCount: finiteOrNull(value.boundsOverlapCount),
+            boundsRejectedCount: finiteOrNull(value.boundsRejectedCount),
+            calls: finiteOrNull(value.calls),
+            candidateCount: finiteOrNull(value.candidateCount),
+            changedTerritoryCount: finiteOrNull(value.changedTerritoryCount),
+            emptyCapturedBoundsCount: finiteOrNull(value.emptyCapturedBoundsCount),
+            maxCapturedArea: finiteOrNull(value.maxCapturedArea),
+            maxCapturedBoundsArea: finiteOrNull(value.maxCapturedBoundsArea),
+            maxCapturedPointCount: finiteOrNull(value.maxCapturedPointCount),
+            maxOwnerArea: finiteOrNull(value.maxOwnerArea),
+            maxOwnerPointCount: finiteOrNull(value.maxOwnerPointCount),
+            maxTerritoryCount: finiteOrNull(value.maxTerritoryCount),
+            missingOwnerTerritoryCount: finiteOrNull(value.missingOwnerTerritoryCount),
+            overlapCount: finiteOrNull(value.overlapCount),
+            overlapRejectedCount: finiteOrNull(value.overlapRejectedCount),
+            ownerChangedCount: finiteOrNull(value.ownerChangedCount),
+            slowestOverlap: normalizeCaptureApplyOverlap(value.slowestOverlap),
+            slowestSubtract: normalizeCaptureApplySubtract(value.slowestSubtract),
+            subtractChangedCount: finiteOrNull(value.subtractChangedCount),
+            subtractCount: finiteOrNull(value.subtractCount),
+            subtractPointCount: finiteOrNull(value.subtractPointCount),
+            subtractResultPointCount: finiteOrNull(value.subtractResultPointCount)
+        };
+    }
+
+    function normalizeCaptureApplyOverlap(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            durationMs: finiteOrNull(value.durationMs),
+            hit: Boolean(value.hit),
+            playerId: typeof value.playerId === "string" ? value.playerId : null,
+            subjectPointCount: finiteOrNull(value.subjectPointCount)
+        };
+    }
+
+    function normalizeCaptureApplySubtract(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            changed: Boolean(value.changed),
+            durationMs: finiteOrNull(value.durationMs),
+            playerId: typeof value.playerId === "string" ? value.playerId : null,
+            resultArea: finiteOrNull(value.resultArea),
+            resultPointCount: finiteOrNull(value.resultPointCount),
+            subjectArea: finiteOrNull(value.subjectArea),
+            subjectPointCount: finiteOrNull(value.subjectPointCount)
         };
     }
 
