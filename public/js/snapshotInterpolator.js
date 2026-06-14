@@ -267,6 +267,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxTerritoryPayloadCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount)),
             maxTerritoryOperationCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount)),
             maxTrailPatchPointCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount)),
+            payloadOutlierCount: snapshotEvents.filter(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.payloadOutlier).length,
+            maxPayloadOutlierBytes: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.payloadOutlier && event.server.snapshotBreakdown.payloadOutlier.payloadBytes)),
             reliableRetryEvents: snapshotEvents.filter(event => event.server && event.server.sendType === "reliable-retry").length,
             reliableBacklogEvents: snapshotEvents.filter(event => event.server && isReliableBacklog(event.server)).length,
             bufferSpikeEvents: snapshotEvents.filter(event => event.bufferMs >= getSlowBufferMs()).length,
@@ -537,8 +539,74 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             trailPatchUpdateCount: finiteOrNull(value.trailPatchUpdateCount),
             trailPatchPointCount: finiteOrNull(value.trailPatchPointCount),
             leaderboardCount: finiteOrNull(value.leaderboardCount),
-            numberCount: finiteOrNull(value.numberCount)
+            numberCount: finiteOrNull(value.numberCount),
+            payloadOutlier: normalizePayloadOutlier(value.payloadOutlier)
         };
+    }
+
+    function normalizePayloadOutlier(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            payloadBytes: finiteOrNull(value.payloadBytes),
+            thresholdBytes: finiteOrNull(value.thresholdBytes),
+            sectionBytes: normalizeNamedByteList(value.sectionBytes, "section"),
+            topSections: normalizeNamedByteList(value.topSections, "section"),
+            topTrails: normalizeTrailPayloadDetails(value.topTrails),
+            topTerritories: normalizeTerritoryPayloadDetails(value.topTerritories),
+            topTerritoryOps: normalizeTerritoryOperationPayloadDetails(value.topTerritoryOps)
+        };
+    }
+
+    function normalizeNamedByteList(values, nameKey) {
+        return (values || []).map(item => ({
+            [nameKey]: item && typeof item[nameKey] === "string" ? item[nameKey] : null,
+            bytes: finiteOrNull(item && item.bytes)
+        }));
+    }
+
+    function normalizeTrailPayloadDetails(values) {
+        return (values || []).map(item => ({
+            playerId: item && typeof item.playerId === "string" ? item.playerId : null,
+            bytes: finiteOrNull(item && item.bytes),
+            full: Boolean(item && item.full),
+            pointCount: finiteOrNull(item && item.pointCount),
+            patchPointCount: finiteOrNull(item && item.patchPointCount),
+            fullPointCount: finiteOrNull(item && item.fullPointCount),
+            leftPatchCount: finiteOrNull(item && item.leftPatchCount),
+            rightPatchCount: finiteOrNull(item && item.rightPatchCount),
+            leftPatchPointCount: finiteOrNull(item && item.leftPatchPointCount),
+            rightPatchPointCount: finiteOrNull(item && item.rightPatchPointCount),
+            leftFillPointCount: finiteOrNull(item && item.leftFillPointCount),
+            rightFillPointCount: finiteOrNull(item && item.rightFillPointCount),
+            leftSegmentPointCount: finiteOrNull(item && item.leftSegmentPointCount),
+            rightSegmentPointCount: finiteOrNull(item && item.rightSegmentPointCount),
+            leftFillPathPointCount: finiteOrNull(item && item.leftFillPathPointCount),
+            rightFillPathPointCount: finiteOrNull(item && item.rightFillPathPointCount)
+        }));
+    }
+
+    function normalizeTerritoryPayloadDetails(values) {
+        return (values || []).map(item => ({
+            playerId: item && typeof item.playerId === "string" ? item.playerId : null,
+            bytes: finiteOrNull(item && item.bytes),
+            pointDefinitionCount: finiteOrNull(item && item.pointDefinitionCount),
+            ringReferenceCount: finiteOrNull(item && item.ringReferenceCount),
+            version: finiteOrNull(item && item.version)
+        }));
+    }
+
+    function normalizeTerritoryOperationPayloadDetails(values) {
+        return (values || []).map(item => ({
+            playerId: item && typeof item.playerId === "string" ? item.playerId : null,
+            bytes: finiteOrNull(item && item.bytes),
+            type: item && typeof item.type === "string" ? item.type : null,
+            trailPointCount: finiteOrNull(item && item.trailPointCount),
+            trailTailPointCount: finiteOrNull(item && item.trailTailPointCount),
+            version: finiteOrNull(item && item.version)
+        }));
     }
 
     function normalizeReliableAck(value) {

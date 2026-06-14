@@ -189,6 +189,8 @@ const network = Object.freeze({
     trailPredictionPlayerHalfWidth: world.playerSize / 2,
     diagnosticsHistoryLimit: 240,
     diagnosticsPingIntervalMs: 1000,
+    diagnosticsPayloadOutlierBytes: 50000,
+    diagnosticsPayloadOutlierTopLimit: 5,
     diagnosticsSlowBufferMs: 150,
     interestMargin: 800,
     maxViewportWorldWidth: 3200,

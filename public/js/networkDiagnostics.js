@@ -146,6 +146,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const botDiagnostics = gameLoop && gameLoop.bot;
         const botPhases = botDiagnostics && botDiagnostics.phases || {};
         const botSelfTrail = botDiagnostics && botDiagnostics.selfTrailSafety || {};
+        const breakdown = latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown || {};
+        const payloadOutlier = breakdown.payloadOutlier || null;
+        const topPayloadSection = payloadOutlier && payloadOutlier.topSections && payloadOutlier.topSections[0] || {};
+        const topPayloadTrail = payloadOutlier && payloadOutlier.topTrails && payloadOutlier.topTrails[0] || {};
         const row = {
             diagnosis: data.diagnosis.reason,
             bufferMs: latestSnapshot && round(latestSnapshot.bufferMs),
@@ -214,9 +218,16 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             buildMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.snapshotBuildMs),
             payloadMeasureMs: latestSnapshot && latestSnapshot.server && round(latestSnapshot.server.payloadMeasureMs),
             payloadBytes: latestSnapshot && latestSnapshot.server && latestSnapshot.server.basePayloadBytes,
-            territoryPayloads: latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown && latestSnapshot.server.snapshotBreakdown.territoryPayloadCount,
-            territoryOps: latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown && latestSnapshot.server.snapshotBreakdown.territoryOperationCount,
-            trailPatchPoints: latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown && latestSnapshot.server.snapshotBreakdown.trailPatchPointCount,
+            payloadOutlierBytes: payloadOutlier && payloadOutlier.payloadBytes,
+            payloadOutlierTopSection: topPayloadSection.section,
+            payloadOutlierTopSectionBytes: topPayloadSection.bytes,
+            payloadOutlierTopTrailPlayer: topPayloadTrail.playerId,
+            payloadOutlierTopTrailBytes: topPayloadTrail.bytes,
+            payloadOutlierTopTrailPoints: topPayloadTrail.pointCount,
+            payloadOutlierTopTrailPatchPoints: topPayloadTrail.patchPointCount,
+            territoryPayloads: breakdown.territoryPayloadCount,
+            territoryOps: breakdown.territoryOperationCount,
+            trailPatchPoints: breakdown.trailPatchPointCount,
             transport: data.transport
         };
 
@@ -292,6 +303,11 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 buildMs: event.server && round(event.server.snapshotBuildMs),
                 payloadMeasureMs: event.server && round(event.server.payloadMeasureMs),
                 payloadBytes: event.server && event.server.basePayloadBytes,
+                payloadOutlierBytes: getEventPayloadOutlier(event) && getEventPayloadOutlier(event).payloadBytes,
+                payloadOutlierTopSection: getTopPayloadSection(event) && getTopPayloadSection(event).section,
+                payloadOutlierTopSectionBytes: getTopPayloadSection(event) && getTopPayloadSection(event).bytes,
+                payloadOutlierTopTrailPlayer: getTopPayloadTrail(event) && getTopPayloadTrail(event).playerId,
+                payloadOutlierTopTrailPoints: getTopPayloadTrail(event) && getTopPayloadTrail(event).pointCount,
                 territoryPayloads: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount,
                 territoryOps: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount,
                 trailPatchPoints: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount,
@@ -309,6 +325,25 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             && event.server.gameLoop
             && event.server.gameLoop.trails
             && event.server.gameLoop.trails.captureApply;
+    }
+
+    function getEventPayloadOutlier(event) {
+        return event
+            && event.server
+            && event.server.snapshotBreakdown
+            && event.server.snapshotBreakdown.payloadOutlier;
+    }
+
+    function getTopPayloadSection(event) {
+        const outlier = getEventPayloadOutlier(event);
+
+        return outlier && outlier.topSections && outlier.topSections[0] || null;
+    }
+
+    function getTopPayloadTrail(event) {
+        const outlier = getEventPayloadOutlier(event);
+
+        return outlier && outlier.topTrails && outlier.topTrails[0] || null;
     }
 
     function clear() {

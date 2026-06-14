@@ -220,6 +220,10 @@ function createSnapshotForNetworkSend(socket, snapshot, sendType, pending = null
 
 function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = null, sendDiagnostics = null) {
     const payloadMeasurement = measureSnapshotPayload(snapshot);
+    const snapshotBreakdown = createSnapshotBreakdown(snapshot, {
+        includePayloadOutlier: isPayloadOutlier(payloadMeasurement.bytes),
+        payloadBytes: payloadMeasurement.bytes
+    });
     const now = Date.now();
     const previousSentAt = Number.isFinite(socket.data.networkDiagnosticsLastSentAt)
         ? socket.data.networkDiagnosticsLastSentAt
@@ -244,7 +248,7 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         snapshotTime: snapshot.time,
         basePayloadBytes: payloadMeasurement.bytes,
         payloadMeasureMs: payloadMeasurement.measureMs,
-        snapshotBreakdown: createSnapshotBreakdown(snapshot),
+        snapshotBreakdown,
         playerCount: countObjectKeys(snapshot.players),
         territoryCount: countArrayItems(snapshot.territoryIds),
         trailCount: countArrayItems(snapshot.trailIds),
@@ -258,6 +262,16 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         reliableAckTimeouts: pending ? pending.ackTimeouts || 0 : 0,
         lastReliableAck: socket.data.networkDiagnosticsLastReliableAck || null
     };
+}
+
+function isPayloadOutlier(bytes) {
+    return Number.isFinite(bytes) && bytes >= getPayloadOutlierThresholdBytes();
+}
+
+function getPayloadOutlierThresholdBytes() {
+    return Number.isFinite(config.network.diagnosticsPayloadOutlierBytes)
+        ? config.network.diagnosticsPayloadOutlierBytes
+        : 50000;
 }
 
 function createMeasuredSnapshot(players, territories, viewerId, clientState, numberSystem, runtimeConfig, shouldMeasure = false) {
@@ -737,7 +751,7 @@ function countArrayItems(value) {
     return Array.isArray(value) ? value.length : 0;
 }
 
-function createSnapshotBreakdown(snapshot) {
+function createSnapshotBreakdown(snapshot, options = {}) {
     const territories = snapshot && snapshot.territories || {};
     const territoryOps = snapshot && snapshot.territoryOps || {};
     const trails = snapshot && snapshot.trails || {};
@@ -787,7 +801,7 @@ function createSnapshotBreakdown(snapshot) {
         trailPatchPointCount += countTrailPatchPoints(trail);
     }
 
-    return {
+    const breakdown = {
         playerPositionCount: countObjectKeys(snapshot && snapshot.players),
         playerInfoCount: countObjectKeys(snapshot && snapshot.playerInfo),
         territoryVersionCount: countObjectKeys(snapshot && snapshot.territoryVersions),
@@ -805,6 +819,155 @@ function createSnapshotBreakdown(snapshot) {
         leaderboardCount: countArrayItems(snapshot && snapshot.leaderboard),
         numberCount: countArrayItems(snapshot && snapshot.numbers && snapshot.numbers.nums)
     };
+
+    if (options.includePayloadOutlier) {
+        breakdown.payloadOutlier = createPayloadOutlierBreakdown(snapshot, options.payloadBytes);
+    }
+
+    return breakdown;
+}
+
+function createPayloadOutlierBreakdown(snapshot, payloadBytes) {
+    const limit = getPayloadOutlierTopLimit();
+    const sectionBytes = createSectionByteBreakdown(snapshot);
+    const trailDetails = createTrailPayloadDetails(snapshot && snapshot.trails, limit);
+    const territoryDetails = createTerritoryPayloadDetails(snapshot && snapshot.territories, limit);
+    const territoryOperationDetails = createTerritoryOperationPayloadDetails(snapshot && snapshot.territoryOps, limit);
+
+    return {
+        payloadBytes: finiteOrNull(payloadBytes),
+        thresholdBytes: getPayloadOutlierThresholdBytes(),
+        sectionBytes,
+        topSections: sectionBytes.slice(0, limit),
+        topTrails: trailDetails,
+        topTerritories: territoryDetails,
+        topTerritoryOps: territoryOperationDetails
+    };
+}
+
+function getPayloadOutlierTopLimit() {
+    return Number.isInteger(config.network.diagnosticsPayloadOutlierTopLimit)
+        ? Math.max(1, config.network.diagnosticsPayloadOutlierTopLimit)
+        : 5;
+}
+
+function createSectionByteBreakdown(snapshot) {
+    return Object.keys(snapshot || {})
+        .map(section => ({
+            section,
+            bytes: measureJsonBytes(snapshot[section])
+        }))
+        .filter(item => Number.isFinite(item.bytes))
+        .sort((first, second) => second.bytes - first.bytes);
+}
+
+function createTrailPayloadDetails(trails, limit) {
+    return Object.entries(trails || {})
+        .map(([playerId, trail]) => createTrailPayloadDetail(playerId, trail))
+        .filter(Boolean)
+        .sort(comparePayloadDetails)
+        .slice(0, limit);
+}
+
+function createTrailPayloadDetail(playerId, trail) {
+    if (!trail || typeof trail !== "object") {
+        return null;
+    }
+
+    const leftPatchPointCount = countPatchPoints(trail.leftPatches);
+    const rightPatchPointCount = countPatchPoints(trail.rightPatches);
+    const leftFillPointCount = countArrayItems(trail.leftFillPoints);
+    const rightFillPointCount = countArrayItems(trail.rightFillPoints);
+    const leftSegmentPointCount = countPackedSegmentsPoints(trail.leftSegments);
+    const rightSegmentPointCount = countPackedSegmentsPoints(trail.rightSegments);
+    const leftFillPathPointCount = countArrayItems(trail.leftFillPath);
+    const rightFillPathPointCount = countArrayItems(trail.rightFillPath);
+    const patchPointCount = leftPatchPointCount + rightPatchPointCount + leftFillPointCount + rightFillPointCount;
+    const fullPointCount = leftSegmentPointCount + rightSegmentPointCount + leftFillPathPointCount + rightFillPathPointCount;
+
+    return {
+        playerId,
+        bytes: measureJsonBytes(trail),
+        full: Boolean(trail.full),
+        pointCount: trail.full ? fullPointCount : patchPointCount,
+        patchPointCount,
+        fullPointCount,
+        leftPatchCount: countArrayItems(trail.leftPatches),
+        rightPatchCount: countArrayItems(trail.rightPatches),
+        leftPatchPointCount,
+        rightPatchPointCount,
+        leftFillPointCount,
+        rightFillPointCount,
+        leftSegmentPointCount,
+        rightSegmentPointCount,
+        leftFillPathPointCount,
+        rightFillPathPointCount
+    };
+}
+
+function createTerritoryPayloadDetails(territories, limit) {
+    return Object.entries(territories || {})
+        .map(([playerId, territory]) => createTerritoryPayloadDetail(playerId, territory))
+        .filter(Boolean)
+        .sort(comparePayloadDetails)
+        .slice(0, limit);
+}
+
+function createTerritoryPayloadDetail(playerId, territory) {
+    if (!territory || typeof territory !== "object") {
+        return null;
+    }
+
+    const polygon = territory.polygon || {};
+
+    return {
+        playerId,
+        bytes: measureJsonBytes(territory),
+        pointDefinitionCount: countArrayItems(polygon.points),
+        ringReferenceCount: countRingReferences(polygon.rings),
+        version: finiteOrNull(territory.version)
+    };
+}
+
+function createTerritoryOperationPayloadDetails(operations, limit) {
+    return Object.entries(operations || {})
+        .map(([playerId, operation]) => createTerritoryOperationPayloadDetail(playerId, operation))
+        .filter(Boolean)
+        .sort(comparePayloadDetails)
+        .slice(0, limit);
+}
+
+function createTerritoryOperationPayloadDetail(playerId, operation) {
+    if (!operation || typeof operation !== "object") {
+        return null;
+    }
+
+    return {
+        playerId,
+        bytes: measureJsonBytes(operation),
+        type: typeof operation.type === "string" ? operation.type : null,
+        trailPointCount: countArrayItems(operation.trailPoints),
+        trailTailPointCount: countArrayItems(operation.trailTailPoints),
+        version: finiteOrNull(operation.version)
+    };
+}
+
+function comparePayloadDetails(first, second) {
+    const byteDifference = (second.bytes || 0) - (first.bytes || 0);
+
+    if (byteDifference !== 0) {
+        return byteDifference;
+    }
+
+    return (second.pointCount || 0) - (first.pointCount || 0);
+}
+
+function measureJsonBytes(value) {
+    try {
+        return Buffer.byteLength(JSON.stringify(value), "utf8");
+    } catch (_error) {
+        return null;
+    }
 }
 
 function countRingReferences(rings) {
