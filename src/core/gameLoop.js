@@ -185,11 +185,22 @@ function normalizeCaptureApplyDiagnostics(diagnostics) {
         missingOwnerTerritoryCount: finiteOrNull(diagnostics.missingOwnerTerritoryCount),
         overlapCount: finiteOrNull(diagnostics.overlapCount),
         overlapRejectedCount: finiteOrNull(diagnostics.overlapRejectedCount),
+        operationSimplifyAttemptCount: finiteOrNull(diagnostics.operationSimplifyAttemptCount),
+        operationSimplifyCacheHitCount: finiteOrNull(diagnostics.operationSimplifyCacheHitCount),
+        operationSimplifyCapturedCount: finiteOrNull(diagnostics.operationSimplifyCapturedCount),
+        operationSimplifyHitCount: finiteOrNull(diagnostics.operationSimplifyHitCount),
+        operationSimplifyInputPointCount: finiteOrNull(diagnostics.operationSimplifyInputPointCount),
+        operationSimplifyMaxAreaDrift: finiteOrNull(diagnostics.operationSimplifyMaxAreaDrift),
+        operationSimplifyMaxAreaDriftRatio: finiteOrNull(diagnostics.operationSimplifyMaxAreaDriftRatio),
+        operationSimplifyOutputPointCount: finiteOrNull(diagnostics.operationSimplifyOutputPointCount),
+        operationSimplifySubjectCount: finiteOrNull(diagnostics.operationSimplifySubjectCount),
         ownerChangedCount: finiteOrNull(diagnostics.ownerChangedCount),
         slowestOverlap: normalizeCaptureApplyOverlap(diagnostics.slowestOverlap),
         slowestSubtract: normalizeCaptureApplySubtract(diagnostics.slowestSubtract),
         subtractChangedCount: finiteOrNull(diagnostics.subtractChangedCount),
         subtractCount: finiteOrNull(diagnostics.subtractCount),
+        subtractOperationClippingPointCount: finiteOrNull(diagnostics.subtractOperationClippingPointCount),
+        subtractOperationPointCount: finiteOrNull(diagnostics.subtractOperationPointCount),
         subtractPointCount: finiteOrNull(diagnostics.subtractPointCount),
         subtractResultPointCount: finiteOrNull(diagnostics.subtractResultPointCount)
     };
@@ -215,12 +226,18 @@ function normalizeCaptureApplySubtract(detail) {
 
     return {
         changed: Boolean(detail.changed),
+        clippingPointCount: finiteOrNull(detail.clippingPointCount),
         durationMs: finiteOrNull(detail.durationMs),
+        operationClippingPointCount: finiteOrNull(detail.operationClippingPointCount),
+        operationResultArea: finiteOrNull(detail.operationResultArea),
+        operationSubjectArea: finiteOrNull(detail.operationSubjectArea),
+        operationSubjectPointCount: finiteOrNull(detail.operationSubjectPointCount),
         playerId: typeof detail.playerId === "string" ? detail.playerId : null,
         resultArea: finiteOrNull(detail.resultArea),
         resultPointCount: finiteOrNull(detail.resultPointCount),
         subjectArea: finiteOrNull(detail.subjectArea),
-        subjectPointCount: finiteOrNull(detail.subjectPointCount)
+        subjectPointCount: finiteOrNull(detail.subjectPointCount),
+        usedSimplified: Boolean(detail.usedSimplified)
     };
 }
 

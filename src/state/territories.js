@@ -2,10 +2,12 @@ const config = require("../config/gameConfig");
 const {
     calculatePolygonArea,
     createCirclePolygon,
+    createOperationalPolygon,
     doBoundsContainBounds,
     doBoundsOverlap,
     doPolygonsOverlap,
     getPolygonBounds,
+    getPolygonPointCount,
     isPointInPolygon,
     isPolygonInsidePolygon,
     serializePolygon,
@@ -15,6 +17,7 @@ const {
 const { getHighResolutionTime } = require("../utils/time");
 
 const territoryChangeAreaEpsilon = 1;
+const operationSimplifyMaxAreaDrift = config.world.playerSize * config.world.playerSize;
 
 function createTerritories() {
     return new Map();
@@ -107,6 +110,8 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         addCaptureApplyCount(captureApply, "emptyCapturedBoundsCount", 1);
     }
 
+    let capturedOperation = null;
+
     for (const [playerId, otherTerritory] of territories.entries()) {
         if (playerId === ownerId) {
             continue;
@@ -168,23 +173,37 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         addCaptureApplyCount(captureApply, "subtractCount", 1);
         addCaptureApplyCount(captureApply, "subtractPointCount", subjectPointCount);
         const previousArea = getTerritoryArea(otherTerritory);
+        const subjectOperation = getTerritoryOperationPolygon(otherTerritory, captureApply, diagnostics);
+        capturedOperation = capturedOperation || getCapturedOperationPolygon(capturedPolygon, captureApply, diagnostics);
+        const operationSubjectArea = calculatePolygonArea(subjectOperation.polygon);
         const subtract = measureCaptureApplyOperation(diagnostics, "captureApplySubtract", () => (
-            subtractPolygon(otherTerritory.polygon, capturedPolygon)
+            subtractPolygon(subjectOperation.polygon, capturedOperation.polygon)
         ));
         const resultPointCount = getPolygonPointCount(subtract.value);
+        const operationResultArea = calculatePolygonArea(subtract.value);
+        const operationAreaDelta = Math.abs(operationSubjectArea - operationResultArea);
+        addCaptureApplyCount(captureApply, "subtractOperationPointCount", subjectOperation.outputPointCount);
+        addCaptureApplyCount(captureApply, "subtractOperationClippingPointCount", capturedOperation.outputPointCount);
         addCaptureApplyCount(captureApply, "subtractResultPointCount", resultPointCount);
-        const changed = measureCaptureApplyPhase(diagnostics, "captureApplyUpdateTerritory", () => (
-            updateTerritoryPolygon(otherTerritory, subtract.value)
-        ));
+        const changed = operationAreaDelta > territoryChangeAreaEpsilon
+            && measureCaptureApplyPhase(diagnostics, "captureApplyUpdateTerritory", () => (
+                updateTerritoryPolygon(otherTerritory, subtract.value)
+            ));
 
         recordSlowestCaptureApplySubtract(captureApply, {
             changed,
+            clippingPointCount: getPolygonPointCount(capturedPolygon),
             durationMs: subtract.durationMs,
+            operationClippingPointCount: capturedOperation.outputPointCount,
+            operationResultArea,
+            operationSubjectArea,
+            operationSubjectPointCount: subjectOperation.outputPointCount,
             playerId,
             resultArea: getTerritoryArea(otherTerritory),
             resultPointCount,
             subjectArea: previousArea,
-            subjectPointCount
+            subjectPointCount,
+            usedSimplified: subjectOperation.simplified || capturedOperation.simplified
         });
 
         if (changed) {
@@ -230,11 +249,22 @@ function createCaptureApplyMetrics() {
         missingOwnerTerritoryCount: 0,
         overlapCount: 0,
         overlapRejectedCount: 0,
+        operationSimplifyAttemptCount: 0,
+        operationSimplifyCacheHitCount: 0,
+        operationSimplifyCapturedCount: 0,
+        operationSimplifyHitCount: 0,
+        operationSimplifyInputPointCount: 0,
+        operationSimplifyMaxAreaDrift: 0,
+        operationSimplifyMaxAreaDriftRatio: 0,
+        operationSimplifyOutputPointCount: 0,
+        operationSimplifySubjectCount: 0,
         ownerChangedCount: 0,
         slowestOverlap: null,
         slowestSubtract: null,
         subtractChangedCount: 0,
         subtractCount: 0,
+        subtractOperationClippingPointCount: 0,
+        subtractOperationPointCount: 0,
         subtractPointCount: 0,
         subtractResultPointCount: 0
     };
@@ -337,19 +367,19 @@ function recordSlowestCaptureApplySubtract(metrics, detail) {
 
     metrics.slowestSubtract = {
         changed: Boolean(detail.changed),
+        clippingPointCount: detail.clippingPointCount,
         durationMs,
+        operationClippingPointCount: detail.operationClippingPointCount,
+        operationResultArea: roundToMilliseconds(detail.operationResultArea),
+        operationSubjectArea: roundToMilliseconds(detail.operationSubjectArea),
+        operationSubjectPointCount: detail.operationSubjectPointCount,
         playerId: detail.playerId,
         resultArea: roundToMilliseconds(detail.resultArea),
         resultPointCount: detail.resultPointCount,
         subjectArea: roundToMilliseconds(detail.subjectArea),
-        subjectPointCount: detail.subjectPointCount
+        subjectPointCount: detail.subjectPointCount,
+        usedSimplified: Boolean(detail.usedSimplified)
     };
-}
-
-function getPolygonPointCount(polygon) {
-    return (polygon || []).reduce((sum, ring) => (
-        sum + (Array.isArray(ring) ? ring.length : 0)
-    ), 0);
 }
 
 function getBoundsArea(bounds) {
@@ -394,6 +424,154 @@ function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolyg
         : unionPolygons(currentPolygon, capturedPolygon);
 }
 
+function getTerritoryOperationPolygon(territory, metrics, diagnostics) {
+    const polygon = territory && territory.polygon || [];
+    const pointCount = getPolygonPointCount(polygon);
+    const options = createOperationSimplifyOptions("subject");
+
+    if (pointCount < options.minInputPointCount) {
+        return createIdentityOperationPolygon(polygon, pointCount);
+    }
+
+    const settingsKey = createOperationSimplifyKey(options);
+
+    if (territory.operationPolygon
+        && territory.operationPolygonVersion === territory.version
+        && territory.operationPolygonSettingsKey === settingsKey) {
+        const cached = {
+            ...territory.operationPolygonStats,
+            cacheHit: true,
+            polygon: territory.operationPolygon
+        };
+
+        recordOperationSimplifyUse(metrics, "subject", cached);
+        return cached;
+    }
+
+    const operation = measureCaptureApplyPhase(diagnostics, "captureApplySimplifySubject", () => (
+        createOperationalPolygon(polygon, options)
+    ));
+    const result = {
+        ...operation,
+        attempted: true,
+        cacheHit: false
+    };
+
+    territory.operationPolygon = result.polygon;
+    territory.operationPolygonVersion = territory.version;
+    territory.operationPolygonSettingsKey = settingsKey;
+    territory.operationPolygonStats = createOperationPolygonStats(result);
+    recordOperationSimplifyUse(metrics, "subject", result);
+
+    return result;
+}
+
+function getCapturedOperationPolygon(capturedPolygon, metrics, diagnostics) {
+    const pointCount = getPolygonPointCount(capturedPolygon);
+    const options = createOperationSimplifyOptions("captured");
+
+    if (pointCount < options.minInputPointCount) {
+        return createIdentityOperationPolygon(capturedPolygon, pointCount);
+    }
+
+    const operation = measureCaptureApplyPhase(diagnostics, "captureApplySimplifyCaptured", () => (
+        createOperationalPolygon(capturedPolygon, options)
+    ));
+    const result = {
+        ...operation,
+        attempted: true,
+        cacheHit: false
+    };
+
+    recordOperationSimplifyUse(metrics, "captured", result);
+
+    return result;
+}
+
+function createOperationSimplifyOptions(kind) {
+    const territoryConfig = config.territory;
+
+    return {
+        maxAreaDrift: operationSimplifyMaxAreaDrift,
+        maxAreaDriftRatio: territoryConfig.operationSimplifyMaxAreaDriftRatio,
+        minInputPointCount: kind === "captured"
+            ? territoryConfig.operationSimplifyClippingMinPoints
+            : territoryConfig.operationSimplifySubjectMinPoints,
+        minPointCount: territoryConfig.operationSimplifyMinPoints,
+        minTolerance: territoryConfig.operationSimplifyMinTolerance,
+        targetPointCount: kind === "captured"
+            ? territoryConfig.operationSimplifyClippingTargetPoints
+            : territoryConfig.operationSimplifySubjectTargetPoints,
+        tolerance: territoryConfig.operationSimplifyTolerance
+    };
+}
+
+function createOperationSimplifyKey(options) {
+    return [
+        options.maxAreaDrift,
+        options.maxAreaDriftRatio,
+        options.minInputPointCount,
+        options.minPointCount,
+        options.minTolerance,
+        options.targetPointCount,
+        options.tolerance
+    ].join(":");
+}
+
+function createIdentityOperationPolygon(polygon, pointCount) {
+    return {
+        areaDrift: 0,
+        areaDriftRatio: 0,
+        attempted: false,
+        cacheHit: false,
+        inputPointCount: pointCount,
+        outputPointCount: pointCount,
+        polygon,
+        simplified: false,
+        tolerance: 0
+    };
+}
+
+function createOperationPolygonStats(operation) {
+    return {
+        areaDrift: operation.areaDrift,
+        areaDriftRatio: operation.areaDriftRatio,
+        attempted: true,
+        inputPointCount: operation.inputPointCount,
+        outputPointCount: operation.outputPointCount,
+        simplified: operation.simplified,
+        tolerance: operation.tolerance
+    };
+}
+
+function recordOperationSimplifyUse(metrics, kind, operation) {
+    if (!metrics || !operation || !operation.attempted) {
+        return;
+    }
+
+    addCaptureApplyCount(metrics, "operationSimplifyAttemptCount", 1);
+
+    if (operation.cacheHit) {
+        addCaptureApplyCount(metrics, "operationSimplifyCacheHitCount", 1);
+    }
+
+    if (!operation.simplified) {
+        return;
+    }
+
+    addCaptureApplyCount(metrics, "operationSimplifyHitCount", 1);
+    addCaptureApplyCount(metrics, "operationSimplifyInputPointCount", operation.inputPointCount);
+    addCaptureApplyCount(metrics, "operationSimplifyOutputPointCount", operation.outputPointCount);
+    recordCaptureApplyMax(metrics, "operationSimplifyMaxAreaDrift", operation.areaDrift);
+    recordCaptureApplyMax(metrics, "operationSimplifyMaxAreaDriftRatio", operation.areaDriftRatio);
+
+    if (kind === "captured") {
+        addCaptureApplyCount(metrics, "operationSimplifyCapturedCount", 1);
+    } else {
+        addCaptureApplyCount(metrics, "operationSimplifySubjectCount", 1);
+    }
+}
+
 function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     const previousArea = getTerritoryArea(territory);
     const nextArea = calculatePolygonArea(nextPolygon);
@@ -412,6 +590,10 @@ function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     territory.area = nextArea;
     territory.bounds = getPolygonBounds(nextPolygon);
     territory.version = (territory.version || 0) + 1;
+    delete territory.operationPolygon;
+    delete territory.operationPolygonSettingsKey;
+    delete territory.operationPolygonStats;
+    delete territory.operationPolygonVersion;
 
     return true;
 }

@@ -84,6 +84,70 @@ function subtractPolygon(subject, clipping) {
     }
 }
 
+function createOperationalPolygon(polygon, options = {}) {
+    const rawInputPointCount = getPolygonPointCount(polygon);
+    const rawArea = calculatePolygonArea(polygon);
+    const normalizedPolygon = normalizeSimplePolygon(polygon);
+    const normalizedPointCount = getPolygonPointCount(normalizedPolygon);
+    const normalizedArea = calculatePolygonArea(normalizedPolygon);
+    const minInputPointCount = getIntegerOption(options.minInputPointCount, 0);
+
+    if (!hasPolygon(normalizedPolygon) || normalizedPointCount < minInputPointCount) {
+        return createOperationalPolygonResult(
+            normalizedPolygon,
+            rawInputPointCount,
+            normalizedPointCount,
+            Math.abs(rawArea - normalizedArea),
+            rawArea > geometryEpsilon ? Math.abs(rawArea - normalizedArea) / rawArea : 0
+        );
+    }
+
+    const tolerance = getPositiveNumberOption(options.tolerance, 0);
+    const minTolerance = getPositiveNumberOption(options.minTolerance, tolerance);
+    const minPointCount = getIntegerOption(options.minPointCount, 3);
+    const targetPointCount = getIntegerOption(options.targetPointCount, normalizedPointCount);
+    const maxAreaDrift = getPositiveNumberOption(options.maxAreaDrift, 0);
+    const maxAreaDriftRatio = getPositiveNumberOption(options.maxAreaDriftRatio, 0);
+    let currentTolerance = tolerance;
+
+    while (currentTolerance >= minTolerance && currentTolerance > 0) {
+        const simplifiedPolygon = simplifySimplePolygonForOperations(
+            normalizedPolygon,
+            currentTolerance,
+            minPointCount,
+            targetPointCount
+        );
+        const outputPointCount = getPolygonPointCount(simplifiedPolygon);
+
+        if (hasPolygon(simplifiedPolygon) && outputPointCount < normalizedPointCount) {
+            const outputArea = calculatePolygonArea(simplifiedPolygon);
+            const areaDrift = Math.abs(rawArea - outputArea);
+            const allowedAreaDrift = Math.max(maxAreaDrift, rawArea * maxAreaDriftRatio);
+
+            if (allowedAreaDrift <= 0 || areaDrift <= allowedAreaDrift) {
+                return createOperationalPolygonResult(
+                    simplifiedPolygon,
+                    rawInputPointCount,
+                    outputPointCount,
+                    areaDrift,
+                    rawArea > geometryEpsilon ? areaDrift / rawArea : 0,
+                    currentTolerance
+                );
+            }
+        }
+
+        currentTolerance /= 2;
+    }
+
+    return createOperationalPolygonResult(
+        normalizedPolygon,
+        rawInputPointCount,
+        normalizedPointCount,
+        Math.abs(rawArea - normalizedArea),
+        rawArea > geometryEpsilon ? Math.abs(rawArea - normalizedArea) / rawArea : 0
+    );
+}
+
 function isPointInPolygon(polygon, x, y) {
     const outerRing = polygon[0];
 
@@ -186,6 +250,12 @@ function getPolygonBounds(polygon) {
         maxX,
         maxY
     };
+}
+
+function getPolygonPointCount(polygon) {
+    return (polygon || []).reduce((sum, ring) => (
+        sum + (Array.isArray(ring) ? ring.length : 0)
+    ), 0);
 }
 
 function doBoundsOverlap(first, second, padding = 0) {
@@ -441,6 +511,89 @@ function normalizeKnownSimpleRing(ring) {
     }
 
     return normalizedRing;
+}
+
+function simplifySimplePolygonForOperations(polygon, tolerance, minPointCount, targetPointCount) {
+    const ring = getOpenRing(polygon && polygon[0]);
+
+    if (ring.length < 3 || ring.length + 1 <= targetPointCount) {
+        return polygon;
+    }
+
+    const simplifiedRing = simplifyOpenRingByDistance(
+        ring,
+        tolerance,
+        Math.max(3, minPointCount - 1),
+        Math.max(3, targetPointCount - 1)
+    );
+
+    if (simplifiedRing.length < 3 || simplifiedRing.length >= ring.length) {
+        return polygon;
+    }
+
+    closeRing(simplifiedRing);
+
+    return normalizeSimplePolygon([simplifiedRing]);
+}
+
+function simplifyOpenRingByDistance(ring, tolerance, minPointCount, targetPointCount) {
+    const simplifiedRing = ring.map(point => [point[0], point[1]]);
+    const toleranceSquared = tolerance * tolerance;
+    let index = 0;
+
+    while (simplifiedRing.length > minPointCount
+        && simplifiedRing.length > targetPointCount
+        && index < simplifiedRing.length) {
+        const previous = simplifiedRing[(index - 1 + simplifiedRing.length) % simplifiedRing.length];
+        const current = simplifiedRing[index];
+        const next = simplifiedRing[(index + 1) % simplifiedRing.length];
+
+        if (isCoordinateRedundantWithinTolerance(previous, current, next, toleranceSquared)) {
+            simplifiedRing.splice(index, 1);
+            index = Math.max(0, index - 1);
+            continue;
+        }
+
+        index++;
+    }
+
+    return simplifiedRing;
+}
+
+function isCoordinateRedundantWithinTolerance(first, second, third, toleranceSquared) {
+    if (!isCoordinateBetween(first, second, third)) {
+        return false;
+    }
+
+    const segmentLengthSquared = getCoordinateDistanceSquared(first, third);
+
+    if (segmentLengthSquared <= geometryEpsilon) {
+        return getCoordinateDistanceSquared(first, second) <= toleranceSquared;
+    }
+
+    const cross = crossCoordinates(first, second, third);
+    const distanceSquared = (cross * cross) / segmentLengthSquared;
+
+    return distanceSquared <= toleranceSquared;
+}
+
+function createOperationalPolygonResult(
+    polygon,
+    inputPointCount,
+    outputPointCount = inputPointCount,
+    areaDrift = 0,
+    areaDriftRatio = 0,
+    tolerance = 0
+) {
+    return {
+        areaDrift,
+        areaDriftRatio,
+        inputPointCount,
+        outputPointCount,
+        polygon,
+        simplified: outputPointCount < inputPointCount,
+        tolerance
+    };
 }
 
 function removeConsecutiveDuplicatePoints(ring) {
@@ -731,6 +884,14 @@ function isZero(value) {
     return Math.abs(value) <= geometryEpsilon;
 }
 
+function getIntegerOption(value, fallback) {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : fallback;
+}
+
+function getPositiveNumberOption(value, fallback) {
+    return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 function hasPolygon(polygon) {
     return Array.isArray(polygon) && polygon.length > 0;
 }
@@ -744,6 +905,7 @@ module.exports = {
     calculatePolygonCentroid,
     createCirclePolygon,
     createKnownSimplePolygonFromPoints,
+    createOperationalPolygon,
     createPolygonFromPoints,
     doBoundsContainBounds,
     doBoundsContainPoint,
@@ -752,6 +914,7 @@ module.exports = {
     findClosestPolygonBoundaryContact,
     findSegmentPolygonBoundaryContact,
     getPolygonBounds,
+    getPolygonPointCount,
     getPointPolygonDistance,
     isCircleInsidePolygon,
     isPointInPolygon,

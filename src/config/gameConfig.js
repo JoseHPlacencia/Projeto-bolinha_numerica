@@ -54,6 +54,14 @@ const territory = Object.freeze({
     fillAlpha: 0.36,
     minCaptureArea: 800,
     minCaptureTrailPoints: 4,
+    operationSimplifyClippingMinPoints: 192,
+    operationSimplifyClippingTargetPoints: 160,
+    operationSimplifyMaxAreaDriftRatio: 0.0025,
+    operationSimplifyMinPoints: 96,
+    operationSimplifyMinTolerance: 1,
+    operationSimplifySubjectMinPoints: 512,
+    operationSimplifySubjectTargetPoints: 384,
+    operationSimplifyTolerance: 4,
     trailPointSpacing: 14,
     victoryAreaRatio: 0.9995
 });
