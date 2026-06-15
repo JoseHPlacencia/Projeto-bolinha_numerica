@@ -260,7 +260,40 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         reliableRetryCount: pending ? Math.max(0, (pending.sentCount || 1) - 1) : 0,
         reliableAgeMs: pending && Number.isFinite(pending.createdAt) ? now - pending.createdAt : null,
         reliableAckTimeouts: pending ? pending.ackTimeouts || 0 : 0,
-        lastReliableAck: socket.data.networkDiagnosticsLastReliableAck || null
+        lastReliableAck: socket.data.networkDiagnosticsLastReliableAck || null,
+        snapshotResyncRequestCount: socket.data.networkDiagnosticsSnapshotResyncCount || 0,
+        lastSnapshotResync: normalizeSnapshotResyncDiagnostic(socket.data.networkDiagnosticsLastSnapshotResync, now),
+        snapshotCacheInvalidationCount: socket.data.networkDiagnosticsSnapshotCacheInvalidationCount || 0,
+        lastSnapshotCacheInvalidation: normalizeSnapshotCacheInvalidationDiagnostic(
+            socket.data.networkDiagnosticsLastSnapshotCacheInvalidation,
+            now
+        )
+    };
+}
+
+function normalizeSnapshotResyncDiagnostic(value, now) {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+
+    return {
+        at: finiteOrNull(value.at),
+        ageMs: Number.isFinite(value.at) ? Math.max(0, now - value.at) : null,
+        count: finiteOrNull(value.count)
+    };
+}
+
+function normalizeSnapshotCacheInvalidationDiagnostic(value, now) {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+
+    return {
+        at: finiteOrNull(value.at),
+        ageMs: Number.isFinite(value.at) ? Math.max(0, now - value.at) : null,
+        count: finiteOrNull(value.count),
+        fullCacheReset: Boolean(value.fullCacheReset),
+        invalidations: countInvalidations(value.invalidations)
     };
 }
 
@@ -764,6 +797,8 @@ function createSnapshotBreakdown(snapshot, options = {}) {
     let captureOperationTrailPointCount = 0;
     let fullTrailUpdateCount = 0;
     let fullTrailPointCount = 0;
+    let partialTrailUpdateCount = 0;
+    let partialTrailRemainingPointCount = 0;
     let trailPatchUpdateCount = 0;
     let trailPatchPointCount = 0;
 
@@ -786,6 +821,13 @@ function createSnapshotBreakdown(snapshot, options = {}) {
     for (const trail of trailValues) {
         if (!trail) {
             continue;
+        }
+
+        if (trail.partial) {
+            partialTrailUpdateCount++;
+            partialTrailRemainingPointCount += Number.isFinite(trail.remainingPointCount)
+                ? trail.remainingPointCount
+                : 0;
         }
 
         if (trail.full) {
@@ -814,6 +856,8 @@ function createSnapshotBreakdown(snapshot, options = {}) {
         trailUpdateCount: trailValues.length,
         fullTrailUpdateCount,
         fullTrailPointCount,
+        partialTrailUpdateCount,
+        partialTrailRemainingPointCount,
         trailPatchUpdateCount,
         trailPatchPointCount,
         leaderboardCount: countArrayItems(snapshot && snapshot.leaderboard),
@@ -889,8 +933,11 @@ function createTrailPayloadDetail(playerId, trail) {
         playerId,
         bytes: measureJsonBytes(trail),
         full: Boolean(trail.full),
+        partial: Boolean(trail.partial),
+        pointBudget: finiteOrNull(trail.pointBudget),
         pointCount: trail.full ? fullPointCount : patchPointCount,
         patchPointCount,
+        remainingPointCount: finiteOrNull(trail.remainingPointCount),
         fullPointCount,
         leftPatchCount: countArrayItems(trail.leftPatches),
         rightPatchCount: countArrayItems(trail.rightPatches),
@@ -995,10 +1042,18 @@ function finiteOrNull(value) {
 
 function countInvalidations(invalidations) {
     return {
-        playerInfo: countArrayItems(invalidations && invalidations.playerInfo),
-        territories: countArrayItems(invalidations && invalidations.territories),
-        trails: countArrayItems(invalidations && invalidations.trails)
+        playerInfo: countInvalidationItems(invalidations && invalidations.playerInfo),
+        territories: countInvalidationItems(invalidations && invalidations.territories),
+        trails: countInvalidationItems(invalidations && invalidations.trails)
     };
+}
+
+function countInvalidationItems(value) {
+    if (Array.isArray(value)) {
+        return value.length;
+    }
+
+    return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
 module.exports = startSnapshotLoop;

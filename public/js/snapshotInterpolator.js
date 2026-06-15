@@ -32,7 +32,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         events: [],
         lastServer: null,
         lastSnapshot: null,
-        lastResync: null
+        lastResync: null,
+        lastResyncSuppressed: null
     };
     const pendingTerritoryOperations = new Map();
     const suppressedCaptureOperationResyncIds = new Set();
@@ -67,6 +68,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         networkDiagnosticsState.lastServer = null;
         networkDiagnosticsState.lastSnapshot = null;
         networkDiagnosticsState.lastResync = null;
+        networkDiagnosticsState.lastResyncSuppressed = null;
         pendingTerritoryOperations.clear();
         suppressedCaptureOperationResyncIds.clear();
         hasServerClockSync = false;
@@ -130,7 +132,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 ...getDebugState(),
                 lastServer: networkDiagnosticsState.lastServer,
                 lastSnapshot: networkDiagnosticsState.lastSnapshot,
-                lastResync: networkDiagnosticsState.lastResync
+                lastResync: networkDiagnosticsState.lastResync,
+                lastResyncSuppressed: networkDiagnosticsState.lastResyncSuppressed
             },
             events: networkDiagnosticsState.events.slice(),
             summary: createNetworkDiagnosticsSummary()
@@ -179,6 +182,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
         if (entry.type === "resyncRequested") {
             networkDiagnosticsState.lastResync = entry;
+        } else if (entry.type === "resyncSuppressed") {
+            networkDiagnosticsState.lastResyncSuppressed = entry;
         }
     }
 
@@ -193,12 +198,17 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function createNetworkDiagnosticsSummary() {
+        const events = networkDiagnosticsState.events;
         const snapshotEvents = networkDiagnosticsState.events
             .filter(event => event.type === "snapshot");
+        const resyncSummary = createResyncDiagnosticsSummary(events, snapshotEvents);
 
         if (snapshotEvents.length === 0) {
             return {
-                samples: 0
+                samples: 0,
+                resync: resyncSummary,
+                resyncEvents: resyncSummary.requested,
+                resyncSuppressedEvents: resyncSummary.suppressed
             };
         }
 
@@ -267,12 +277,47 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxTerritoryPayloadCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount)),
             maxTerritoryOperationCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount)),
             maxTrailPatchPointCount: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount)),
+            maxPartialTrailUpdates: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.partialTrailUpdateCount)),
+            maxPartialTrailRemainingPoints: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.partialTrailRemainingPointCount)),
             payloadOutlierCount: snapshotEvents.filter(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.payloadOutlier).length,
             maxPayloadOutlierBytes: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.payloadOutlier && event.server.snapshotBreakdown.payloadOutlier.payloadBytes)),
             reliableRetryEvents: snapshotEvents.filter(event => event.server && event.server.sendType === "reliable-retry").length,
             reliableBacklogEvents: snapshotEvents.filter(event => event.server && isReliableBacklog(event.server)).length,
             bufferSpikeEvents: snapshotEvents.filter(event => event.bufferMs >= getSlowBufferMs()).length,
-            resyncEvents: networkDiagnosticsState.events.filter(event => event.type === "resyncRequested").length
+            resync: resyncSummary,
+            resyncEvents: resyncSummary.requested,
+            resyncSuppressedEvents: resyncSummary.suppressed
+        };
+    }
+
+    function createResyncDiagnosticsSummary(events, snapshotEvents) {
+        const resyncEvents = events.filter(event => event.type === "resyncRequested");
+        const suppressedEvents = events.filter(event => event.type === "resyncSuppressed");
+        const invalidationEvents = snapshotEvents.filter(event => hasAnyInvalidationCounts(event.invalidations));
+        const windowDurationMs = getDiagnosticsWindowDurationMs(events);
+        const lastResync = resyncEvents[resyncEvents.length - 1] || null;
+        const lastSuppressed = suppressedEvents[suppressedEvents.length - 1] || null;
+
+        return {
+            requested: resyncEvents.length,
+            suppressed: suppressedEvents.length,
+            snapshotInvalidationEvents: invalidationEvents.length,
+            requestedPerMinute: calculateRatePerMinute(resyncEvents.length, windowDurationMs),
+            suppressedPerMinute: calculateRatePerMinute(suppressedEvents.length, windowDurationMs),
+            snapshotInvalidationsPerMinute: calculateRatePerMinute(invalidationEvents.length, windowDurationMs),
+            invalidations: sumInvalidationCounts(snapshotEvents.map(event => event.invalidations)),
+            reasons: countBy(resyncEvents.map(event => event.reason)),
+            suppressedReasons: countBy(suppressedEvents.map(event => event.reason)),
+            lastReason: lastResync && lastResync.reason || null,
+            lastSuppressedReason: lastSuppressed && lastSuppressed.reason || null,
+            lastAgeMs: lastResync && Number.isFinite(lastResync.perfAt)
+                ? Math.max(0, performance.now() - lastResync.perfAt)
+                : null,
+            lastSuppressedAgeMs: lastSuppressed && Number.isFinite(lastSuppressed.perfAt)
+                ? Math.max(0, performance.now() - lastSuppressed.perfAt)
+                : null,
+            lastInvalidations: lastResync && lastResync.invalidations || null,
+            lastDetails: lastResync && lastResync.details || null
         };
     }
 
@@ -320,7 +365,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             reliableRetryCount: finiteOrNull(value.reliableRetryCount),
             reliableAgeMs: finiteOrNull(value.reliableAgeMs),
             reliableAckTimeouts: finiteOrNull(value.reliableAckTimeouts),
-            lastReliableAck: normalizeReliableAck(value.lastReliableAck)
+            lastReliableAck: normalizeReliableAck(value.lastReliableAck),
+            snapshotResyncRequestCount: finiteOrNull(value.snapshotResyncRequestCount),
+            lastSnapshotResync: normalizeSnapshotResyncDiagnostic(value.lastSnapshotResync),
+            snapshotCacheInvalidationCount: finiteOrNull(value.snapshotCacheInvalidationCount),
+            lastSnapshotCacheInvalidation: normalizeSnapshotCacheInvalidationDiagnostic(value.lastSnapshotCacheInvalidation)
         };
     }
 
@@ -536,6 +585,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             trailUpdateCount: finiteOrNull(value.trailUpdateCount),
             fullTrailUpdateCount: finiteOrNull(value.fullTrailUpdateCount),
             fullTrailPointCount: finiteOrNull(value.fullTrailPointCount),
+            partialTrailUpdateCount: finiteOrNull(value.partialTrailUpdateCount),
+            partialTrailRemainingPointCount: finiteOrNull(value.partialTrailRemainingPointCount),
             trailPatchUpdateCount: finiteOrNull(value.trailPatchUpdateCount),
             trailPatchPointCount: finiteOrNull(value.trailPatchPointCount),
             leaderboardCount: finiteOrNull(value.leaderboardCount),
@@ -572,8 +623,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             playerId: item && typeof item.playerId === "string" ? item.playerId : null,
             bytes: finiteOrNull(item && item.bytes),
             full: Boolean(item && item.full),
+            partial: Boolean(item && item.partial),
+            pointBudget: finiteOrNull(item && item.pointBudget),
             pointCount: finiteOrNull(item && item.pointCount),
             patchPointCount: finiteOrNull(item && item.patchPointCount),
+            remainingPointCount: finiteOrNull(item && item.remainingPointCount),
             fullPointCount: finiteOrNull(item && item.fullPointCount),
             leftPatchCount: finiteOrNull(item && item.leftPatchCount),
             rightPatchCount: finiteOrNull(item && item.rightPatchCount),
@@ -623,16 +677,108 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         };
     }
 
+    function normalizeSnapshotResyncDiagnostic(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            at: finiteOrNull(value.at),
+            ageMs: finiteOrNull(value.ageMs),
+            count: finiteOrNull(value.count)
+        };
+    }
+
+    function normalizeSnapshotCacheInvalidationDiagnostic(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            at: finiteOrNull(value.at),
+            ageMs: finiteOrNull(value.ageMs),
+            count: finiteOrNull(value.count),
+            fullCacheReset: Boolean(value.fullCacheReset),
+            invalidations: countInvalidations(value.invalidations)
+        };
+    }
+
     function countInvalidations(invalidations) {
         return {
-            playerInfo: countItems(invalidations && invalidations.playerInfo),
-            territories: countItems(invalidations && invalidations.territories),
-            trails: countItems(invalidations && invalidations.trails)
+            playerInfo: getInvalidationCount(invalidations && invalidations.playerInfo),
+            territories: getInvalidationCount(invalidations && invalidations.territories),
+            trails: getInvalidationCount(invalidations && invalidations.trails)
         };
     }
 
     function countItems(value) {
         return Array.isArray(value) ? value.length : 0;
+    }
+
+    function hasAnyInvalidationCounts(invalidations) {
+        const counts = normalizeInvalidationCounts(invalidations);
+
+        return counts.playerInfo > 0 || counts.territories > 0 || counts.trails > 0;
+    }
+
+    function sumInvalidationCounts(invalidationsList) {
+        return (invalidationsList || []).reduce((sum, invalidations) => {
+            const counts = normalizeInvalidationCounts(invalidations);
+
+            sum.playerInfo += counts.playerInfo;
+            sum.territories += counts.territories;
+            sum.trails += counts.trails;
+
+            return sum;
+        }, {
+            playerInfo: 0,
+            territories: 0,
+            trails: 0
+        });
+    }
+
+    function normalizeInvalidationCounts(invalidations) {
+        return {
+            playerInfo: getInvalidationCount(invalidations && invalidations.playerInfo),
+            territories: getInvalidationCount(invalidations && invalidations.territories),
+            trails: getInvalidationCount(invalidations && invalidations.trails)
+        };
+    }
+
+    function getInvalidationCount(value) {
+        if (Array.isArray(value)) {
+            return value.length;
+        }
+
+        return Number.isFinite(value) ? Math.max(0, value) : 0;
+    }
+
+    function getDiagnosticsWindowDurationMs(events) {
+        const timedEvents = (events || []).filter(event => Number.isFinite(event && event.perfAt));
+
+        if (timedEvents.length < 2) {
+            return null;
+        }
+
+        return Math.max(0, timedEvents[timedEvents.length - 1].perfAt - timedEvents[0].perfAt);
+    }
+
+    function calculateRatePerMinute(count, durationMs) {
+        if (!Number.isFinite(durationMs) || durationMs <= 0) {
+            return null;
+        }
+
+        return count / durationMs * 60000;
+    }
+
+    function countBy(values) {
+        return (values || []).reduce((counts, value) => {
+            const key = value === null || value === undefined || value === "" ? "(none)" : String(value);
+
+            counts[key] = (counts[key] || 0) + 1;
+
+            return counts;
+        }, {});
     }
 
     function getNetworkDiagnosticsHistoryLimit() {
@@ -1098,7 +1244,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             if (!operationResult.applied) {
                 failedIds.add(id);
                 markCacheInvalid(applyResult, "territories", id);
-                handleCaptureOperationFailure(id);
+                handleCaptureOperationFailure(id, operationResult);
                 continue;
             }
 
@@ -1129,7 +1275,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             if (!operationResult.applied) {
                 failedIds.add(id);
                 markCacheInvalid(applyResult, "territories", id);
-                handleCaptureOperationFailure(id);
+                handleCaptureOperationFailure(id, operationResult);
                 continue;
             }
 
@@ -1260,6 +1406,18 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 reason: "capture_result_invalid_area",
                 details: {
                     nextArea
+                }
+            };
+        }
+
+        if (hasSelfIntersections(nextRing)) {
+            return {
+                valid: false,
+                reason: "capture_result_self_intersection",
+                details: {
+                    nextArea,
+                    previousArea,
+                    pointCount: nextRing.length
                 }
             };
         }
@@ -1815,23 +1973,50 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         return sourcePoints.concat(unpackPoints(packedPoints));
     }
 
-    function requestResync() {
+    function requestResync(details = {}) {
         const now = performance.now();
         const interval = networkConfig.resyncRequestIntervalMs || 1000;
 
-        if (typeof options.onResyncNeeded !== "function" || now - lastResyncRequestedAt < interval) {
+        if (typeof options.onResyncNeeded !== "function") {
+            recordResyncSuppressed("missing_handler", details, now, interval);
+            return;
+        }
+
+        if (now - lastResyncRequestedAt < interval) {
+            recordResyncSuppressed("rate_limited", details, now, interval);
             return;
         }
 
         lastResyncRequestedAt = now;
         recordNetworkDiagnosticsEvent({
             type: "resyncRequested",
+            reason: details.reason || null,
+            details: details.details || null,
+            invalidations: details.invalidations || null,
             bufferMs: networkState.bufferMs,
             snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
             averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
             jitterMs: networkState.jitterMs
         });
         options.onResyncNeeded();
+    }
+
+    function recordResyncSuppressed(reason, details, now, interval) {
+        recordNetworkDiagnosticsEvent({
+            type: "resyncSuppressed",
+            reason,
+            sourceReason: details && details.reason || null,
+            details: details && details.details || null,
+            invalidations: details && details.invalidations || null,
+            intervalMs: interval,
+            nextAllowedInMs: Number.isFinite(lastResyncRequestedAt)
+                ? Math.max(0, interval - (now - lastResyncRequestedAt))
+                : 0,
+            bufferMs: networkState.bufferMs,
+            snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
+            averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
+            jitterMs: networkState.jitterMs
+        });
     }
 
     function createIgnoredTerritoryResyncIds(failedTerritoryOperationIds) {
@@ -1842,13 +2027,30 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         ]);
     }
 
-    function handleCaptureOperationFailure(id) {
+    function handleCaptureOperationFailure(id, operationResult) {
         if (networkConfig.captureOperationResyncEnabled === false) {
             suppressedCaptureOperationResyncIds.add(id);
+            recordResyncSuppressed("capture_operation_resync_disabled", {
+                reason: operationResult && operationResult.reason || null,
+                details: operationResult && operationResult.details || null,
+                invalidations: {
+                    territories: 1,
+                    playerInfo: 0,
+                    trails: 0
+                }
+            }, performance.now(), networkConfig.resyncRequestIntervalMs || 1000);
             return;
         }
 
-        requestResync();
+        requestResync({
+            reason: operationResult && operationResult.reason || null,
+            details: operationResult && operationResult.details || null,
+            invalidations: {
+                territories: 1,
+                playerInfo: 0,
+                trails: 0
+            }
+        });
     }
 }
 
@@ -2169,6 +2371,83 @@ function calculateRingArea(ring) {
     }
 
     return area / 2;
+}
+
+function hasSelfIntersections(ring) {
+    const openRing = getOpenRing(ring);
+
+    if (openRing.length < 4) {
+        return false;
+    }
+
+    for (let firstIndex = 0; firstIndex < openRing.length; firstIndex++) {
+        const firstStart = openRing[firstIndex];
+        const firstEnd = openRing[(firstIndex + 1) % openRing.length];
+
+        for (let secondIndex = firstIndex + 1; secondIndex < openRing.length; secondIndex++) {
+            if (areAdjacentSegments(firstIndex, secondIndex, openRing.length)) {
+                continue;
+            }
+
+            const secondStart = openRing[secondIndex];
+            const secondEnd = openRing[(secondIndex + 1) % openRing.length];
+
+            if (!doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd)) {
+                continue;
+            }
+
+            if (segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+function areAdjacentSegments(firstIndex, secondIndex, segmentCount) {
+    return Math.abs(firstIndex - secondIndex) <= 1
+        || (firstIndex === 0 && secondIndex === segmentCount - 1);
+}
+
+function doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
+    return Math.min(firstStart.x, firstEnd.x) <= Math.max(secondStart.x, secondEnd.x) + geometryEpsilon
+        && Math.max(firstStart.x, firstEnd.x) + geometryEpsilon >= Math.min(secondStart.x, secondEnd.x)
+        && Math.min(firstStart.y, firstEnd.y) <= Math.max(secondStart.y, secondEnd.y) + geometryEpsilon
+        && Math.max(firstStart.y, firstEnd.y) + geometryEpsilon >= Math.min(secondStart.y, secondEnd.y);
+}
+
+function segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {
+    const firstToSecondStart = crossCoordinates(firstStart, firstEnd, secondStart);
+    const firstToSecondEnd = crossCoordinates(firstStart, firstEnd, secondEnd);
+    const secondToFirstStart = crossCoordinates(secondStart, secondEnd, firstStart);
+    const secondToFirstEnd = crossCoordinates(secondStart, secondEnd, firstEnd);
+
+    if (Math.abs(firstToSecondStart) <= geometryEpsilon && isPointOnSegment(secondStart, firstStart, firstEnd)) {
+        return true;
+    }
+
+    if (Math.abs(firstToSecondEnd) <= geometryEpsilon && isPointOnSegment(secondEnd, firstStart, firstEnd)) {
+        return true;
+    }
+
+    if (Math.abs(secondToFirstStart) <= geometryEpsilon && isPointOnSegment(firstStart, secondStart, secondEnd)) {
+        return true;
+    }
+
+    if (Math.abs(secondToFirstEnd) <= geometryEpsilon && isPointOnSegment(firstEnd, secondStart, secondEnd)) {
+        return true;
+    }
+
+    return (firstToSecondStart > 0) !== (firstToSecondEnd > 0)
+        && (secondToFirstStart > 0) !== (secondToFirstEnd > 0);
+}
+
+function isPointOnSegment(point, segmentStart, segmentEnd) {
+    return point.x >= Math.min(segmentStart.x, segmentEnd.x) - geometryEpsilon
+        && point.x <= Math.max(segmentStart.x, segmentEnd.x) + geometryEpsilon
+        && point.y >= Math.min(segmentStart.y, segmentEnd.y) - geometryEpsilon
+        && point.y <= Math.max(segmentStart.y, segmentEnd.y) + geometryEpsilon;
 }
 
 function isPointInsideOrOnRing(point, ring) {

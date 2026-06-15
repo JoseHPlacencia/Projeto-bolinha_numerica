@@ -136,7 +136,8 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const latestSnapshot = data.snapshots && data.snapshots.current
             ? data.snapshots.current.lastSnapshot
             : null;
-        const gameLoop = latestSnapshot && latestSnapshot.server && latestSnapshot.server.gameLoop;
+        const server = latestSnapshot && latestSnapshot.server;
+        const gameLoop = server && server.gameLoop;
         const gameLoopPhases = gameLoop && gameLoop.phases || {};
         const trailDiagnostics = gameLoop && gameLoop.trails;
         const trailPhases = trailDiagnostics && trailDiagnostics.phases || {};
@@ -150,6 +151,11 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const payloadOutlier = breakdown.payloadOutlier || null;
         const topPayloadSection = payloadOutlier && payloadOutlier.topSections && payloadOutlier.topSections[0] || {};
         const topPayloadTrail = payloadOutlier && payloadOutlier.topTrails && payloadOutlier.topTrails[0] || {};
+        const resync = data.snapshots && data.snapshots.summary && data.snapshots.summary.resync || {};
+        const serverResync = server && server.lastSnapshotResync || {};
+        const serverCacheInvalidation = server && server.lastSnapshotCacheInvalidation || {};
+        const lastResyncInvalidations = resync.lastInvalidations || {};
+        const lastCacheInvalidations = serverCacheInvalidation.invalidations || {};
         const row = {
             diagnosis: data.diagnosis.reason,
             bufferMs: latestSnapshot && round(latestSnapshot.bufferMs),
@@ -228,6 +234,26 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             territoryPayloads: breakdown.territoryPayloadCount,
             territoryOps: breakdown.territoryOperationCount,
             trailPatchPoints: breakdown.trailPatchPointCount,
+            partialTrailUpdates: breakdown.partialTrailUpdateCount,
+            partialTrailRemainingPoints: breakdown.partialTrailRemainingPointCount,
+            resyncRequests: resync.requested,
+            resyncSuppressed: resync.suppressed,
+            resyncPerMinute: round(resync.requestedPerMinute),
+            resyncLastReason: resync.lastReason,
+            resyncLastAgeMs: round(resync.lastAgeMs),
+            resyncLastTerritories: lastResyncInvalidations.territories,
+            resyncLastTrails: lastResyncInvalidations.trails,
+            resyncLastPlayerInfo: lastResyncInvalidations.playerInfo,
+            serverResyncRequests: server && server.snapshotResyncRequestCount,
+            serverResyncLastAgeMs: round(serverResync.ageMs),
+            cacheInvalidationEvents: resync.snapshotInvalidationEvents,
+            cacheInvalidationPerMinute: round(resync.snapshotInvalidationsPerMinute),
+            serverCacheInvalidations: server && server.snapshotCacheInvalidationCount,
+            serverCacheInvalidationLastAgeMs: round(serverCacheInvalidation.ageMs),
+            serverCacheInvalidationFullReset: serverCacheInvalidation.fullCacheReset,
+            serverCacheInvalidationTerritories: lastCacheInvalidations.territories,
+            serverCacheInvalidationTrails: lastCacheInvalidations.trails,
+            serverCacheInvalidationPlayerInfo: lastCacheInvalidations.playerInfo,
             transport: data.transport
         };
 
@@ -311,6 +337,16 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 territoryPayloads: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryPayloadCount,
                 territoryOps: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.territoryOperationCount,
                 trailPatchPoints: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount,
+                partialTrailUpdates: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.partialTrailUpdateCount,
+                partialTrailRemainingPoints: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.partialTrailRemainingPointCount,
+                invalidatedTerritories: event.invalidations && event.invalidations.territories,
+                invalidatedTrails: event.invalidations && event.invalidations.trails,
+                invalidatedPlayerInfo: event.invalidations && event.invalidations.playerInfo,
+                serverResyncRequests: event.server && event.server.snapshotResyncRequestCount,
+                serverResyncLastAgeMs: event.server && event.server.lastSnapshotResync && round(event.server.lastSnapshotResync.ageMs),
+                serverCacheInvalidations: event.server && event.server.snapshotCacheInvalidationCount,
+                serverCacheInvalidationLastAgeMs: event.server && event.server.lastSnapshotCacheInvalidation && round(event.server.lastSnapshotCacheInvalidation.ageMs),
+                serverCacheInvalidationTerritories: event.server && event.server.lastSnapshotCacheInvalidation && event.server.lastSnapshotCacheInvalidation.invalidations && event.server.lastSnapshotCacheInvalidation.invalidations.territories,
                 reliableRetryCount: event.server && event.server.reliableRetryCount,
                 preserveTrails: event.preserveTrails
             }));

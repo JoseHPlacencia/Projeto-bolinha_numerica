@@ -352,13 +352,14 @@ function serializeTrailUpdates(players, trailIds, clientState, now) {
         const stats = getTrailStats(player);
         const knownTrail = clientState.trails.get(playerId);
         const shouldSendFull = shouldSendFullTrail(player, stats, knownTrail, now);
-        const update = shouldSendFull
+        const serialized = shouldSendFull
             ? serializeFullTrail(player)
             : serializeTrailPatch(player, knownTrail);
+        const update = serialized.update;
 
         if (!shouldSendFull && getTrailUpdatePointCount(update) === 0) {
             clientState.trails.set(playerId, {
-                ...stats,
+                ...serialized.state,
                 lastFullSentAt: knownTrail.lastFullSentAt
             });
             continue;
@@ -366,7 +367,7 @@ function serializeTrailUpdates(players, trailIds, clientState, now) {
 
         serializedTrails[playerId] = update;
         clientState.trails.set(playerId, {
-            ...stats,
+            ...serialized.state,
             lastFullSentAt: shouldSendFull ? now : knownTrail.lastFullSentAt
         });
     }
@@ -394,31 +395,75 @@ function shouldSendFullTrail(player, stats, knownTrail, now) {
 }
 
 function serializeFullTrail(player) {
-    return {
+    const maxPoints = getTrailUpdateMaxPoints();
+    const componentBudgets = allocateTrailComponentBudgets([
+        countSegmentPoints(player.trailLeftSegments),
+        countSegmentPoints(player.trailRightSegments),
+        getPointArrayLength(player.trailLeftFillPath),
+        getPointArrayLength(player.trailRightFillPath)
+    ], maxPoints);
+    const leftSegments = packLimitedSegments(player.trailLeftSegments, componentBudgets[0]);
+    const rightSegments = packLimitedSegments(player.trailRightSegments, componentBudgets[1]);
+    const leftFillPath = packLimitedPoints(player.trailLeftFillPath, 0, componentBudgets[2]);
+    const rightFillPath = packLimitedPoints(player.trailRightFillPath, 0, componentBudgets[3]);
+    const sentStats = {
+        leftSegmentLengths: getPackedSegmentLengths(leftSegments),
+        rightSegmentLengths: getPackedSegmentLengths(rightSegments),
+        leftFillLength: leftFillPath.length,
+        rightFillLength: rightFillPath.length
+    };
+    const sentPointCount = getTrailStatsPointCount(sentStats);
+    const totalPointCount = getTrailStats(player).pointCount;
+    const update = {
         full: true,
         color: player.color,
-        leftSegments: packSegments(player.trailLeftSegments),
-        rightSegments: packSegments(player.trailRightSegments),
-        leftFillPath: packPoints(player.trailLeftFillPath),
-        rightFillPath: packPoints(player.trailRightFillPath)
+        leftSegments,
+        rightSegments,
+        leftFillPath,
+        rightFillPath
+    };
+
+    markPartialTrailUpdate(update, sentPointCount, totalPointCount, maxPoints);
+
+    return {
+        state: {
+            ...sentStats,
+            pointCount: sentPointCount
+        },
+        update
     };
 }
 
 function serializeTrailPatch(player, knownTrail) {
+    const maxPoints = getTrailUpdateMaxPoints();
+    const componentBudgets = allocateTrailComponentBudgets([
+        getSegmentPatchPointCount(player.trailLeftSegments, knownTrail.leftSegmentLengths),
+        getSegmentPatchPointCount(player.trailRightSegments, knownTrail.rightSegmentLengths),
+        Math.max(0, player.trailLeftFillPath.length - knownTrail.leftFillLength),
+        Math.max(0, player.trailRightFillPath.length - knownTrail.rightFillLength)
+    ], maxPoints);
     const update = {
         color: player.color
     };
-    const leftPatches = getSegmentPatches(player.trailLeftSegments, knownTrail.leftSegmentLengths);
-    const rightPatches = getSegmentPatches(player.trailRightSegments, knownTrail.rightSegmentLengths);
-    const leftFillPoints = packPoints(player.trailLeftFillPath.slice(knownTrail.leftFillLength));
-    const rightFillPoints = packPoints(player.trailRightFillPath.slice(knownTrail.rightFillLength));
+    const leftPatchResult = getLimitedSegmentPatches(player.trailLeftSegments, knownTrail.leftSegmentLengths, componentBudgets[0]);
+    const rightPatchResult = getLimitedSegmentPatches(player.trailRightSegments, knownTrail.rightSegmentLengths, componentBudgets[1]);
+    const leftFillPoints = packLimitedPoints(player.trailLeftFillPath, knownTrail.leftFillLength, componentBudgets[2]);
+    const rightFillPoints = packLimitedPoints(player.trailRightFillPath, knownTrail.rightFillLength, componentBudgets[3]);
+    const sentStats = {
+        leftSegmentLengths: leftPatchResult.lengths,
+        rightSegmentLengths: rightPatchResult.lengths,
+        leftFillLength: knownTrail.leftFillLength + leftFillPoints.length,
+        rightFillLength: knownTrail.rightFillLength + rightFillPoints.length
+    };
+    const sentPointCount = getTrailStatsPointCount(sentStats);
+    const totalPointCount = getTrailStats(player).pointCount;
 
-    if (leftPatches.length > 0) {
-        update.leftPatches = leftPatches;
+    if (leftPatchResult.patches.length > 0) {
+        update.leftPatches = leftPatchResult.patches;
     }
 
-    if (rightPatches.length > 0) {
-        update.rightPatches = rightPatches;
+    if (rightPatchResult.patches.length > 0) {
+        update.rightPatches = rightPatchResult.patches;
     }
 
     if (leftFillPoints.length > 0) {
@@ -431,28 +476,188 @@ function serializeTrailPatch(player, knownTrail) {
         update.rightFillStart = knownTrail.rightFillLength;
     }
 
-    return update;
+    markPartialTrailUpdate(update, getTrailUpdatePointCount(update), totalPointCount - getTrailStatsPointCount(knownTrail), maxPoints);
+
+    return {
+        state: {
+            ...sentStats,
+            pointCount: sentPointCount
+        },
+        update
+    };
 }
 
-function getSegmentPatches(segments, knownLengths) {
+function getLimitedSegmentPatches(segments, knownLengths, maxPoints) {
     const patches = [];
+    const nextLengths = knownLengths.slice();
+    let remainingPoints = maxPoints;
 
     for (let index = 0; index < segments.length; index++) {
         const knownLength = knownLengths[index] || 0;
-        const points = packPoints(segments[index].slice(knownLength));
+        const availablePointCount = Math.max(0, segments[index].length - knownLength);
+        const takePointCount = Math.min(availablePointCount, remainingPoints);
 
-        if (points.length === 0) {
+        if (takePointCount <= 0) {
+            if (index < knownLengths.length) {
+                nextLengths[index] = knownLength;
+            }
             continue;
         }
+
+        const points = packPoints(segments[index].slice(knownLength, knownLength + takePointCount));
 
         patches.push({
             index,
             start: knownLength,
             points
         });
+        nextLengths[index] = knownLength + takePointCount;
+        remainingPoints -= takePointCount;
+
+        if (remainingPoints <= 0) {
+            break;
+        }
     }
 
-    return patches;
+    return {
+        lengths: trimTrailingZeroLengths(nextLengths),
+        patches
+    };
+}
+
+function allocateTrailComponentBudgets(componentPointCounts, maxPoints) {
+    const counts = componentPointCounts.map(count => Math.max(0, count || 0));
+    const totalPointCount = sumValues(counts);
+
+    if (!Number.isFinite(maxPoints) || totalPointCount <= maxPoints) {
+        return counts;
+    }
+
+    const budget = Math.max(1, Math.floor(maxPoints));
+    const budgets = counts.map(() => 0);
+    const activeIndexes = counts
+        .map((count, index) => ({ count, index }))
+        .filter(item => item.count > 0);
+
+    if (activeIndexes.length === 0) {
+        return budgets;
+    }
+
+    let remainingBudget = budget;
+
+    for (const item of activeIndexes) {
+        budgets[item.index] = 1;
+        remainingBudget--;
+
+        if (remainingBudget <= 0) {
+            return budgets;
+        }
+    }
+
+    const remainingCounts = counts.map((count, index) => Math.max(0, count - budgets[index]));
+    const remainingTotal = sumValues(remainingCounts);
+    const shares = remainingCounts.map((count, index) => {
+        const exact = remainingTotal > 0 ? count / remainingTotal * remainingBudget : 0;
+        const whole = Math.floor(exact);
+
+        budgets[index] += whole;
+
+        return {
+            fraction: exact - whole,
+            index
+        };
+    });
+
+    remainingBudget = budget - sumValues(budgets);
+    shares.sort((first, second) => second.fraction - first.fraction);
+
+    for (const share of shares) {
+        if (remainingBudget <= 0) {
+            break;
+        }
+
+        if (counts[share.index] <= budgets[share.index]) {
+            continue;
+        }
+
+        budgets[share.index]++;
+        remainingBudget--;
+    }
+
+    return budgets.map((value, index) => Math.min(value, counts[index]));
+}
+
+function packLimitedSegments(segments, maxPoints) {
+    const packedSegments = [];
+    let remainingPoints = maxPoints;
+
+    for (const segment of segments || []) {
+        if (remainingPoints <= 0) {
+            break;
+        }
+
+        const packedSegment = packLimitedPoints(segment, 0, remainingPoints);
+
+        if (packedSegment.length === 0) {
+            continue;
+        }
+
+        packedSegments.push(packedSegment);
+        remainingPoints -= packedSegment.length;
+    }
+
+    return packedSegments;
+}
+
+function packLimitedPoints(points, startIndex, maxPoints) {
+    if (!Array.isArray(points) || maxPoints <= 0) {
+        return [];
+    }
+
+    const endIndex = Math.min(points.length, startIndex + maxPoints);
+
+    return packPoints(points.slice(startIndex, endIndex));
+}
+
+function getPackedSegmentLengths(segments) {
+    return Array.isArray(segments) ? segments.map(segment => segment.length) : [];
+}
+
+function countSegmentPoints(segments) {
+    return sumValues(getSegmentLengths(segments));
+}
+
+function getTrailStatsPointCount(stats) {
+    return sumValues(stats.leftSegmentLengths || [])
+        + sumValues(stats.rightSegmentLengths || [])
+        + Math.max(0, stats.leftFillLength || 0)
+        + Math.max(0, stats.rightFillLength || 0);
+}
+
+function markPartialTrailUpdate(update, sentPointCount, totalPointCount, pointBudget) {
+    if (!Number.isFinite(totalPointCount) || sentPointCount >= totalPointCount) {
+        return;
+    }
+
+    update.partial = true;
+    update.remainingPointCount = totalPointCount - sentPointCount;
+    update.pointBudget = Number.isFinite(pointBudget) ? pointBudget : null;
+}
+
+function getTrailUpdateMaxPoints() {
+    const value = config.network.trailUpdateMaxPoints;
+
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : Infinity;
+}
+
+function trimTrailingZeroLengths(lengths) {
+    const nextLengths = lengths.slice();
+
+    while (nextLengths.length > 0 && nextLengths[nextLengths.length - 1] <= 0) {
+        nextLengths.pop();
+    }
+
+    return nextLengths;
 }
 
 function getVisiblePlayerIds(players, viewerId, interestBounds) {

@@ -294,13 +294,59 @@ function registerInputEvents(socket, roomManager) {
 
     socket.on("snapshotResync", () => {
         if (!snapshotGuard.canHandleInput()) return;
+        recordSnapshotResync(socket);
         socket.data.snapshotState = null;
     });
 
     socket.on("snapshotCacheInvalid", rawInvalidations => {
         if (!snapshotGuard.canHandleInput()) return;
+        recordSnapshotCacheInvalidation(socket, rawInvalidations);
         invalidateSnapshotCache(socket, rawInvalidations);
     });
+}
+
+function recordSnapshotResync(socket) {
+    const count = (socket.data.networkDiagnosticsSnapshotResyncCount || 0) + 1;
+
+    socket.data.networkDiagnosticsSnapshotResyncCount = count;
+    socket.data.networkDiagnosticsLastSnapshotResync = {
+        at: Date.now(),
+        count
+    };
+}
+
+function recordSnapshotCacheInvalidation(socket, invalidations) {
+    const count = (socket.data.networkDiagnosticsSnapshotCacheInvalidationCount || 0) + 1;
+    const invalidationCounts = countSnapshotInvalidations(invalidations);
+
+    socket.data.networkDiagnosticsSnapshotCacheInvalidationCount = count;
+    socket.data.networkDiagnosticsLastSnapshotCacheInvalidation = {
+        at: Date.now(),
+        count,
+        fullCacheReset: !hasSnapshotInvalidationCounts(invalidationCounts),
+        invalidations: invalidationCounts
+    };
+}
+
+function countSnapshotInvalidations(invalidations) {
+    return {
+        playerInfo: countInvalidationIds(invalidations && invalidations.playerInfo),
+        territories: countInvalidationIds(invalidations && invalidations.territories),
+        trails: countInvalidationIds(invalidations && invalidations.trails)
+    };
+}
+
+function countInvalidationIds(ids) {
+    return Array.isArray(ids) ? ids.length : 0;
+}
+
+function hasSnapshotInvalidationCounts(invalidations) {
+    return Boolean(invalidations)
+        && (
+            invalidations.playerInfo > 0
+            || invalidations.territories > 0
+            || invalidations.trails > 0
+        );
 }
 
 function handleInputEvent(socket, roomManager, callback) {
