@@ -197,7 +197,7 @@ const network = Object.freeze({
     maxViewportWorldHeight: 2200,
     cullPlayerPositionsByViewport: false,
     captureOperationSyncEnabled: true,
-    captureOperationFallbackTrailPointsEnabled: false,
+    captureOperationFallbackTrailPointsEnabled: true,
     captureOperationNeededTrailPointsEnabled: true,
     captureOperationBatchTrailPointsEnabled: true,
     captureOperationHistoryLimit: 128,
@@ -213,7 +213,7 @@ const network = Object.freeze({
     playerInfoFullSyncIntervalMs: 5000,
     territoryFullSyncIntervalMs: 10000,
     trailFullSyncIntervalMs: 4000,
-    trailUpdateMaxPoints: 800,
+    trailUpdateMaxPoints: 512,
     trailPatchFullRatio: 0.85,
     resyncRequestIntervalMs: 1000
 });
