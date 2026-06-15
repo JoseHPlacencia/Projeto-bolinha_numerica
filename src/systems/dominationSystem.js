@@ -38,6 +38,7 @@ function captureClosedTrail(player, territories, players, context = {}) {
 
     const territory = territories.get(player.id);
     const baseVersion = territory ? territory.version || 0 : 0;
+    const baseTerritoryPolygon = territory ? clonePolygon(territory.polygon) : [];
     const ownerPolygon = measureTrailPhase(diagnostics, "captureOwnerPolygon", () => (
         getCaptureOwnerPolygon(capture)
     ));
@@ -54,7 +55,15 @@ function captureClosedTrail(player, territories, players, context = {}) {
     addTrailDiagnosticCount(diagnostics, "captureChangedPlayerCount", changedPlayerIds.size);
 
     measureTrailPhase(diagnostics, "captureStoreOperation", () => {
-        storeCaptureOperation(territories, player.id, capture, baseVersion, changedPlayerIds);
+        storeCaptureOperation(
+            territories,
+            player.id,
+            capture,
+            baseVersion,
+            changedPlayerIds,
+            baseTerritoryPolygon,
+            diagnostics
+        );
     });
     measureTrailPhase(diagnostics, "captureDamagePlayers", () => {
         damagePlayersInsideCapturedPolygon(players, territories, player, newlyCapturedPolygon, context);
@@ -586,7 +595,15 @@ function createCaptureOperation(
     };
 }
 
-function storeCaptureOperation(territories, playerId, capture, baseVersion, changedPlayerIds) {
+function storeCaptureOperation(
+    territories,
+    playerId,
+    capture,
+    baseVersion,
+    changedPlayerIds,
+    baseTerritoryPolygon,
+    diagnostics
+) {
     if (!changedPlayerIds.has(playerId) || !capture.operation) {
         return;
     }
@@ -607,6 +624,25 @@ function storeCaptureOperation(territories, playerId, capture, baseVersion, chan
         return;
     }
 
+    const replayValidation = validateCaptureOperationReplay(
+        capture.operation,
+        baseTerritoryPolygon,
+        territory.polygon
+    );
+
+    if (!replayValidation.valid) {
+        addTrailDiagnosticCount(diagnostics, "captureOperationReplayRejected", 1);
+        addTrailDiagnosticCount(
+            diagnostics,
+            getCaptureOperationReplayRejectionCounter(replayValidation.reason),
+            1
+        );
+        delete territory.lastCaptureOperation;
+        return;
+    }
+
+    addTrailDiagnosticCount(diagnostics, "captureOperationReplayAccepted", 1);
+
     territory.lastCaptureOperation = {
         type: "trailCapture",
         baseVersion,
@@ -620,6 +656,386 @@ function storeCaptureOperation(territories, playerId, capture, baseVersion, chan
         endContact: capture.operation.endContact,
         keepAnchor: capture.operation.keepAnchor
     };
+}
+
+function validateCaptureOperationReplay(operation, basePolygon, finalPolygon) {
+    const replayPolygon = createCaptureOperationReplayPolygon(operation, basePolygon);
+
+    if (getPolygonPointCount(replayPolygon) < 4) {
+        return {
+            valid: false,
+            reason: "invalid_replay_polygon"
+        };
+    }
+
+    if (!areReplayPolygonAreasClose(replayPolygon, finalPolygon)) {
+        return {
+            valid: false,
+            reason: "area_mismatch"
+        };
+    }
+
+    return {
+        valid: true
+    };
+}
+
+function createCaptureOperationReplayPolygon(operation, basePolygon) {
+    const ring = createPackedPointRing(basePolygon && basePolygon[0]);
+
+    if (!operation || ring.length < 3) {
+        return [];
+    }
+
+    const replayOperation = createClientReplayOperation(operation);
+
+    if (!replayOperation.startContact
+        || !replayOperation.endContact
+        || !replayOperation.keepAnchor
+        || replayOperation.trailPoints.length < 2) {
+        return [];
+    }
+
+    const localStartContact = getLocalReplayBoundaryContact(ring, replayOperation.startContact);
+    const localEndContact = getLocalReplayBoundaryContact(ring, replayOperation.endContact);
+
+    if (!localStartContact || !localEndContact) {
+        return [];
+    }
+
+    const boundaryPath = getReplayCaptureBoundaryPath(
+        ring,
+        localEndContact,
+        localStartContact,
+        replayOperation
+    );
+
+    if (!boundaryPath || boundaryPath.length < 2) {
+        return [];
+    }
+
+    const trailPoints = createReplayClippedTrailPoints(
+        replayOperation.trailPoints,
+        replayOperation.trailSegmentLength,
+        localStartContact.point,
+        localEndContact.point
+    );
+
+    return createKnownSimplePolygonFromPoints(trailPoints.concat(boundaryPath));
+}
+
+function createPackedPointRing(ring) {
+    if (!Array.isArray(ring)) {
+        return [];
+    }
+
+    return ring
+        .filter(point => (
+            Array.isArray(point)
+            && Number.isFinite(point[0])
+            && Number.isFinite(point[1])
+        ))
+        .map(point => ({
+            x: packReplayCoordinate(point[0]),
+            y: packReplayCoordinate(point[1])
+        }));
+}
+
+function createClientReplayOperation(operation) {
+    return {
+        trailSegmentLength: operation.trailSegmentLength,
+        trailPoints: getFinitePoints(operation.trailPoints).map(packReplayPoint),
+        boundaryPathIndex: operation.boundaryPathIndex,
+        startContact: packReplayContact(operation.startContact),
+        endContact: packReplayContact(operation.endContact),
+        keepAnchor: packReplayPoint(operation.keepAnchor)
+    };
+}
+
+function packReplayContact(contact) {
+    if (!contact || !contact.point) {
+        return null;
+    }
+
+    return {
+        point: packReplayPoint(contact.point),
+        segmentIndex: Number.isInteger(contact.segmentIndex) ? contact.segmentIndex : null,
+        segmentT: Number.isFinite(contact.segmentT)
+            ? roundToPrecision(contact.segmentT, config.network.anglePrecision)
+            : null
+    };
+}
+
+function packReplayPoint(point) {
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+        return null;
+    }
+
+    return {
+        x: packReplayCoordinate(point.x),
+        y: packReplayCoordinate(point.y)
+    };
+}
+
+function packReplayCoordinate(value) {
+    return roundToPrecision(value, config.network.coordinatePrecision);
+}
+
+function roundToPrecision(value, precision) {
+    const safePrecision = Number.isFinite(precision) && precision > 0 ? precision : 1;
+
+    return Math.round(value * safePrecision) / safePrecision;
+}
+
+function getLocalReplayBoundaryContact(ring, contact) {
+    const indexedContact = createIndexedReplayBoundaryContact(ring, contact);
+
+    if (indexedContact) {
+        return indexedContact;
+    }
+
+    return findClosestReplayBoundaryContact(ring, contact.point);
+}
+
+function createIndexedReplayBoundaryContact(ring, contact) {
+    if (!contact
+        || !Array.isArray(ring)
+        || !Number.isInteger(contact.segmentIndex)
+        || !Number.isFinite(contact.segmentT)) {
+        return null;
+    }
+
+    const openRingLength = getOpenPointRingLength(ring);
+
+    if (contact.segmentIndex < 0 || contact.segmentIndex >= openRingLength) {
+        return null;
+    }
+
+    const segmentStart = ring[contact.segmentIndex];
+    const segmentEnd = ring[(contact.segmentIndex + 1) % openRingLength];
+    const projection = projectReplayPointOnSegment(contact.point, segmentStart, segmentEnd);
+    const maxDistanceSquared = Number.isFinite(config.network.captureOperationIndexedBoundaryMaxDistanceSquared)
+        ? config.network.captureOperationIndexedBoundaryMaxDistanceSquared
+        : 4;
+
+    if (projection.distanceSquared > maxDistanceSquared) {
+        return null;
+    }
+
+    return {
+        point: projection.point,
+        segmentIndex: contact.segmentIndex,
+        segmentT: projection.segmentT
+    };
+}
+
+function findClosestReplayBoundaryContact(ring, point) {
+    const openRingLength = getOpenPointRingLength(ring);
+    let closestContact = null;
+
+    for (let segmentIndex = 0; segmentIndex < openRingLength; segmentIndex++) {
+        const projection = projectReplayPointOnSegment(
+            point,
+            ring[segmentIndex],
+            ring[(segmentIndex + 1) % openRingLength]
+        );
+
+        if (!closestContact || projection.distanceSquared < closestContact.distanceSquared) {
+            closestContact = {
+                point: projection.point,
+                segmentIndex,
+                segmentT: projection.segmentT,
+                distanceSquared: projection.distanceSquared
+            };
+        }
+    }
+
+    return closestContact;
+}
+
+function getReplayCaptureBoundaryPath(ring, startContact, endContact, operation) {
+    if (Number.isInteger(operation.boundaryPathIndex)) {
+        const indexedPath = createReplayBoundaryPathByIndex(
+            ring,
+            startContact,
+            endContact,
+            operation.boundaryPathIndex
+        );
+
+        if (indexedPath && isReplayBoundaryPathConsistentWithAnchor(indexedPath, operation.keepAnchor)) {
+            return indexedPath;
+        }
+    }
+
+    return selectBoundaryPathByAnchor(
+        createReplayBoundaryPaths(ring, startContact, endContact),
+        operation.keepAnchor
+    );
+}
+
+function createReplayBoundaryPathByIndex(ring, startContact, endContact, pathIndex) {
+    if (pathIndex === 0) {
+        return removeConsecutiveDuplicatePoints(createReplayForwardBoundaryPath(ring, startContact, endContact));
+    }
+
+    if (pathIndex === 1) {
+        return removeConsecutiveDuplicatePoints(createReplayForwardBoundaryPath(ring, endContact, startContact).reverse());
+    }
+
+    return null;
+}
+
+function createReplayBoundaryPaths(ring, startContact, endContact) {
+    return [
+        removeConsecutiveDuplicatePoints(createReplayForwardBoundaryPath(ring, startContact, endContact)),
+        removeConsecutiveDuplicatePoints(createReplayForwardBoundaryPath(ring, endContact, startContact).reverse())
+    ].filter(path => path.length >= 2);
+}
+
+function createReplayForwardBoundaryPath(ring, startContact, endContact) {
+    const openRingLength = getOpenPointRingLength(ring);
+
+    if (!startContact || !endContact || openRingLength < 3) {
+        return [];
+    }
+
+    if (startContact.segmentIndex === endContact.segmentIndex
+        && endContact.segmentT >= startContact.segmentT) {
+        return [startContact.point, endContact.point];
+    }
+
+    const path = [startContact.point];
+    let vertexIndex = (startContact.segmentIndex + 1) % openRingLength;
+    let guard = 0;
+
+    while (guard <= openRingLength) {
+        path.push(ring[vertexIndex]);
+
+        if (vertexIndex === endContact.segmentIndex) {
+            break;
+        }
+
+        vertexIndex = (vertexIndex + 1) % openRingLength;
+        guard++;
+    }
+
+    path.push(endContact.point);
+
+    return path;
+}
+
+function isReplayBoundaryPathConsistentWithAnchor(path, anchor) {
+    if (!Array.isArray(path) || path.length < 2 || !anchor) {
+        return false;
+    }
+
+    if (path.length > 2) {
+        return getReplayDistanceSquared(path[1], anchor) <= 4;
+    }
+
+    return getReplayPointPathDistanceSquared(anchor, path) <= 4;
+}
+
+function selectBoundaryPathByAnchor(paths, anchor) {
+    let selectedPath = null;
+    let selectedDistance = Infinity;
+
+    for (const path of paths || []) {
+        const distance = getReplayPointPathDistanceSquared(anchor, path);
+
+        if (distance < selectedDistance) {
+            selectedDistance = distance;
+            selectedPath = path;
+        }
+    }
+
+    return selectedPath && Number.isFinite(selectedDistance) ? selectedPath : null;
+}
+
+function createReplayClippedTrailPoints(sidePoints, expectedLength, startPoint, endPoint) {
+    const expectedPointCount = Number.isInteger(expectedLength) && expectedLength > 1
+        ? expectedLength
+        : sidePoints.length;
+    const usablePoints = sidePoints.slice(0, expectedPointCount);
+    const middlePoints = usablePoints.length >= expectedPointCount
+        ? usablePoints.slice(1, -1)
+        : usablePoints.slice(1);
+
+    return removeConsecutiveDuplicatePoints([
+        startPoint,
+        ...middlePoints,
+        endPoint
+    ]);
+}
+
+function getOpenPointRingLength(ring) {
+    if (!Array.isArray(ring)) {
+        return 0;
+    }
+
+    if (ring.length > 1 && arePointsEqual(ring[0], ring[ring.length - 1])) {
+        return ring.length - 1;
+    }
+
+    return ring.length;
+}
+
+function projectReplayPointOnSegment(point, segmentStart, segmentEnd) {
+    const direction = subtractPoints(segmentEnd, segmentStart);
+    const lengthSquared = direction.x * direction.x + direction.y * direction.y;
+    const segmentT = lengthSquared <= geometryEpsilon
+        ? 0
+        : clamp((dotProduct(subtractPoints(point, segmentStart), direction) / lengthSquared), 0, 1);
+    const projectedPoint = {
+        x: segmentStart.x + direction.x * segmentT,
+        y: segmentStart.y + direction.y * segmentT
+    };
+
+    return {
+        point: projectedPoint,
+        segmentT,
+        distanceSquared: getReplayDistanceSquared(point, projectedPoint)
+    };
+}
+
+function getReplayPointPathDistanceSquared(point, path) {
+    let distance = Infinity;
+
+    for (let index = 0; index < path.length - 1; index++) {
+        distance = Math.min(distance, projectReplayPointOnSegment(point, path[index], path[index + 1]).distanceSquared);
+    }
+
+    return distance;
+}
+
+function getReplayDistanceSquared(first, second) {
+    const x = first.x - second.x;
+    const y = first.y - second.y;
+
+    return x * x + y * y;
+}
+
+function dotProduct(first, second) {
+    return first.x * second.x + first.y * second.y;
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function areReplayPolygonAreasClose(first, second) {
+    const firstArea = calculatePolygonArea(first);
+    const secondArea = calculatePolygonArea(second);
+
+    return Math.abs(firstArea - secondArea) <= Math.max(10, secondArea * 0.005);
+}
+
+function getCaptureOperationReplayRejectionCounter(reason) {
+    if (reason === "area_mismatch") {
+        return "captureOperationReplayAreaMismatch";
+    }
+
+    return "captureOperationReplayInvalid";
 }
 
 function getPolygonPointCount(polygon) {

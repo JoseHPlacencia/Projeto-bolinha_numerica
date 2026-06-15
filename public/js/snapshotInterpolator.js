@@ -37,6 +37,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     };
     const pendingTerritoryOperations = new Map();
     const suppressedCaptureOperationResyncIds = new Set();
+    const failedTerritoryOperationKeys = new Map();
     let hasServerClockSync = false;
     let lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
 
@@ -71,6 +72,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         networkDiagnosticsState.lastResyncSuppressed = null;
         pendingTerritoryOperations.clear();
         suppressedCaptureOperationResyncIds.clear();
+        failedTerritoryOperationKeys.clear();
         hasServerClockSync = false;
         lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
     }
@@ -1227,6 +1229,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 polygon
             };
             suppressedCaptureOperationResyncIds.delete(id);
+            clearFailedTerritoryOperationKeys(id);
         }
     }
 
@@ -1234,6 +1237,16 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const failedIds = new Set();
 
         for (const [id, operation] of Object.entries(operations || {})) {
+            const duplicateFailure = getFailedTerritoryOperation(id, operation);
+
+            if (duplicateFailure) {
+                failedIds.add(id);
+                pendingTerritoryOperations.delete(id);
+                markCacheInvalid(applyResult, "territories", id);
+                handleDuplicateCaptureOperationFailure(id, operation, duplicateFailure);
+                continue;
+            }
+
             if (shouldDeferTerritoryOperation(id, operation, activeTrailIds)) {
                 pendingTerritoryOperations.set(id, operation);
                 continue;
@@ -1243,13 +1256,16 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
             if (!operationResult.applied) {
                 failedIds.add(id);
+                pendingTerritoryOperations.delete(id);
                 markCacheInvalid(applyResult, "territories", id);
-                handleCaptureOperationFailure(id, operationResult);
+                markFailedTerritoryOperation(id, operation, operationResult);
+                handleCaptureOperationFailure(id, operationResult, operation);
                 continue;
             }
 
             pendingTerritoryOperations.delete(id);
             suppressedCaptureOperationResyncIds.delete(id);
+            clearFailedTerritoryOperationKeys(id);
         }
 
         applyPendingTerritoryOperations(activeTrailIds, applyResult, failedIds);
@@ -1270,17 +1286,30 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 continue;
             }
 
+            const duplicateFailure = getFailedTerritoryOperation(id, operation);
+
+            if (duplicateFailure) {
+                failedIds.add(id);
+                pendingTerritoryOperations.delete(id);
+                markCacheInvalid(applyResult, "territories", id);
+                handleDuplicateCaptureOperationFailure(id, operation, duplicateFailure);
+                continue;
+            }
+
             const operationResult = applyCaptureTerritoryOperation(id, operation);
 
             if (!operationResult.applied) {
                 failedIds.add(id);
+                pendingTerritoryOperations.delete(id);
                 markCacheInvalid(applyResult, "territories", id);
-                handleCaptureOperationFailure(id, operationResult);
+                markFailedTerritoryOperation(id, operation, operationResult);
+                handleCaptureOperationFailure(id, operationResult, operation);
                 continue;
             }
 
             pendingTerritoryOperations.delete(id);
             suppressedCaptureOperationResyncIds.delete(id);
+            clearFailedTerritoryOperationKeys(id);
         }
     }
 
@@ -1705,6 +1734,84 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         };
     }
 
+    function markFailedTerritoryOperation(id, operation, operationResult) {
+        const key = createTerritoryOperationKey(id, operation);
+
+        if (!key) {
+            return;
+        }
+
+        failedTerritoryOperationKeys.set(key, {
+            reason: operationResult && operationResult.reason || null,
+            details: operationResult && operationResult.details || null
+        });
+    }
+
+    function getFailedTerritoryOperation(id, operation) {
+        const key = createTerritoryOperationKey(id, operation);
+
+        return key ? failedTerritoryOperationKeys.get(key) : null;
+    }
+
+    function clearFailedTerritoryOperationKeys(id) {
+        const prefix = `${id}:`;
+
+        for (const key of failedTerritoryOperationKeys.keys()) {
+            if (key.startsWith(prefix)) {
+                failedTerritoryOperationKeys.delete(key);
+            }
+        }
+    }
+
+    function createTerritoryOperationKey(id, operation) {
+        if (!id || !operation) {
+            return null;
+        }
+
+        return [
+            id,
+            operation.type || "unknown",
+            Number.isFinite(operation.baseVersion) ? operation.baseVersion : "base?",
+            Number.isFinite(operation.version) ? operation.version : "version?",
+            operation.trailSide || "side?",
+            Number.isInteger(operation.trailSegmentIndex) ? operation.trailSegmentIndex : "segment?",
+            Number.isInteger(operation.trailSegmentLength) ? operation.trailSegmentLength : "length?",
+            Number.isInteger(operation.boundaryPathIndex) ? operation.boundaryPathIndex : "path?"
+        ].join(":");
+    }
+
+    function createCaptureOperationDiagnosticsDetails(id, operationResult, operation) {
+        const details = operationResult && operationResult.details || {};
+
+        return {
+            territoryId: id,
+            operationType: operation && operation.type || null,
+            baseVersion: finiteOrNull(operation && operation.baseVersion),
+            operationVersion: finiteOrNull(operation && operation.version),
+            trailSide: operation && operation.trailSide || null,
+            trailSegmentIndex: Number.isInteger(operation && operation.trailSegmentIndex)
+                ? operation.trailSegmentIndex
+                : null,
+            trailSegmentLength: Number.isInteger(operation && operation.trailSegmentLength)
+                ? operation.trailSegmentLength
+                : null,
+            boundaryPathIndex: Number.isInteger(operation && operation.boundaryPathIndex)
+                ? operation.boundaryPathIndex
+                : null,
+            hasFallbackTrailPoints: hasFallbackTrailPoints(operation),
+            fallbackTrailPointCount: countPackedPoints(operation && operation.trailPoints),
+            trailTailStart: Number.isInteger(operation && operation.trailTailStart)
+                ? operation.trailTailStart
+                : null,
+            trailTailPointCount: countPackedPoints(operation && operation.trailTailPoints),
+            resultDetails: details
+        };
+    }
+
+    function countPackedPoints(points) {
+        return Array.isArray(points) ? points.length : 0;
+    }
+
     function hasFallbackTrailPoints(operation) {
         return unpackPoints(operation && operation.trailPoints).length >= 2;
     }
@@ -2027,12 +2134,26 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         ]);
     }
 
-    function handleCaptureOperationFailure(id, operationResult) {
+    function handleDuplicateCaptureOperationFailure(id, operation, duplicateFailure) {
+        recordResyncSuppressed("duplicate_capture_operation_failure", {
+            reason: duplicateFailure && duplicateFailure.reason || null,
+            details: createCaptureOperationDiagnosticsDetails(id, duplicateFailure, operation),
+            invalidations: {
+                territories: 1,
+                playerInfo: 0,
+                trails: 0
+            }
+        }, performance.now(), networkConfig.resyncRequestIntervalMs || 1000);
+    }
+
+    function handleCaptureOperationFailure(id, operationResult, operation) {
+        const details = createCaptureOperationDiagnosticsDetails(id, operationResult, operation);
+
         if (networkConfig.captureOperationResyncEnabled === false) {
             suppressedCaptureOperationResyncIds.add(id);
             recordResyncSuppressed("capture_operation_resync_disabled", {
                 reason: operationResult && operationResult.reason || null,
-                details: operationResult && operationResult.details || null,
+                details,
                 invalidations: {
                     territories: 1,
                     playerInfo: 0,
@@ -2044,7 +2165,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
         requestResync({
             reason: operationResult && operationResult.reason || null,
-            details: operationResult && operationResult.details || null,
+            details,
             invalidations: {
                 territories: 1,
                 playerInfo: 0,
