@@ -32,11 +32,26 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
     const playerIds = getVisiblePlayerIds(players, viewerId, interestBounds);
     const territoryIds = getVisibleTerritoryIds(territories, viewerId, interestBounds);
     const trailIds = getVisibleTrailIds(players, viewerId, interestBounds);
+    const payloadBudget = createSnapshotPayloadBudget();
 
     pruneClientState(clientState, players, territories);
 
-    const territoryChanges = serializeChangedTerritoryState(territories, territoryIds, viewerId, clientState, now);
-    const trailUpdates = serializeTrailUpdates(players, trailIds, clientState, now);
+    const territoryChanges = serializeChangedTerritoryState(
+        territories,
+        prioritizeVisibleIds(territoryIds, viewerId),
+        viewerId,
+        clientState,
+        now,
+        payloadBudget
+    );
+    const trailUpdates = serializeTrailUpdates(
+        players,
+        prioritizeVisibleIds(trailIds, viewerId),
+        viewerId,
+        clientState,
+        now,
+        payloadBudget
+    );
 
     pruneInactiveTrailStates(clientState, players);
 
@@ -45,17 +60,22 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         time: now,
         players: serializePlayerPositions(players, playerIds),
         playerInfo: serializeChangedPlayerInfo(players, playerIds, clientState, now),
-        territoryIds,
-        territoryVersions: serializeTerritoryVersions(territories, territoryIds),
+        territoryIds: territoryChanges.territoryIds,
+        territoryVersions: territoryChanges.territoryVersions,
         territories: territoryChanges.territories,
         territoryOps: territoryChanges.operations,
-        trailIds,
-        trails: trailUpdates,
+        trailIds: trailUpdates.trailIds,
+        trails: trailUpdates.trails,
         mode: config.gameMode.mode,
         roomConfig: serializeRoomSettings(runtimeConfig),
         leaderboard: createLeaderboard(players, territories, runtimeConfig),
         numbers: numberSystem ? numberSystem.serialize() : null
     };
+
+    const payloadBudgetDiagnostics = serializeSnapshotPayloadBudget(payloadBudget);
+    if (payloadBudgetDiagnostics) {
+        snapshot.payloadBudget = payloadBudgetDiagnostics;
+    }
 
     if (viewer && viewer.debugState) {
         snapshot.debug = {
@@ -152,13 +172,18 @@ function createLeaderboard(players, territories, runtimeConfig = null) {
         }));
 }
 
-function serializeTerritoryVersions(territories, territoryIds) {
+function serializeTerritoryVersions(territories, territoryIds, clientState) {
     const serializedVersions = {};
 
     for (const territoryId of territoryIds) {
         const territory = territories.get(territoryId);
+        const knownTerritory = clientState && clientState.territories
+            ? clientState.territories.get(territoryId)
+            : null;
 
-        if (territory) {
+        if (knownTerritory) {
+            serializedVersions[territoryId] = knownTerritory.version || 0;
+        } else if (territory) {
             serializedVersions[territoryId] = territory.version || 0;
         }
     }
@@ -166,9 +191,10 @@ function serializeTerritoryVersions(territories, territoryIds) {
     return serializedVersions;
 }
 
-function serializeChangedTerritoryState(territories, territoryIds, viewerId, clientState, now) {
+function serializeChangedTerritoryState(territories, territoryIds, viewerId, clientState, now, payloadBudget = null) {
     const serializedTerritories = {};
     const serializedOperations = {};
+    const includedTerritoryIds = [];
 
     for (const territoryId of territoryIds) {
         const territory = territories.get(territoryId);
@@ -179,8 +205,10 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
 
         const version = territory.version || 0;
         const knownTerritory = clientState.territories.get(territoryId);
+        let includeTerritoryId = Boolean(knownTerritory);
 
         if (!shouldSendVersionedState(knownTerritory, version, now, config.network.territoryFullSyncIntervalMs)) {
+            includedTerritoryIds.push(territoryId);
             continue;
         }
 
@@ -188,11 +216,24 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
         const operation = createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, territoryId, viewerId);
 
         if (operation) {
+            consumeSnapshotPayloadBudget(payloadBudget, "territoryOps", estimateTerritoryOperationPayloadBytes(operation), {
+                force: true
+            });
             serializedOperations[territoryId] = operation;
             clientState.territories.set(territoryId, {
                 version,
                 sentAt: now
             });
+            includedTerritoryIds.push(territoryId);
+            continue;
+        }
+
+        if (!consumeSnapshotPayloadBudget(payloadBudget, "territories", estimateTerritoryPayloadBytes(territory), {
+            force: territoryId === viewerId
+        })) {
+            if (includeTerritoryId) {
+                includedTerritoryIds.push(territoryId);
+            }
             continue;
         }
 
@@ -209,9 +250,16 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
             version,
             sentAt: now
         });
+        includeTerritoryId = true;
+
+        if (includeTerritoryId) {
+            includedTerritoryIds.push(territoryId);
+        }
     }
 
     return {
+        territoryIds: includedTerritoryIds,
+        territoryVersions: serializeTerritoryVersions(territories, includedTerritoryIds, clientState),
         territories: serializedTerritories,
         operations: serializedOperations
     };
@@ -338,8 +386,9 @@ function packCaptureContact(contact) {
     ];
 }
 
-function serializeTrailUpdates(players, trailIds, clientState, now) {
+function serializeTrailUpdates(players, trailIds, viewerId, clientState, now, payloadBudget = null) {
     const serializedTrails = {};
+    const includedTrailIds = [];
 
     for (const playerId of trailIds) {
         const player = players.get(playerId);
@@ -351,6 +400,7 @@ function serializeTrailUpdates(players, trailIds, clientState, now) {
 
         const stats = getTrailStats(player);
         const knownTrail = clientState.trails.get(playerId);
+        const includeKnownTrail = Boolean(knownTrail);
         const shouldSendFull = shouldSendFullTrail(player, stats, knownTrail, now);
         const serialized = shouldSendFull
             ? serializeFullTrail(player)
@@ -362,6 +412,16 @@ function serializeTrailUpdates(players, trailIds, clientState, now) {
                 ...serialized.state,
                 lastFullSentAt: knownTrail.lastFullSentAt
             });
+            includedTrailIds.push(playerId);
+            continue;
+        }
+
+        if (!consumeSnapshotPayloadBudget(payloadBudget, "trails", estimateTrailPayloadBytes(update), {
+            force: playerId === viewerId
+        })) {
+            if (includeKnownTrail) {
+                includedTrailIds.push(playerId);
+            }
             continue;
         }
 
@@ -370,9 +430,13 @@ function serializeTrailUpdates(players, trailIds, clientState, now) {
             ...serialized.state,
             lastFullSentAt: shouldSendFull ? now : knownTrail.lastFullSentAt
         });
+        includedTrailIds.push(playerId);
     }
 
-    return serializedTrails;
+    return {
+        trailIds: includedTrailIds,
+        trails: serializedTrails
+    };
 }
 
 function shouldSendFullTrail(player, stats, knownTrail, now) {
@@ -650,6 +714,137 @@ function getTrailUpdateMaxPoints() {
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : Infinity;
 }
 
+function createSnapshotPayloadBudget() {
+    const budgetBytes = getSnapshotPayloadBudgetBytes();
+
+    if (!Number.isFinite(budgetBytes)) {
+        return {
+            enabled: false
+        };
+    }
+
+    return {
+        enabled: true,
+        budgetBytes,
+        usedBytes: 0,
+        deferredBytes: 0,
+        sent: {
+            territories: 0,
+            territoryOps: 0,
+            trails: 0
+        },
+        deferred: {
+            territories: 0,
+            territoryOps: 0,
+            trails: 0
+        }
+    };
+}
+
+function serializeSnapshotPayloadBudget(payloadBudget) {
+    if (!payloadBudget || !payloadBudget.enabled) {
+        return null;
+    }
+
+    return {
+        budgetBytes: payloadBudget.budgetBytes,
+        usedBytes: payloadBudget.usedBytes,
+        remainingBytes: Math.max(0, payloadBudget.budgetBytes - payloadBudget.usedBytes),
+        deferredBytes: payloadBudget.deferredBytes,
+        sent: { ...payloadBudget.sent },
+        deferred: { ...payloadBudget.deferred }
+    };
+}
+
+function consumeSnapshotPayloadBudget(payloadBudget, section, estimatedBytes, options = {}) {
+    if (!payloadBudget || !payloadBudget.enabled) {
+        return true;
+    }
+
+    const bytes = Math.max(0, Math.ceil(Number(estimatedBytes) || 0));
+    const force = options.force === true;
+    const hasRoom = payloadBudget.usedBytes <= 0 || payloadBudget.usedBytes + bytes <= payloadBudget.budgetBytes;
+
+    if (!force && !hasRoom) {
+        incrementPayloadBudgetCount(payloadBudget.deferred, section);
+        payloadBudget.deferredBytes += bytes;
+        return false;
+    }
+
+    incrementPayloadBudgetCount(payloadBudget.sent, section);
+    payloadBudget.usedBytes += bytes;
+    return true;
+}
+
+function incrementPayloadBudgetCount(target, section) {
+    if (!target || !Object.prototype.hasOwnProperty.call(target, section)) {
+        return;
+    }
+
+    target[section]++;
+}
+
+function getSnapshotPayloadBudgetBytes() {
+    const value = config.network.snapshotPayloadBudgetBytes;
+
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : Infinity;
+}
+
+function estimateTerritoryPayloadBytes(territory) {
+    const pointCount = countPolygonPoints(territory && territory.polygon);
+    const ringCount = countPolygonRings(territory && territory.polygon);
+
+    return 180 + pointCount * 32 + ringCount * 24;
+}
+
+function estimateTerritoryOperationPayloadBytes(operation) {
+    const trailPointCount = getPackedPointCount(operation && operation.trailPoints)
+        + getPackedPointCount(operation && operation.trailTailPoints);
+
+    return 220 + trailPointCount * 22;
+}
+
+function estimateTrailPayloadBytes(update) {
+    const pointCount = getTrailPayloadPointCount(update);
+    const segmentCount = countArrayItems(update && update.leftSegments)
+        + countArrayItems(update && update.rightSegments)
+        + countArrayItems(update && update.leftPatches)
+        + countArrayItems(update && update.rightPatches);
+
+    return 220 + pointCount * 22 + segmentCount * 18;
+}
+
+function getTrailPayloadPointCount(update) {
+    if (!update) {
+        return 0;
+    }
+
+    if (update.full) {
+        return countPackedSegmentsPoints(update.leftSegments)
+            + countPackedSegmentsPoints(update.rightSegments)
+            + getPackedPointCount(update.leftFillPath)
+            + getPackedPointCount(update.rightFillPath);
+    }
+
+    return getTrailUpdatePointCount(update);
+}
+
+function countPackedSegmentsPoints(segments) {
+    return (segments || []).reduce((sum, segment) => sum + getPackedPointCount(segment), 0);
+}
+
+function countArrayItems(value) {
+    return Array.isArray(value) ? value.length : 0;
+}
+
+function countPolygonPoints(polygon) {
+    return (polygon || []).reduce((sum, ring) => sum + countArrayItems(ring), 0);
+}
+
+function countPolygonRings(polygon) {
+    return Array.isArray(polygon) ? polygon.length : 0;
+}
+
 function trimTrailingZeroLengths(lengths) {
     const nextLengths = lengths.slice();
 
@@ -704,6 +899,24 @@ function getVisibleTrailIds(players, viewerId, interestBounds) {
     }
 
     return trailIds;
+}
+
+function prioritizeVisibleIds(ids, priorityId) {
+    if (!priorityId || !Array.isArray(ids) || ids.length < 2) {
+        return ids;
+    }
+
+    const priorityIndex = ids.indexOf(priorityId);
+
+    if (priorityIndex <= 0) {
+        return ids;
+    }
+
+    return [
+        ids[priorityIndex],
+        ...ids.slice(0, priorityIndex),
+        ...ids.slice(priorityIndex + 1)
+    ];
 }
 
 function createInterestBounds(viewer) {

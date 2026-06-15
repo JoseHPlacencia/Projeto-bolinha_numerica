@@ -597,7 +597,31 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             trailPatchPointCount: finiteOrNull(value.trailPatchPointCount),
             leaderboardCount: finiteOrNull(value.leaderboardCount),
             numberCount: finiteOrNull(value.numberCount),
+            payloadBudget: normalizePayloadBudget(value.payloadBudget),
             payloadOutlier: normalizePayloadOutlier(value.payloadOutlier)
+        };
+    }
+
+    function normalizePayloadBudget(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            budgetBytes: finiteOrNull(value.budgetBytes),
+            usedBytes: finiteOrNull(value.usedBytes),
+            remainingBytes: finiteOrNull(value.remainingBytes),
+            deferredBytes: finiteOrNull(value.deferredBytes),
+            sent: normalizePayloadBudgetCounts(value.sent),
+            deferred: normalizePayloadBudgetCounts(value.deferred)
+        };
+    }
+
+    function normalizePayloadBudgetCounts(value) {
+        return {
+            territories: finiteOrNull(value && value.territories),
+            territoryOps: finiteOrNull(value && value.territoryOps),
+            trails: finiteOrNull(value && value.trails)
         };
     }
 

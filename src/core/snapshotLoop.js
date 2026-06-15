@@ -143,6 +143,7 @@ function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
         territoryOps: {},
         trailIds: filterKnownIds(snapshot.trailIds, clientState.trails),
         trails: {},
+        payloadBudget: null,
         preserveTrails: true
     };
 }
@@ -869,7 +870,8 @@ function createSnapshotBreakdown(snapshot, options = {}) {
         trailPatchUpdateCount,
         trailPatchPointCount,
         leaderboardCount: countArrayItems(snapshot && snapshot.leaderboard),
-        numberCount: countArrayItems(snapshot && snapshot.numbers && snapshot.numbers.nums)
+        numberCount: countArrayItems(snapshot && snapshot.numbers && snapshot.numbers.nums),
+        payloadBudget: normalizePayloadBudget(snapshot && snapshot.payloadBudget)
     };
 
     if (options.includePayloadOutlier) {
@@ -894,6 +896,29 @@ function createPayloadOutlierBreakdown(snapshot, payloadBytes) {
         topTrails: trailDetails,
         topTerritories: territoryDetails,
         topTerritoryOps: territoryOperationDetails
+    };
+}
+
+function normalizePayloadBudget(value) {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+
+    return {
+        budgetBytes: finiteOrNull(value.budgetBytes),
+        usedBytes: finiteOrNull(value.usedBytes),
+        remainingBytes: finiteOrNull(value.remainingBytes),
+        deferredBytes: finiteOrNull(value.deferredBytes),
+        sent: normalizePayloadBudgetCounts(value.sent),
+        deferred: normalizePayloadBudgetCounts(value.deferred)
+    };
+}
+
+function normalizePayloadBudgetCounts(value) {
+    return {
+        territories: finiteOrNull(value && value.territories),
+        territoryOps: finiteOrNull(value && value.territoryOps),
+        trails: finiteOrNull(value && value.trails)
     };
 }
 

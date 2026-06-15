@@ -148,6 +148,8 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const botPhases = botDiagnostics && botDiagnostics.phases || {};
         const botSelfTrail = botDiagnostics && botDiagnostics.selfTrailSafety || {};
         const breakdown = latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown || {};
+        const payloadBudget = breakdown.payloadBudget || {};
+        const payloadBudgetDeferred = payloadBudget.deferred || {};
         const payloadOutlier = breakdown.payloadOutlier || null;
         const topPayloadSection = payloadOutlier && payloadOutlier.topSections && payloadOutlier.topSections[0] || {};
         const topPayloadTrail = payloadOutlier && payloadOutlier.topTrails && payloadOutlier.topTrails[0] || {};
@@ -240,6 +242,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             trailPatchPoints: breakdown.trailPatchPointCount,
             partialTrailUpdates: breakdown.partialTrailUpdateCount,
             partialTrailRemainingPoints: breakdown.partialTrailRemainingPointCount,
+            payloadBudgetUsedBytes: payloadBudget.usedBytes,
+            payloadBudgetDeferredBytes: payloadBudget.deferredBytes,
+            payloadBudgetDeferredTerritories: payloadBudgetDeferred.territories,
+            payloadBudgetDeferredTrails: payloadBudgetDeferred.trails,
             resyncRequests: resync.requested,
             resyncSuppressed: resync.suppressed,
             resyncPerMinute: round(resync.requestedPerMinute),
@@ -347,6 +353,9 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 trailPatchPoints: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.trailPatchPointCount,
                 partialTrailUpdates: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.partialTrailUpdateCount,
                 partialTrailRemainingPoints: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.partialTrailRemainingPointCount,
+                payloadBudgetDeferredBytes: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.payloadBudget && event.server.snapshotBreakdown.payloadBudget.deferredBytes,
+                payloadBudgetDeferredTerritories: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.payloadBudget && event.server.snapshotBreakdown.payloadBudget.deferred && event.server.snapshotBreakdown.payloadBudget.deferred.territories,
+                payloadBudgetDeferredTrails: event.server && event.server.snapshotBreakdown && event.server.snapshotBreakdown.payloadBudget && event.server.snapshotBreakdown.payloadBudget.deferred && event.server.snapshotBreakdown.payloadBudget.deferred.trails,
                 invalidatedTerritories: event.invalidations && event.invalidations.territories,
                 invalidatedTrails: event.invalidations && event.invalidations.trails,
                 invalidatedPlayerInfo: event.invalidations && event.invalidations.playerInfo,

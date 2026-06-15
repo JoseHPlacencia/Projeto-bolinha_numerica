@@ -192,6 +192,7 @@ const network = Object.freeze({
     diagnosticsPayloadOutlierBytes: 50000,
     diagnosticsPayloadOutlierTopLimit: 5,
     diagnosticsSlowBufferMs: 150,
+    snapshotPayloadBudgetBytes: 42000,
     interestMargin: 800,
     maxViewportWorldWidth: 3200,
     maxViewportWorldHeight: 2200,
