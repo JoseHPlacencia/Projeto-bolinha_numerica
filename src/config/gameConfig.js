@@ -213,7 +213,7 @@ const network = Object.freeze({
     playerInfoFullSyncIntervalMs: 5000,
     territoryFullSyncIntervalMs: 10000,
     trailFullSyncIntervalMs: 4000,
-    trailUpdateMaxPoints: 1600,
+    trailUpdateMaxPoints: 800,
     trailPatchFullRatio: 0.85,
     resyncRequestIntervalMs: 1000
 });
