@@ -1087,6 +1087,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
 
         const activeNextTrailIds = new Set(next.trailIds || Object.keys(next.trails || {}));
+        const territories = next.territories || previous.territories || {};
         let predictedTrails = null;
 
         for (const [id, trail] of Object.entries(baseTrails)) {
@@ -1094,7 +1095,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 continue;
             }
 
-            const predictedTrail = createPredictedTrail(trail, players[id]);
+            const predictedTrail = createPredictedTrail(trail, players[id], territories[id]);
 
             if (predictedTrail === trail) {
                 continue;
@@ -1123,22 +1124,32 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         return networkState.bufferMs <= maxBufferMs;
     }
 
-    function createPredictedTrail(trail, player) {
+    function createPredictedTrail(trail, player, territory) {
         if (!trail || !player || !Number.isFinite(player.x) || !Number.isFinite(player.y) || !Number.isFinite(player.angle)) {
             return trail;
         }
 
         const sample = createTrailPredictionSample(player);
-        const leftSegments = appendPredictedPointToLastSegment(trail.leftSegments, sample.leftPoint);
-        const rightSegments = appendPredictedPointToLastSegment(trail.rightSegments, sample.rightPoint);
+        const shouldPredictLeft = !isPointInsideTerritory(sample.leftPoint, territory);
+        const shouldPredictRight = !isPointInsideTerritory(sample.rightPoint, territory);
+        const leftSegments = shouldPredictLeft
+            ? appendPredictedPointToLastSegment(trail.leftSegments, sample.leftPoint)
+            : trail.leftSegments;
+        const rightSegments = shouldPredictRight
+            ? appendPredictedPointToLastSegment(trail.rightSegments, sample.rightPoint)
+            : trail.rightSegments;
 
-        if (leftSegments === trail.leftSegments || rightSegments === trail.rightSegments) {
+        if (leftSegments === trail.leftSegments && rightSegments === trail.rightSegments) {
             return trail;
         }
 
-        const leftFillPath = appendPredictedPointToFillPath(trail.leftFillPath, sample.leftPoint);
-        const rightFillPath = appendPredictedPointToFillPath(trail.rightFillPath, sample.rightPoint);
-        const fillChanged = leftFillPath !== trail.leftFillPath && rightFillPath !== trail.rightFillPath;
+        const leftFillPath = shouldPredictLeft
+            ? appendPredictedPointToFillPath(trail.leftFillPath, sample.leftPoint)
+            : trail.leftFillPath;
+        const rightFillPath = shouldPredictRight
+            ? appendPredictedPointToFillPath(trail.rightFillPath, sample.rightPoint)
+            : trail.rightFillPath;
+        const fillChanged = leftFillPath !== trail.leftFillPath || rightFillPath !== trail.rightFillPath;
 
         return {
             id: trail.id,
@@ -1220,6 +1231,30 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
         return distanceSquared >= minDistance * minDistance
             && distanceSquared <= maxDistance * maxDistance;
+    }
+
+    function isPointInsideTerritory(point, territory) {
+        if (!isValidPoint(point) || !territory) {
+            return false;
+        }
+
+        return getTerritoryPolygons(territory)
+            .some(polygon => isPointInsidePolygon(point, polygon));
+    }
+
+    function getTerritoryPolygons(territory) {
+        if (territory && territory.polygon && Array.isArray(territory.polygon.rings)) {
+            return [territory.polygon];
+        }
+
+        return Array.isArray(territory && territory.polygons)
+            ? territory.polygons
+            : [];
+    }
+
+    function isPointInsidePolygon(point, polygon) {
+        return (polygon && polygon.rings || [])
+            .some(ring => isPointInsideOrOnRing(point, ring));
     }
 
     function updatePlayerInfoCache(playerInfo) {
