@@ -6,7 +6,12 @@ Sua concepção visa por em prática a ODS 4 - Educação de Qualidade - atravé
 ## Desenvolvimento
 
 Como entrega principal do projeto, a equipe optou por desenvolver um jogo multiplayer, nos moldes do já existente paper.io, aplicando como mecânica base elementos de teoria dos conjuntos.  
-A solução tecnológica empregada no jogo consiste em node.js para o backend, biblioteca socket.io para a comunicação com o frontend, e a biblioteca js-angus-clipper para algumas operações geométricas.
+A solução tecnológica empregada no jogo consiste em node.js para o backend, biblioteca socket.io para a comunicação com o frontend, e a biblioteca polygon-clipping para algumas operações geométricas.
+
+## Acesso
+
+O jogo está disponível em: [vennperio.site](https://vennperio.site)
+A pretensão é mantê-lo por pelo menos um ano, e em desenvolvimento contínuo.
 
 ## Instruções
 

@@ -39,7 +39,7 @@ export function createRoomUi(socket, options = {}) {
     });
 
     socket.on("joinRoomResult", result => {
-        setJoiningState(elements, false);
+        setJoiningState(elements);
 
         if (result && result.success) {
             setStatus(elements, `Entrou na sala: ${result.roomCode}`);
@@ -319,7 +319,9 @@ function createRoom(socket, elements, roomOptions = {}, options = {}) {
     }
 
     setStatus(elements, "Criando sala...");
-    elements.createRoomButton.disabled = true;
+    if (elements.createRoomButton) {
+        elements.createRoomButton.disabled = true;
+    }
     notifyJoinStart(options);
     const playerOpts = typeof options.getPlayerOptions === "function" ? options.getPlayerOptions() : {};
     socket.emit("joinRoom", {

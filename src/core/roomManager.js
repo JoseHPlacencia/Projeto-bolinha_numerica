@@ -71,12 +71,12 @@ function createRoom(io, options = {}) {
     if (isPrivate && !isSystemRoom) {
         const password = String(options.password || "").trim();
         if (!password) {
-            return { success: false, message: "A senha é obrigatória para salas privadas." };
+            return { success: false, message: "Password is required for private rooms." };
         }
         if (password.length < config.rooms.privateRoomPasswordMinLength) {
             return {
                 success: false,
-                message: `A senha deve ter pelo menos ${config.rooms.privateRoomPasswordMinLength} caracteres.`
+                message: `Password must be at least ${config.rooms.privateRoomPasswordMinLength} characters long.`
             };
         }
         const { hash, salt } = createPasswordHash(password);
@@ -159,7 +159,7 @@ function joinRoom(roomCode, socket, password = "") {
     const spawn = alreadyJoined ? null : createSpawn(room.players, room.territories, room.runtimeConfig);
 
     if (!alreadyJoined && !spawn) {
-        return { success: false, message: "NÃ£o hÃ¡ espaÃ§o suficiente para nascer nesta sala." };
+        return { success: false, message: "Don't have enough space to spawn in this room." };
     }
 
     if (socket.data.roomCode === normalizedRoomCode) {

@@ -116,7 +116,7 @@ function registerRoomEvents(socket, io, roomManager) {
                 roomManager.destroyRoom(createResult.room.code);
                 socket.emit("joinRoomResult", {
                     success: false,
-                    message: "NÃ£o hÃ¡ espaÃ§o suficiente para nascer nesta sala."
+                    message: "Don't have enough space to spawn in this room."
                 });
                 return;
             }
@@ -144,7 +144,7 @@ function registerRoomEvents(socket, io, roomManager) {
             roomManager.leaveRoom(socket);
             socket.emit("joinRoomResult", {
                 success: false,
-                message: "NÃ£o hÃ¡ espaÃ§o suficiente para nascer nesta sala."
+                message: "Don't have enough space to spawn in this room."
             });
             io.emit("roomsList", buildRoomsList(roomManager));
             return;
