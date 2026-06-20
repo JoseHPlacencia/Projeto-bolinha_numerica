@@ -204,7 +204,7 @@ const network = Object.freeze({
     captureOperationHistoryLimit: 128,
     optimisticOwnerCaptureOperationSyncEnabled: false,
     captureOperationResyncEnabled: true,
-    reliableTrailUpdatesEnabled: false,
+    reliableTrailUpdatesEnabled: true,
     coordinatePrecision: 10,
     anglePrecision: 1000,
     forcedFullSyncsEnabled: false,

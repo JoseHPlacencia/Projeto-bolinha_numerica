@@ -634,11 +634,7 @@ function crossProduct(first, second) {
 }
 
 function clearTrail(player) {
-    player.trailLeftSegments = [];
-    player.trailRightSegments = [];
-    player.isLeftTrailActive = false;
-    player.isRightTrailActive = false;
-    clearTrailFill(player);
+    player.clearTrailState();
 }
 
 function clearTrailFill(player) {

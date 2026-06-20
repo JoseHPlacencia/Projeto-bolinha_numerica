@@ -68,6 +68,7 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
             isNetworkDiagnosticsEnabled(socket)
         );
         const snapshot = measuredSnapshot.snapshot;
+        assignSnapshotSequence(socket, snapshot);
         const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDiagnostics);
 
         if (isSpectatorSocket) {
@@ -124,6 +125,7 @@ function sendVolatileSnapshotWhileReliablePending(socket, players, territories, 
         isNetworkDiagnosticsEnabled(socket)
     );
     const snapshot = measuredSnapshot.snapshot;
+    assignSnapshotSequence(socket, snapshot);
     const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDiagnostics);
 
     if (socket.data && socket.data.spectatorRoomCode) {
@@ -150,6 +152,21 @@ function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
 
 function filterKnownIds(ids, knownStates) {
     return (ids || []).filter(id => knownStates && knownStates.has(id));
+}
+
+function assignSnapshotSequence(socket, snapshot) {
+    if (!socket || !socket.data || !snapshot) {
+        return null;
+    }
+
+    const previousSequence = Number.isSafeInteger(socket.data.snapshotSequence)
+        ? socket.data.snapshotSequence
+        : 0;
+    const sequence = previousSequence + 1;
+
+    socket.data.snapshotSequence = sequence;
+    snapshot.sequence = sequence;
+    return sequence;
 }
 
 function queueReliableSnapshot(socket, snapshot, nextSnapshotState, sendDiagnostics = null) {
@@ -1092,6 +1109,7 @@ function countInvalidationItems(value) {
 module.exports = startSnapshotLoop;
 module.exports.startSnapshotLoop = startSnapshotLoop;
 module.exports.acknowledgeReliableSnapshot = acknowledgeReliableSnapshot;
+module.exports.assignSnapshotSequence = assignSnapshotSequence;
 module.exports.invalidateSnapshotCache = invalidateSnapshotCache;
 module.exports.queueReliableSnapshot = queueReliableSnapshot;
 module.exports.sendSnapshot = sendSnapshot;

@@ -7,6 +7,10 @@ import {
     clipPolygonRingsToBounds,
     clipPolylineToBounds
 } from "./viewportClipping.js";
+import {
+    isDarkVisualTheme
+} from "../visualTheme.js";
+import { isPerformanceMode } from "../renderSettings.js";
 
 const trailRenderCache = new WeakMap();
 const trailSegmentRenderCache = new WeakMap();
@@ -34,8 +38,8 @@ function drawTrail(context, trail, player, gameConfig, viewportBounds) {
     context.lineJoin = "round";
 
     drawTrailFill(context, preparedTrail.fill, color, gameConfig.territory.fillAlpha, viewportBounds);
-    drawTrailEdges(context, preparedTrail.left, color, lineWidth, viewportBounds);
-    drawTrailEdges(context, preparedTrail.right, color, lineWidth, viewportBounds);
+    drawTrailEdges(context, preparedTrail.left, color, lineWidth, viewportBounds, gameConfig);
+    drawTrailEdges(context, preparedTrail.right, color, lineWidth, viewportBounds, gameConfig);
 
     context.restore();
 }
@@ -80,7 +84,7 @@ function drawTrailFill(context, polygon, color, fillAlpha, viewportBounds) {
     context.restore();
 }
 
-function drawTrailEdges(context, edge, color, lineWidth, viewportBounds) {
+function drawTrailEdges(context, edge, color, lineWidth, viewportBounds, gameConfig) {
     if (!edge || edge.segments.length === 0 || !boundsOverlap(expandBounds(edge.bounds, lineWidth), viewportBounds)) {
         return;
     }
@@ -96,25 +100,50 @@ function drawTrailEdges(context, edge, color, lineWidth, viewportBounds) {
     context.save();
     context.globalAlpha = 1;
     context.strokeStyle = color;
-    context.lineWidth = lineWidth;
+    const darkTheme = isDarkVisualTheme(gameConfig);
+    const performanceMode = isPerformanceMode(gameConfig);
+    context.lineWidth = darkTheme && performanceMode ? lineWidth * 2.8 : lineWidth;
 
-    if (!viewportBounds && edge.path) {
-        context.stroke(edge.path);
-    } else {
-        const path = createSmoothSegmentsPath(segments);
+    if (darkTheme) {
+        context.globalAlpha = performanceMode ? 0.24 : 0.46;
 
-        if (path) {
-            context.stroke(path);
-            context.restore();
-            return;
+        if (!performanceMode) {
+            context.lineWidth = lineWidth * 1.25;
+            context.shadowColor = color;
+            context.shadowBlur = 18;
         }
 
-        for (const segment of segments) {
-            strokeSmoothPath(context, segment);
+        strokeTrail(context, edge, segments, viewportBounds);
+
+        if (!performanceMode) {
+            context.shadowColor = "transparent";
+            context.shadowBlur = 0;
         }
+
+        context.globalAlpha = 1;
+        context.lineWidth = lineWidth;
     }
 
+    strokeTrail(context, edge, segments, viewportBounds);
     context.restore();
+}
+
+function strokeTrail(context, edge, segments, viewportBounds) {
+    if (!viewportBounds && edge.path) {
+        context.stroke(edge.path);
+        return;
+    }
+
+    const path = createSmoothSegmentsPath(segments);
+
+    if (path) {
+        context.stroke(path);
+        return;
+    }
+
+    for (const segment of segments) {
+        strokeSmoothPath(context, segment);
+    }
 }
 
 function clipTrailSegmentsToViewport(segments, viewportBounds, lineWidth) {

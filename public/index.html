@@ -4,8 +4,29 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
 <title>Vennperio</title>
+<script>
+try {
+    const savedTheme = localStorage.getItem("vennperioVisualTheme");
+    const savedPerformanceMode = localStorage.getItem("vennperioPerformanceMode");
+    document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light";
+    document.documentElement.dataset.renderQuality = savedPerformanceMode === "false"
+        ? "quality"
+        : "performance";
+} catch {
+    document.documentElement.dataset.theme = "light";
+    document.documentElement.dataset.renderQuality = "performance";
+}
+</script>
 <meta name="description" content="Jogue Vennperio, um multiplayer educativo sobre Teoria dos Conjuntos com conquista de territórios, estratégia e pensamento rápido.">
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/css/tokens.css">
+<link rel="stylesheet" href="/css/base.css">
+<link rel="stylesheet" href="/css/menu.css">
+<link rel="stylesheet" href="/css/overlays.css">
+<link rel="stylesheet" href="/css/game-hud.css">
+<link rel="stylesheet" href="/css/rooms.css">
+<link rel="stylesheet" href="/css/settings.css">
+<link rel="stylesheet" href="/css/themes.css">
+<link rel="stylesheet" href="/css/responsive.css">
 </head>
 <body class="is-menu-active">
 <main id="mainMenu" class="main-menu" aria-label="Menu principal">
@@ -59,6 +80,23 @@
         </div>
 
         <div class="bottom-links">
+            <button class="icon-btn" id="btn-settings" type="button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06-2.83 2.83-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21h-4v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06-2.83-2.83.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3v-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06 2.83-2.83.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3h4v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06 2.83 2.83-.06.06A1.65 1.65 0 0 0 19.4 9c.12.6.64 1.04 1.25 1.05H21v4h-.35A1.65 1.65 0 0 0 19.4 15Z"></path>
+                </svg>
+                Configurações
+            </button>
+            <button class="icon-btn theme-toggle" id="btn-theme" type="button" aria-pressed="false">
+                <svg class="theme-toggle__icon theme-toggle__icon--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"></path>
+                </svg>
+                <svg class="theme-toggle__icon theme-toggle__icon--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.66 6.34l1.41-1.41"></path>
+                </svg>
+                <span data-theme-label>Modo escuro</span>
+            </button>
             <button class="icon-btn" id="btn-help" type="button">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><circle cx="12" cy="17" r=".5" fill="currentColor"></circle></svg>
                 Ajuda
@@ -214,6 +252,44 @@
                 <button id="closeRoomDetailsButton" class="room-modal__close" type="button">&times;</button>
             </div>
             <div id="roomDetailsBody" class="room-modal__section room-details"></div>
+        </div>
+    </div>
+
+    <div class="overlay" id="overlay-settings" aria-hidden="true">
+        <div class="popup settings-popup" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+            <div class="popup-header">
+                <div>
+                    <p class="settings-eyebrow">Vídeo</p>
+                    <h2 id="settingsTitle">Configurações</h2>
+                </div>
+                <button class="popup-close" data-close="overlay-settings" type="button">×</button>
+            </div>
+            <div class="popup-body settings-body">
+                <div class="settings-row">
+                    <div class="settings-copy">
+                        <label for="fpsLimitSelect">Trava de FPS</label>
+                        <p>Limita a frequência de renderização para reduzir o uso de energia e GPU.</p>
+                    </div>
+                    <select id="fpsLimitSelect" class="settings-select">
+                        <option value="0">Desativada</option>
+                        <option value="30">30 FPS</option>
+                        <option value="60" selected>60 FPS</option>
+                        <option value="120">120 FPS</option>
+                    </select>
+                </div>
+
+                <div class="settings-row">
+                    <div class="settings-copy">
+                        <span class="settings-label">Modo desempenho</span>
+                        <p id="performanceModeHint">Usa halos simplificados para manter a renderização mais leve.</p>
+                    </div>
+                    <label class="settings-switch" for="performanceModeCheckbox">
+                        <input id="performanceModeCheckbox" type="checkbox" checked>
+                        <span class="settings-switch__track"><span class="settings-switch__thumb"></span></span>
+                        <span class="sr-only">Ativar modo desempenho</span>
+                    </label>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -411,6 +487,17 @@
 <section id="gameLayer" class="game-layer" aria-label="Jogo" aria-hidden="true">
     <canvas id="gameCanvas"></canvas>
     <div id="hud" class="hud">
+        <div id="gameRoomCodePanel" class="room-code-panel" aria-label="Código da sala" hidden>
+            <span class="room-code-panel__label">Sala</span>
+            <strong id="gameRoomCodeDisplay" class="room-code-panel__code"></strong>
+            <button id="copyRoomCodeButton" class="room-code-panel__copy" type="button" aria-label="Copiar código da sala" title="Copiar código da sala">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+                    <path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"></path>
+                </svg>
+            </button>
+            <span id="roomCodeCopyStatus" class="sr-only" aria-live="polite"></span>
+        </div>
         <div id="lifePanel" class="life-panel" aria-label="Vidas">
             <span class="life-panel__label">Vidas</span>
             <div id="lifePips" class="life-panel__pips"></div>

@@ -108,6 +108,7 @@ class Player {
         this.lastMouseDirectionAngle = null;
         this.inputVersion = 0;
         this.infoVersion = 0;
+        this.trailGeneration = 0;
         this.boundarySlideInputVersion = 0;
         this.debugState = null;
         this.viewport = null;
@@ -175,6 +176,7 @@ class Player {
     }
 
     clearTrailState() {
+        this.trailGeneration++;
         this.trailLeftSegments = [];
         this.trailRightSegments = [];
         this.trailLeftFillPath = [];

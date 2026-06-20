@@ -1,11 +1,24 @@
 import { loadGameConfig } from "./js/config.js";
 import { startClient } from "./js/gameClient.js";
 import { createMenuBackground } from "./js/menuBackground.js";
+import {
+    DEFAULT_FPS_LIMIT,
+    DEFAULT_PERFORMANCE_MODE,
+    normalizeFpsLimit
+} from "./js/renderSettings.js";
+import {
+    normalizeVisualTheme,
+    VISUAL_THEME_DARK,
+    VISUAL_THEME_LIGHT
+} from "./js/visualTheme.js";
 
 const STORAGE_KEYS = {
     color: "bolinhaJogadorCor",
     difficulty: "bolinhaDificuldade",
-    name: "bolinhaJogadorNome"
+    fpsLimit: "vennperioFpsLimit",
+    name: "bolinhaJogadorNome",
+    performanceMode: "vennperioPerformanceMode",
+    theme: "vennperioVisualTheme"
 };
 
 const DEFAULT_PLAYER_COLOR = "#ff2626";
@@ -15,6 +28,11 @@ const difficultyRow = document.querySelector(".diff-row");
 const playButton = document.getElementById("btn-play");
 const findRoomMenuButton = document.getElementById("btn-encontrar-sala");
 const createRoomMenuButton = document.getElementById("btn-criar-sala");
+const settingsButton = document.getElementById("btn-settings");
+const themeButton = document.getElementById("btn-theme");
+const fpsLimitSelect = document.getElementById("fpsLimitSelect");
+const performanceModeCheckbox = document.getElementById("performanceModeCheckbox");
+const performanceModeHint = document.getElementById("performanceModeHint");
 const mainMenu = document.getElementById("mainMenu");
 const gameLayer = document.getElementById("gameLayer");
 const gameOverPanel = document.getElementById("gameOverPanel");
@@ -27,6 +45,10 @@ const PLAY_BUTTON_IDLE_LABEL = "▶ Partida rápida";
 
 let selectedColor = DEFAULT_PLAYER_COLOR;
 let selectedDifficulty = "medium";
+let selectedFpsLimit = DEFAULT_FPS_LIMIT;
+let selectedPerformanceMode = DEFAULT_PERFORMANCE_MODE;
+let selectedTheme = normalizeVisualTheme(document.documentElement.dataset.theme);
+let activeGameConfig = null;
 let gameClient = null;
 let menuBackground = null;
 let pendingAutoStart = null;
@@ -40,6 +62,10 @@ initializeClient();
 async function initializeClient() {
     try {
         const gameConfig = await loadGameConfig();
+        activeGameConfig = gameConfig;
+        loadRenderingPreferences();
+        applyVisualTheme(selectedTheme, { persist: false, updateClient: false });
+        applyRenderingSettings({}, { persist: false, updateClient: false });
         menuBackground = createMenuBackground(gameConfig);
         gameClient = startClient(gameConfig, {
             getPlayerOptions,
@@ -64,7 +90,11 @@ function initializeMenu() {
     attachPlayButton();
     attachFindRoomButton();
     attachCreateRoomButton();
+    attachSettingsControls();
+    attachThemeButton();
     attachOverlayButtons();
+    syncThemeButton();
+    syncSettingsControls();
     showMenu();
 }
 
@@ -76,6 +106,18 @@ function loadPreferences() {
     if (savedName) playerNameInput.value = savedName;
     if (savedColor) selectColor(savedColor);
     if (savedDifficulty) selectDifficulty(savedDifficulty);
+}
+
+function loadRenderingPreferences() {
+    const savedFpsLimit = localStorage.getItem(STORAGE_KEYS.fpsLimit);
+    const savedPerformanceMode = localStorage.getItem(STORAGE_KEYS.performanceMode);
+
+    selectedFpsLimit = normalizeFpsLimit(
+        savedFpsLimit === null ? DEFAULT_FPS_LIMIT : savedFpsLimit
+    );
+    selectedPerformanceMode = savedPerformanceMode === null
+        ? DEFAULT_PERFORMANCE_MODE
+        : savedPerformanceMode !== "false";
 }
 
 function attachColorPicker() {
@@ -99,6 +141,140 @@ function attachPlayButton() {
         savePreferences();
         startPublicGame();
     });
+}
+
+function attachThemeButton() {
+    if (!themeButton) return;
+
+    themeButton.addEventListener("click", () => {
+        const nextTheme = selectedTheme === VISUAL_THEME_DARK
+            ? VISUAL_THEME_LIGHT
+            : VISUAL_THEME_DARK;
+
+        applyVisualTheme(nextTheme);
+    });
+}
+
+function attachSettingsControls() {
+    settingsButton?.addEventListener("click", () => {
+        syncSettingsControls();
+        openOverlay("overlay-settings");
+    });
+
+    fpsLimitSelect?.addEventListener("change", () => {
+        applyRenderingSettings({
+            fpsLimit: fpsLimitSelect.value
+        });
+    });
+
+    performanceModeCheckbox?.addEventListener("change", () => {
+        applyRenderingSettings({
+            performanceMode: performanceModeCheckbox.checked
+        });
+    });
+}
+
+function applyVisualTheme(theme, options = {}) {
+    const {
+        persist = true,
+        updateClient = true
+    } = options;
+
+    selectedTheme = normalizeVisualTheme(theme);
+    document.documentElement.dataset.theme = selectedTheme;
+
+    if (activeGameConfig) {
+        activeGameConfig.visualTheme = {
+            ...(activeGameConfig.visualTheme || {}),
+            mode: selectedTheme
+        };
+    }
+
+    if (updateClient && gameClient && typeof gameClient.setVisualTheme === "function") {
+        gameClient.setVisualTheme(selectedTheme);
+    }
+
+    if (persist) {
+        localStorage.setItem(STORAGE_KEYS.theme, selectedTheme);
+    }
+
+    syncThemeButton();
+}
+
+function syncThemeButton() {
+    if (!themeButton) return;
+
+    const darkModeActive = selectedTheme === VISUAL_THEME_DARK;
+    const label = darkModeActive ? "Modo claro" : "Modo escuro";
+
+    themeButton.setAttribute("aria-pressed", String(darkModeActive));
+    themeButton.setAttribute("aria-label", darkModeActive
+        ? "Ativar modo claro"
+        : "Ativar modo escuro");
+
+    const labelElement = themeButton.querySelector("[data-theme-label]");
+    if (labelElement) {
+        labelElement.textContent = label;
+    }
+}
+
+function applyRenderingSettings(settings, options = {}) {
+    const {
+        persist = true,
+        updateClient = true
+    } = options;
+
+    if (Object.hasOwn(settings, "fpsLimit")) {
+        selectedFpsLimit = normalizeFpsLimit(settings.fpsLimit);
+    }
+
+    if (Object.hasOwn(settings, "performanceMode")) {
+        selectedPerformanceMode = Boolean(settings.performanceMode);
+    }
+
+    const renderingSettings = {
+        fpsLimit: selectedFpsLimit,
+        performanceMode: selectedPerformanceMode
+    };
+
+    document.documentElement.dataset.renderQuality = selectedPerformanceMode
+        ? "performance"
+        : "quality";
+
+    if (activeGameConfig) {
+        activeGameConfig.renderingSettings = {
+            ...(activeGameConfig.renderingSettings || {}),
+            ...renderingSettings
+        };
+    }
+
+    if (updateClient) {
+        gameClient?.setRenderingSettings?.(renderingSettings);
+        menuBackground?.setRenderingSettings?.(renderingSettings);
+    }
+
+    if (persist) {
+        localStorage.setItem(STORAGE_KEYS.fpsLimit, String(selectedFpsLimit));
+        localStorage.setItem(STORAGE_KEYS.performanceMode, String(selectedPerformanceMode));
+    }
+
+    syncSettingsControls();
+}
+
+function syncSettingsControls() {
+    if (fpsLimitSelect) {
+        fpsLimitSelect.value = String(selectedFpsLimit);
+    }
+
+    if (performanceModeCheckbox) {
+        performanceModeCheckbox.checked = selectedPerformanceMode;
+    }
+
+    if (performanceModeHint) {
+        performanceModeHint.textContent = selectedPerformanceMode
+            ? "Usa halos simplificados para manter a renderização mais leve."
+            : "Ativa halos multicamada mais suaves e intensos, com maior custo gráfico.";
+    }
 }
 
 function attachCreateRoomButton() {

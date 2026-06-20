@@ -1,3 +1,9 @@
+import {
+    getMapPalette,
+    isDarkVisualTheme
+} from "../visualTheme.js";
+import { isPerformanceMode } from "../renderSettings.js";
+
 export function createMinimapRenderer(canvas, gameConfig) {
     const context = canvas.getContext("2d");
     const settings = getMinimapSettings(gameConfig);
@@ -65,22 +71,42 @@ export function createMinimapRenderer(canvas, gameConfig) {
 
     function drawMapBackground() {
         const circle = getMapCircle();
+        const palette = getMapPalette(gameConfig);
 
         context.save();
         context.beginPath();
         context.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
-        context.fillStyle = "rgba(8, 12, 18, 0.72)";
+        context.fillStyle = palette.fill;
+        context.globalAlpha = isDarkVisualTheme(gameConfig) ? 0.94 : 0.88;
         context.fill();
         context.restore();
     }
 
     function drawMapBorder() {
         const circle = getMapBorderCircle();
+        const palette = getMapPalette(gameConfig);
 
         context.save();
+        if (isDarkVisualTheme(gameConfig)) {
+            const performanceMode = isPerformanceMode(gameConfig);
+
+            context.beginPath();
+            context.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
+            context.strokeStyle = performanceMode ? palette.glow : palette.border;
+            context.lineWidth = performanceMode
+                ? settings.mapBorderWidth * 3
+                : settings.mapBorderWidth * 1.5;
+
+            if (!performanceMode) {
+                context.shadowColor = palette.border;
+                context.shadowBlur = 9;
+            }
+
+            context.stroke();
+        }
         context.beginPath();
         context.arc(circle.x, circle.y, circle.radius, 0, Math.PI * 2);
-        context.strokeStyle = "rgba(255, 255, 255, 0.24)";
+        context.strokeStyle = palette.border;
         context.lineWidth = settings.mapBorderWidth;
         context.stroke();
         context.restore();
@@ -111,6 +137,24 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.strokeStyle = territory.color;
         context.lineCap = "round";
         context.lineJoin = "round";
+        if (isDarkVisualTheme(gameConfig)) {
+            const performanceMode = isPerformanceMode(gameConfig);
+
+            context.globalAlpha = performanceMode ? 0.28 : 0.4;
+            context.lineWidth = performanceMode
+                ? settings.territoryBorderWidth * 3
+                : settings.territoryBorderWidth * 1.4;
+
+            if (!performanceMode) {
+                context.shadowColor = territory.color;
+                context.shadowBlur = 7;
+            }
+
+            context.stroke(path);
+            context.shadowColor = "transparent";
+            context.shadowBlur = 0;
+        }
+        context.globalAlpha = 1;
         context.lineWidth = settings.territoryBorderWidth;
         context.stroke(path);
         context.restore();
@@ -230,17 +274,41 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.strokeStyle = color;
         context.lineCap = "round";
         context.lineJoin = "round";
-        context.lineWidth = settings.trailBorderWidth;
+        const darkTheme = isDarkVisualTheme(gameConfig);
+        const performanceMode = isPerformanceMode(gameConfig);
+        context.lineWidth = darkTheme && performanceMode
+            ? settings.trailBorderWidth * 3
+            : settings.trailBorderWidth;
 
-        if (edge.path) {
-            context.stroke(edge.path);
-        } else {
-            for (const segment of edge.segments) {
-                strokeTrailSegment(segment);
+        if (darkTheme) {
+            context.globalAlpha = performanceMode ? 0.28 : 0.42;
+
+            if (!performanceMode) {
+                context.lineWidth = settings.trailBorderWidth * 1.4;
+                context.shadowColor = color;
+                context.shadowBlur = 7;
             }
+
+            strokeTrailEdge(edge);
+            context.shadowColor = "transparent";
+            context.shadowBlur = 0;
+            context.globalAlpha = 1;
+            context.lineWidth = settings.trailBorderWidth;
         }
 
+        strokeTrailEdge(edge);
         context.restore();
+    }
+
+    function strokeTrailEdge(edge) {
+        if (edge.path) {
+            context.stroke(edge.path);
+            return;
+        }
+
+        for (const segment of edge.segments) {
+            strokeTrailSegment(segment);
+        }
     }
 
     function drawPlayerIcon(player, color) {
@@ -254,14 +322,21 @@ export function createMinimapRenderer(canvas, gameConfig) {
         context.rotate(Number.isFinite(player.angle) ? player.angle : 0);
         context.scale(scale, scale);
 
-        context.fillStyle = "rgba(0,0,0,.18)";
+        context.fillStyle = isDarkVisualTheme(gameConfig)
+            ? "rgba(255,255,255,.1)"
+            : "rgba(0,0,0,.18)";
         context.fillRect(-30, -30, playerSize, playerSize);
+
+        if (isDarkVisualTheme(gameConfig)) {
+            context.shadowColor = color || player.color || "#f5f7fb";
+            context.shadowBlur = (isPerformanceMode(gameConfig) ? 8 : 10) / scale;
+        }
 
         context.fillStyle = color || player.color || "#f5f7fb";
         context.fillRect(-35, -35, playerSize, playerSize);
 
         context.lineWidth = settings.playerIconBorderWidth / scale;
-        context.strokeStyle = "#000";
+        context.strokeStyle = isDarkVisualTheme(gameConfig) ? "#fff" : "#000";
         context.strokeRect(-35, -35, playerSize, playerSize);
         context.restore();
     }

@@ -1,0 +1,121 @@
+/* Shared scrollbar styling and global small-screen adaptations. */
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 99px;
+}
+
+@media (max-width: 640px) {
+    .main-menu {
+        padding: 12px;
+    }
+
+    .logo-wrap {
+        margin-bottom: 18px;
+    }
+
+    .card {
+        padding: 24px 20px;
+    }
+
+    .bottom-links {
+        gap: 8px;
+    }
+
+    .icon-btn {
+        padding: 9px 12px;
+    }
+
+    .gallery-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .sobre-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .hud {
+        bottom: 10px;
+        gap: 8px;
+        right: auto;
+        padding: 10px;
+        top: auto;
+    }
+
+    .life-panel {
+        grid-template-columns: auto auto;
+        padding: 7px 8px;
+    }
+
+    .room-code-panel {
+        gap: 6px;
+        padding: 7px;
+    }
+
+    .room-code-panel__label {
+        display: none;
+    }
+
+    .room-code-panel__code {
+        font-size: 12px;
+        letter-spacing: 1px;
+    }
+
+    .life-panel__label {
+        display: none;
+    }
+
+    .life-panel__pip {
+        height: 10px;
+        width: 18px;
+    }
+
+    .debug-panel div {
+        min-width: 64px;
+    }
+
+    .minimap {
+        bottom: 10px;
+        right: 10px;
+    }
+
+    .rank-panel {
+        max-width: calc(100vw - 20px);
+        min-width: min(320px, calc(100vw - 20px));
+        right: 10px;
+        top: 10px;
+    }
+
+    .rank-panel__header,
+    .rank-panel__row {
+        grid-template-columns: minmax(76px, 1fr) 54px 42px 38px;
+    }
+
+    .rank-panel__row {
+        font-size: 11px;
+        min-height: 26px;
+    }
+
+    .game-over-panel__content {
+        padding: 26px 22px 24px;
+    }
+
+    .settings-row {
+        align-items: stretch;
+        gap: 14px;
+        grid-template-columns: 1fr;
+    }
+
+    .settings-select {
+        width: 100%;
+    }
+
+    .settings-switch {
+        justify-self: end;
+    }
+}
+

@@ -1,5 +1,6 @@
 import { createCanvasRenderer } from "./renderer.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
+import { getRenderFrameIntervalMs } from "./renderSettings.js";
 
 let renderer = null;
 let snapshots = null;
@@ -9,6 +10,7 @@ let running = false;
 let frameCount = 0;
 let renderedFrameCount = 0;
 let renderTimeTotal = 0;
+let lastRenderedAt = Number.NEGATIVE_INFINITY;
 let debugMeasuredAt = performance.now();
 
 self.addEventListener("message", event => {
@@ -70,6 +72,7 @@ function applyGameConfig(nextConfig) {
     }
 
     mergeObject(currentGameConfig, nextConfig);
+    lastRenderedAt = Number.NEGATIVE_INFINITY;
 }
 
 function mergeObject(target, source) {
@@ -106,10 +109,15 @@ function resetSnapshots() {
     }
 }
 
-function renderLoop() {
+function renderLoop(timestamp = performance.now()) {
     scheduleFrame(renderLoop);
 
     if (!renderer || !snapshots || !currentPlayerId) {
+        publishDebugState(0, false);
+        return;
+    }
+
+    if (!shouldRenderFrame(timestamp)) {
         publishDebugState(0, false);
         return;
     }
@@ -124,6 +132,17 @@ function renderLoop() {
     const startedAt = performance.now();
     renderer.renderWorld(state, currentPlayerId);
     publishDebugState(performance.now() - startedAt, true);
+}
+
+function shouldRenderFrame(now) {
+    const interval = getRenderFrameIntervalMs(currentGameConfig);
+
+    if (interval > 0 && now - lastRenderedAt < interval - 0.5) {
+        return false;
+    }
+
+    lastRenderedAt = now;
+    return true;
 }
 
 function scheduleFrame(callback) {

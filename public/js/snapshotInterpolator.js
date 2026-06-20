@@ -12,7 +12,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         playerInfo: {},
         territories: {},
         territoryPoints: {},
-        trails: {}
+        trails: {},
+        trailAssemblies: {}
     };
     const networkState = {
         bufferMs: networkConfig.initialBufferMs,
@@ -55,6 +56,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         entityCache.territories = {};
         entityCache.territoryPoints = {};
         entityCache.trails = {};
+        entityCache.trailAssemblies = {};
         networkState.bufferMs = networkConfig.initialBufferMs;
         networkState.serverOffset = 0;
         networkState.lastSnapshotReceivedAt = null;
@@ -81,10 +83,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const now = performance.now();
         const applyResult = createApplyResult();
         const snapshot = expandSnapshot(rawSnapshot, applyResult);
+        const shouldSave = applyResult.applied && isSnapshotNewerThanRenderBuffer(snapshot);
 
-        updateAdaptiveBuffer(now);
-        syncServerClock(snapshot.time);
-        saveSnapshot(snapshot);
+        if (shouldSave) {
+            updateAdaptiveBuffer(now);
+            syncServerClock(snapshot.time);
+            saveSnapshot(snapshot);
+        }
         recordSnapshotNetworkDiagnostics(rawSnapshot, snapshot, applyResult, now);
 
         return applyResult;
@@ -882,9 +887,9 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function expandCompactSnapshot(rawSnapshot, applyResult) {
-        updatePlayerInfoCache(rawSnapshot.playerInfo);
-        updateTerritoryCache(rawSnapshot.territories, applyResult);
-        updateTrailCache(rawSnapshot.trails, applyResult);
+        updatePlayerInfoCache(rawSnapshot.playerInfo, rawSnapshot.sequence);
+        updateTerritoryCache(rawSnapshot.territories, applyResult, rawSnapshot.sequence);
+        updateTrailCache(rawSnapshot.trails, applyResult, rawSnapshot.sequence);
         const activeTrailIds = new Set(rawSnapshot.trailIds || []);
         const failedTerritoryOperationIds = updateTerritoryOperations(rawSnapshot.territoryOps, activeTrailIds, applyResult);
         const ignoredTerritoryResyncIds = createIgnoredTerritoryResyncIds(failedTerritoryOperationIds);
@@ -907,6 +912,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         debugState.visibleTrails = Object.keys(trails).length;
 
         return {
+            sequence: rawSnapshot.sequence,
             time: rawSnapshot.time,
             players,
             territories,
@@ -932,6 +938,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         debugState.visibleTrails = Object.keys(snapshot.trails || {}).length;
 
         return {
+            sequence: snapshot.sequence,
             time: snapshot.time,
             players: snapshot.players || {},
             territories: snapshot.territories || {},
@@ -1000,6 +1007,21 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         while (snapshots.length > networkConfig.maxSnapshots) {
             snapshots.shift();
         }
+    }
+
+    function isSnapshotNewerThanRenderBuffer(snapshot) {
+        const latest = snapshots[snapshots.length - 1];
+
+        if (!latest) {
+            return true;
+        }
+
+        if (Number.isSafeInteger(snapshot.sequence) && Number.isSafeInteger(latest.sequence)) {
+            return snapshot.sequence > latest.sequence;
+        }
+
+        return Number.isFinite(snapshot.time)
+            && (!Number.isFinite(latest.time) || snapshot.time > latest.time);
     }
 
     function findSnapshotPair(renderTime) {
@@ -1257,13 +1279,26 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             .some(ring => isPointInsideOrOnRing(point, ring));
     }
 
-    function updatePlayerInfoCache(playerInfo) {
+    function updatePlayerInfoCache(playerInfo, snapshotSequence) {
         for (const [id, info] of Object.entries(playerInfo || {})) {
+            const cachedInfo = entityCache.playerInfo[id];
+            const version = info[3];
+
+            if (
+                cachedInfo
+                && Number.isFinite(version)
+                && Number.isFinite(cachedInfo.version)
+                && version < cachedInfo.version
+            ) {
+                continue;
+            }
+
             entityCache.playerInfo[id] = {
                 color: info[0],
                 territoryX: info[1],
                 territoryY: info[2],
-                version: info[3],
+                version,
+                snapshotSequence,
                 name: info[4],
                 eliminations: info[5],
                 lives: info[6],
@@ -1273,8 +1308,19 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
     }
 
-    function updateTerritoryCache(territories, applyResult) {
+    function updateTerritoryCache(territories, applyResult, snapshotSequence) {
         for (const [id, territory] of Object.entries(territories || {})) {
+            const cachedTerritory = entityCache.territories[id];
+
+            if (
+                cachedTerritory
+                && Number.isFinite(territory.version)
+                && Number.isFinite(cachedTerritory.version)
+                && territory.version < cachedTerritory.version
+            ) {
+                continue;
+            }
+
             const base = territory.base || [0, 0];
             const polygon = unpackTerritoryPolygon(territory.polygon);
 
@@ -1287,6 +1333,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 id,
                 color: territory.color,
                 version: territory.version,
+                snapshotSequence,
                 baseX: base[0],
                 baseY: base[1],
                 polygon
@@ -1390,6 +1437,17 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 expectedBaseVersion: operation.baseVersion,
                 operationVersion: operation.version
             });
+        }
+
+        if (
+            Number.isFinite(operation.version)
+            && Number.isFinite(territory.version)
+            && territory.version >= operation.version
+        ) {
+            return {
+                applied: true,
+                skipped: true
+            };
         }
 
         if (territory.version !== operation.baseVersion) {
@@ -1953,23 +2011,103 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
     }
 
-    function updateTrailCache(trails, applyResult) {
+    function updateTrailCache(trails, applyResult, snapshotSequence) {
         for (const [id, update] of Object.entries(trails || {})) {
-            if (update.full) {
-                entityCache.trails[id] = createFullTrail(id, update);
+            const cachedTrail = entityCache.trails[id];
+            const assembly = entityCache.trailAssemblies[id];
+            const newestTrail = getNewestTrailState(cachedTrail, assembly);
+
+            if (isTrailUpdateStale(update, snapshotSequence, newestTrail)) {
                 continue;
             }
 
-            const trail = entityCache.trails[id];
-            const patchedTrail = trail && createPatchedTrail(trail, update);
+            if (update.full) {
+                const fullTrail = createFullTrail(id, update, snapshotSequence);
+                const shouldStage = Boolean(
+                    update.partial
+                    && cachedTrail
+                    && !cachedTrail.isPartial
+                    && isSameTrailGeneration(cachedTrail, fullTrail)
+                );
+
+                if (shouldStage) {
+                    entityCache.trailAssemblies[id] = fullTrail;
+                    continue;
+                }
+
+                entityCache.trails[id] = fullTrail;
+                delete entityCache.trailAssemblies[id];
+                continue;
+            }
+
+            const trail = assembly || cachedTrail;
+            const patchedTrail = trail && createPatchedTrail(trail, update, snapshotSequence);
 
             if (!patchedTrail) {
+                delete entityCache.trailAssemblies[id];
                 markCacheInvalid(applyResult, "trails", id);
                 continue;
             }
 
+            if (assembly && update.partial) {
+                entityCache.trailAssemblies[id] = patchedTrail;
+                continue;
+            }
+
             entityCache.trails[id] = patchedTrail;
+            delete entityCache.trailAssemblies[id];
         }
+    }
+
+    function getNewestTrailState(cachedTrail, assembly) {
+        if (!cachedTrail) {
+            return assembly || null;
+        }
+
+        if (!assembly) {
+            return cachedTrail;
+        }
+
+        if ((assembly.generation || 0) !== (cachedTrail.generation || 0)) {
+            return (assembly.generation || 0) > (cachedTrail.generation || 0)
+                ? assembly
+                : cachedTrail;
+        }
+
+        return (assembly.snapshotSequence || 0) > (cachedTrail.snapshotSequence || 0)
+            ? assembly
+            : cachedTrail;
+    }
+
+    function isTrailUpdateStale(update, snapshotSequence, trail) {
+        if (!trail) {
+            return false;
+        }
+
+        const updateGeneration = Number.isSafeInteger(update.generation)
+            ? update.generation
+            : null;
+        const trailGeneration = Number.isSafeInteger(trail.generation)
+            ? trail.generation
+            : null;
+
+        if (
+            updateGeneration !== null
+            && trailGeneration !== null
+            && updateGeneration !== trailGeneration
+        ) {
+            return updateGeneration < trailGeneration;
+        }
+
+        return Number.isSafeInteger(snapshotSequence)
+            && Number.isSafeInteger(trail.snapshotSequence)
+            && snapshotSequence <= trail.snapshotSequence;
+    }
+
+    function isSameTrailGeneration(first, second) {
+        return Number.isSafeInteger(first && first.generation)
+            && Number.isSafeInteger(second && second.generation)
+            && first.generation === second.generation;
     }
 
     function expandPlayers(players, debug) {
@@ -2047,10 +2185,13 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
     }
 
-    function createFullTrail(id, update) {
+    function createFullTrail(id, update, snapshotSequence) {
         const trail = {
             id,
             color: update.color,
+            generation: update.generation,
+            snapshotSequence,
+            isPartial: Boolean(update.partial),
             leftSegments: unpackSegments(update.leftSegments),
             rightSegments: unpackSegments(update.rightSegments),
             leftFillPath: unpackPoints(update.leftFillPath),
@@ -2063,7 +2204,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         return trail;
     }
 
-    function createPatchedTrail(trail, update) {
+    function createPatchedTrail(trail, update, snapshotSequence) {
         const leftSegments = applySegmentPatches(trail.leftSegments, update.leftPatches);
         const rightSegments = applySegmentPatches(trail.rightSegments, update.rightPatches);
         const leftFillPath = appendPathPoints(trail.leftFillPath, update.leftFillPoints, update.leftFillStart);
@@ -2083,12 +2224,24 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             && !fillChanged
             && color === trail.color
         ) {
-            return trail;
+            return {
+                ...trail,
+                generation: Number.isSafeInteger(update.generation)
+                    ? update.generation
+                    : trail.generation,
+                snapshotSequence,
+                isPartial: Boolean(update.partial)
+            };
         }
 
         return {
             id: trail.id,
             color,
+            generation: Number.isSafeInteger(update.generation)
+                ? update.generation
+                : trail.generation,
+            snapshotSequence,
+            isPartial: Boolean(update.partial),
             leftSegments,
             rightSegments,
             leftFillPath,

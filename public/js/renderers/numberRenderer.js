@@ -1,3 +1,6 @@
+import { isPerformanceMode } from "../renderSettings.js";
+import { isDarkVisualTheme } from "../visualTheme.js";
+
 const NUMBER_RADIUS = 44;
 
 const COLORS = [
@@ -19,7 +22,7 @@ function getColorIndex(display) {
     return 5;
 }
 
-export function drawNumberLayer(ctx, numbers, viewportBounds) {
+export function drawNumberLayer(ctx, numbers, viewportBounds, gameConfig) {
     if (!numbers || numbers.length === 0) return;
 
     if (!viewportBounds) return;
@@ -42,6 +45,24 @@ export function drawNumberLayer(ctx, numbers, viewportBounds) {
         const colorIndex = getColorIndex(display);
         const [foregroundColor, backgroundColor] = COLORS[colorIndex];
 
+        const darkTheme = isDarkVisualTheme(gameConfig);
+        const performanceMode = isPerformanceMode(gameConfig);
+
+        if (darkTheme && performanceMode) {
+            ctx.save();
+            ctx.globalAlpha = 0.2;
+            ctx.beginPath();
+            ctx.arc(x, y, NUMBER_RADIUS + 9, 0, 6.2832);
+            ctx.fillStyle = foregroundColor;
+            ctx.fill();
+            ctx.restore();
+        }
+
+        if (darkTheme && !performanceMode) {
+            ctx.shadowColor = foregroundColor;
+            ctx.shadowBlur = 28;
+        }
+
         ctx.beginPath();
         ctx.arc(x, y, NUMBER_RADIUS, 0, 6.2832);
         ctx.fillStyle = backgroundColor;
@@ -50,6 +71,8 @@ export function drawNumberLayer(ctx, numbers, viewportBounds) {
         ctx.lineWidth   = 3;
         ctx.strokeStyle = foregroundColor;
         ctx.stroke();
+        ctx.shadowColor = "transparent";
+        ctx.shadowBlur = 0;
 
         const textLength = String(display).length;
         const fontSize = textLength > 5 ? 13 : textLength > 4 ? 15 : textLength > 3 ? 17 : textLength > 2 ? 19 : 22;

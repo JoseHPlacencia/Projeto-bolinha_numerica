@@ -35,7 +35,6 @@ function eliminatePlayer(players, territories, attacker, target, context) {
     }
 
     attacker.addElimination();
-    clearPendingTarget(players, target.id);
     handlePlayerLifeLoss(players, territories, target, context, {
         attacker,
         reason: "eliminated"
@@ -50,6 +49,8 @@ function handlePlayerLifeLoss(players, territories, target, context = {}, option
     if (!target) {
         return false;
     }
+
+    clearPendingTarget(players, target.id);
 
     if (target.loseLife() > 0) {
         const spawn = findRespawnPointForPlayer(territories, target);

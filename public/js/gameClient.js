@@ -7,6 +7,7 @@ import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createRoomUi } from "./roomUi.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createWorldRenderer } from "./worldRenderer.js";
+import { getRenderFrameIntervalMs } from "./renderSettings.js";
 
 const DEFAULT_MINIMAP_FRAME_RATE = 15;
 
@@ -34,6 +35,7 @@ export function startClient(gameConfig, options = {}) {
     const isWorkerRenderer = renderer.getDebugState().mode === "worker";
     const workerMainUpdateIntervalMs = getMinimapUpdateIntervalMs(gameConfig);
     let myId = null;
+    let lastClientFrameAt = Number.NEGATIVE_INFINITY;
     let lastViewportSentAt = 0;
     let lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
 
@@ -96,12 +98,38 @@ export function startClient(gameConfig, options = {}) {
     return {
         networkDiagnostics,
         roomUi,
+        setRenderingSettings,
+        setVisualTheme,
         socket
     };
 
-    function render() {
+    function setVisualTheme(mode) {
+        const visualTheme = {
+            ...(gameConfig.visualTheme || {}),
+            mode
+        };
+
+        gameConfig.visualTheme = visualTheme;
+        renderer.updateConfig({ visualTheme });
+    }
+
+    function setRenderingSettings(settings) {
+        const renderingSettings = {
+            ...(gameConfig.renderingSettings || {}),
+            ...settings
+        };
+
+        gameConfig.renderingSettings = renderingSettings;
+        lastClientFrameAt = Number.NEGATIVE_INFINITY;
+        renderer.updateConfig({ renderingSettings });
+    }
+
+    function render(now = performance.now()) {
         requestAnimationFrame(render);
-        const now = performance.now();
+
+        if (!shouldRenderClientFrame(now)) {
+            return;
+        }
 
         frameMonitor.recordFrame(now);
 
@@ -137,6 +165,17 @@ export function startClient(gameConfig, options = {}) {
         }
 
         minimap.render(state, myId);
+    }
+
+    function shouldRenderClientFrame(now) {
+        const interval = getRenderFrameIntervalMs(gameConfig);
+
+        if (interval > 0 && now - lastClientFrameAt < interval - 0.5) {
+            return false;
+        }
+
+        lastClientFrameAt = now;
+        return true;
     }
 
     function shouldUpdateWorkerMainViews(now) {

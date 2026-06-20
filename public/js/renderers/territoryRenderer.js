@@ -6,6 +6,10 @@ import {
     clipPolygonRingsToBounds,
     clipPolylineToBounds
 } from "./viewportClipping.js";
+import {
+    isDarkVisualTheme
+} from "../visualTheme.js";
+import { isPerformanceMode } from "../renderSettings.js";
 
 const territoryRenderCache = new WeakMap();
 
@@ -159,26 +163,49 @@ function drawTerritoryBorder(context, polygon, gameConfig, viewportBounds) {
 
     context.save();
     context.globalAlpha = 1;
-    context.lineWidth = lineWidth;
     context.strokeStyle = polygon.color;
     context.lineJoin = "round";
     context.lineCap = "round";
 
-    if (!viewportBounds && polygon.borderPath) {
-        context.stroke(polygon.borderPath);
-    } else {
-        const path = createPolylinePath(borderSegments);
+    if (isDarkVisualTheme(gameConfig)) {
+        const performanceMode = isPerformanceMode(gameConfig);
 
-        if (path) {
-            context.stroke(path);
-            context.restore();
-            return;
+        context.globalAlpha = performanceMode ? 0.24 : 0.42;
+        context.lineWidth = performanceMode ? lineWidth * 2.8 : lineWidth * 1.25;
+
+        if (!performanceMode) {
+            context.shadowColor = polygon.color;
+            context.shadowBlur = 18;
         }
 
-        strokePolylineSegments(context, borderSegments);
+        strokeTerritoryBorder(context, polygon, borderSegments, viewportBounds);
+
+        if (!performanceMode) {
+            context.shadowColor = "transparent";
+            context.shadowBlur = 0;
+        }
     }
 
+    context.globalAlpha = 1;
+    context.lineWidth = lineWidth;
+    strokeTerritoryBorder(context, polygon, borderSegments, viewportBounds);
     context.restore();
+}
+
+function strokeTerritoryBorder(context, polygon, borderSegments, viewportBounds) {
+    if (!viewportBounds && polygon.borderPath) {
+        context.stroke(polygon.borderPath);
+        return;
+    }
+
+    const path = createPolylinePath(borderSegments);
+
+    if (path) {
+        context.stroke(path);
+        return;
+    }
+
+    strokePolylineSegments(context, borderSegments);
 }
 
 function clipBorderRingsToViewport(rings, viewportBounds, lineWidth) {

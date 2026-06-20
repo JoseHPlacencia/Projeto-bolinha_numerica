@@ -480,6 +480,7 @@ function serializeFullTrail(player) {
     const totalPointCount = getTrailStats(player).pointCount;
     const update = {
         full: true,
+        generation: getTrailGeneration(player),
         color: player.color,
         leftSegments,
         rightSegments,
@@ -492,6 +493,7 @@ function serializeFullTrail(player) {
     return {
         state: {
             ...sentStats,
+            generation: getTrailGeneration(player),
             pointCount: sentPointCount
         },
         update
@@ -507,6 +509,7 @@ function serializeTrailPatch(player, knownTrail) {
         Math.max(0, player.trailRightFillPath.length - knownTrail.rightFillLength)
     ], maxPoints);
     const update = {
+        generation: getTrailGeneration(player),
         color: player.color
     };
     const leftPatchResult = getLimitedSegmentPatches(player.trailLeftSegments, knownTrail.leftSegmentLengths, componentBudgets[0]);
@@ -545,6 +548,7 @@ function serializeTrailPatch(player, knownTrail) {
     return {
         state: {
             ...sentStats,
+            generation: getTrailGeneration(player),
             pointCount: sentPointCount
         },
         update
@@ -957,6 +961,7 @@ function getTrailStats(player) {
         + rightFillLength;
 
     return {
+        generation: getTrailGeneration(player),
         leftSegmentLengths,
         rightSegmentLengths,
         leftFillLength,
@@ -966,10 +971,17 @@ function getTrailStats(player) {
 }
 
 function canPatchTrail(stats, knownTrail) {
-    return canPatchLengths(stats.leftSegmentLengths, knownTrail.leftSegmentLengths)
+    return stats.generation === knownTrail.generation
+        && canPatchLengths(stats.leftSegmentLengths, knownTrail.leftSegmentLengths)
         && canPatchLengths(stats.rightSegmentLengths, knownTrail.rightSegmentLengths)
         && stats.leftFillLength >= knownTrail.leftFillLength
         && stats.rightFillLength >= knownTrail.rightFillLength;
+}
+
+function getTrailGeneration(player) {
+    return Number.isSafeInteger(player && player.trailGeneration)
+        ? player.trailGeneration
+        : 0;
 }
 
 function canPatchLengths(currentLengths, knownLengths) {

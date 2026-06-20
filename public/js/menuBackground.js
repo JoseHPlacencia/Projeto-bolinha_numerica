@@ -1,5 +1,6 @@
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createWorldRenderer } from "./worldRenderer.js";
+import { getRenderFrameIntervalMs } from "./renderSettings.js";
 
 const RECONNECT_DELAY_MS = 2000;
 
@@ -23,6 +24,7 @@ export function createMenuBackground(gameConfig) {
 
     let animationFrame = null;
     let followId = null;
+    let lastRenderedAt = Number.NEGATIVE_INFINITY;
     let reconnectTimer = null;
     let running = false;
 
@@ -69,6 +71,7 @@ export function createMenuBackground(gameConfig) {
     });
 
     return {
+        setRenderingSettings,
         start,
         stop
     };
@@ -80,6 +83,7 @@ export function createMenuBackground(gameConfig) {
 
         running = true;
         followId = null;
+        lastRenderedAt = Number.NEGATIVE_INFINITY;
         resizeCanvas();
         window.addEventListener("resize", resizeCanvas);
         socket.connect();
@@ -107,12 +111,16 @@ export function createMenuBackground(gameConfig) {
         clearCanvas();
     }
 
-    function render() {
+    function render(now = performance.now()) {
         if (!running) {
             return;
         }
 
         animationFrame = requestAnimationFrame(render);
+
+        if (!shouldRenderFrame(now)) {
+            return;
+        }
 
         const state = snapshots.getRenderState();
         const renderFollowId = pickFollowId(state);
@@ -123,6 +131,26 @@ export function createMenuBackground(gameConfig) {
 
         followId = renderFollowId;
         renderer.renderWorld(state, renderFollowId);
+    }
+
+    function setRenderingSettings(settings) {
+        gameConfig.renderingSettings = {
+            ...(gameConfig.renderingSettings || {}),
+            ...settings
+        };
+        lastRenderedAt = Number.NEGATIVE_INFINITY;
+        renderer.updateConfig({ renderingSettings: gameConfig.renderingSettings });
+    }
+
+    function shouldRenderFrame(now) {
+        const interval = getRenderFrameIntervalMs(gameConfig);
+
+        if (interval > 0 && now - lastRenderedAt < interval - 0.5) {
+            return false;
+        }
+
+        lastRenderedAt = now;
+        return true;
     }
 
     function pickFollowId(state) {
@@ -226,6 +254,7 @@ function getPixelRatio() {
 
 function createNoopMenuBackground() {
     return {
+        setRenderingSettings() {},
         start() {},
         stop() {}
     };

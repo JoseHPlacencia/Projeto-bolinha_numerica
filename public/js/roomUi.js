@@ -27,6 +27,7 @@ export function createRoomUi(socket, options = {}) {
         currentCodeFilter = codeFilter;
         renderRoomsList(socket, elements, allRooms, currentFilter, currentCodeFilter, options);
     });
+    bindRoomCodeCopy(elements);
     bindPasswordPopup(socket, elements, options);
     bindDetailsPopup(elements);
 
@@ -43,8 +44,7 @@ export function createRoomUi(socket, options = {}) {
 
         if (result && result.success) {
             setStatus(elements, `Entrou na sala: ${result.roomCode}`);
-            elements.roomCodeDisplay.textContent = result.roomCode;
-            elements.roomInfo.classList.remove("hidden");
+            showRoomInfo(elements, result.roomCode);
             resetRoomForm(elements, options);
             closeModal(elements);
             if (typeof options.onJoinSuccess === "function") {
@@ -103,10 +103,13 @@ function getRoomElements() {
         filterAllBtn: document.getElementById("filterAllBtn"),
         filterPrivateBtn: document.getElementById("filterPrivateBtn"),
         filterPublicBtn: document.getElementById("filterPublicBtn"),
+        gameRoomCodeDisplay: document.getElementById("gameRoomCodeDisplay"),
+        gameRoomCodePanel: document.getElementById("gameRoomCodePanel"),
         joinRoomButton: document.getElementById("joinRoomButton"),
         leaveRoomButton: document.getElementById("leaveRoomButton"),
         privateRoomCheckbox: document.getElementById("privateRoomCheckbox"),
         roomCodeDisplay: document.getElementById("roomCodeDisplay"),
+        roomCodeCopyStatus: document.getElementById("roomCodeCopyStatus"),
         roomCodeFilterInput: document.getElementById("roomCodeFilterInput"),
         roomCodeInput: document.getElementById("roomCodeInput"),
         roomCreatePasswordInput: document.getElementById("roomCreatePasswordInput"),
@@ -124,7 +127,8 @@ function getRoomElements() {
         roomPasswordPopupInput: document.getElementById("roomPasswordPopupInput"),
         roomPasswordPrompt: document.getElementById("roomPasswordPrompt"),
         roomsList: document.getElementById("roomsList"),
-        toggleCustomOptionsButton: document.getElementById("toggleCustomOptionsButton")
+        toggleCustomOptionsButton: document.getElementById("toggleCustomOptionsButton"),
+        copyRoomCodeButton: document.getElementById("copyRoomCodeButton")
     };
 }
 
@@ -172,8 +176,7 @@ function bindExitButton(socket, elements, options) {
         }
 
         socket.emit("leaveRoom");
-        elements.roomInfo.classList.add("hidden");
-        elements.roomCodeDisplay.textContent = "";
+        clearRoomInfo(elements);
         setStatus(elements, "");
         closeModal(elements);
 
@@ -238,9 +241,42 @@ function bindLeaveRoom(socket, elements) {
 
     elements.leaveRoomButton.addEventListener("click", () => {
         socket.emit("leaveRoom");
-        elements.roomInfo.classList.add("hidden");
-        elements.roomCodeDisplay.textContent = "";
+        clearRoomInfo(elements);
         setStatus(elements, "Saiu da sala.");
+    });
+}
+
+function bindRoomCodeCopy(elements) {
+    if (!elements.copyRoomCodeButton) {
+        return;
+    }
+
+    elements.copyRoomCodeButton.addEventListener("click", async () => {
+        const roomCode = String(elements.gameRoomCodeDisplay && elements.gameRoomCodeDisplay.textContent || "").trim();
+
+        if (!roomCode) {
+            return;
+        }
+
+        const copied = await copyTextToClipboard(roomCode);
+        const message = copied
+            ? `Código ${roomCode} copiado.`
+            : "Não foi possível copiar o código.";
+
+        if (elements.roomCodeCopyStatus) {
+            elements.roomCodeCopyStatus.textContent = message;
+        }
+
+        elements.copyRoomCodeButton.classList.toggle("is-copied", copied);
+        elements.copyRoomCodeButton.setAttribute(
+            "aria-label",
+            copied ? "Código copiado" : "Copiar código da sala"
+        );
+
+        window.setTimeout(() => {
+            elements.copyRoomCodeButton.classList.remove("is-copied");
+            elements.copyRoomCodeButton.setAttribute("aria-label", "Copiar código da sala");
+        }, 1400);
     });
 }
 
@@ -682,8 +718,70 @@ function resetActions(elements) {
 function clearRoomInfo(elements) {
     if (elements.roomInfo) elements.roomInfo.classList.add("hidden");
     if (elements.roomCodeDisplay) elements.roomCodeDisplay.textContent = "";
+    if (elements.gameRoomCodePanel) elements.gameRoomCodePanel.hidden = true;
+    if (elements.gameRoomCodeDisplay) elements.gameRoomCodeDisplay.textContent = "";
+    if (elements.roomCodeCopyStatus) elements.roomCodeCopyStatus.textContent = "";
+    if (elements.copyRoomCodeButton) {
+        elements.copyRoomCodeButton.classList.remove("is-copied");
+        elements.copyRoomCodeButton.setAttribute("aria-label", "Copiar código da sala");
+    }
     setStatus(elements, "");
     resetActions(elements);
+}
+
+function showRoomInfo(elements, roomCode) {
+    const normalizedRoomCode = String(roomCode || "").trim().toUpperCase();
+
+    if (!normalizedRoomCode) {
+        clearRoomInfo(elements);
+        return;
+    }
+
+    if (elements.roomCodeDisplay) {
+        elements.roomCodeDisplay.textContent = normalizedRoomCode;
+    }
+
+    if (elements.roomInfo) {
+        elements.roomInfo.classList.remove("hidden");
+    }
+
+    if (elements.gameRoomCodeDisplay) {
+        elements.gameRoomCodeDisplay.textContent = normalizedRoomCode;
+    }
+
+    if (elements.gameRoomCodePanel) {
+        elements.gameRoomCodePanel.hidden = false;
+    }
+}
+
+async function copyTextToClipboard(value) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        try {
+            await navigator.clipboard.writeText(value);
+            return true;
+        } catch {
+            // Continue with the compatibility fallback.
+        }
+    }
+
+    const textArea = document.createElement("textarea");
+    textArea.value = value;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    document.body.append(textArea);
+    textArea.select();
+
+    let copied = false;
+
+    try {
+        copied = document.execCommand("copy");
+    } catch {
+        copied = false;
+    }
+
+    textArea.remove();
+    return copied;
 }
 
 function openCreateModal(elements, options = {}) {

@@ -4,6 +4,7 @@ import { drawPlayerLayer } from "./renderers/playerRenderer.js";
 import { drawTerritoryLayer } from "./renderers/territoryRenderer.js";
 import { drawTrailLayer } from "./renderers/trailRenderer.js";
 import { createViewportBounds } from "./renderers/viewportCulling.js";
+import { isDarkVisualTheme } from "./visualTheme.js";
 
 export function createCanvasViewportLayout(gameConfig, rawWidth, rawHeight, rawPixelRatio = 1) {
     let width = Number.isFinite(rawWidth) && rawWidth > 0
@@ -98,10 +99,10 @@ export function createCanvasRenderer(canvas, gameConfig) {
         context.scale(canvasScale, canvasScale);
         context.translate(-currentPlayer.x, -currentPlayer.y);
 
-        drawMap(context, gameConfig.world);
+        drawMap(context, gameConfig.world, gameConfig);
         drawTerritoryLayer(context, state, gameConfig, viewportBounds);
         drawTrailLayer(context, state, gameConfig, viewportBounds);
-        drawNumberLayer(context, state.numbers && state.numbers.nums, viewportBounds);
+        drawNumberLayer(context, state.numbers && state.numbers.nums, viewportBounds, gameConfig);
         drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId, gameConfig, viewportBounds);
         context.restore();
     }
@@ -125,7 +126,8 @@ export function createCanvasRenderer(canvas, gameConfig) {
 
     function clearCanvas() {
         context.setTransform(1, 0, 0, 1, 0, 0);
-        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.fillStyle = isDarkVisualTheme(gameConfig) ? "#000000" : "#dce8f2";
+        context.fillRect(0, 0, canvas.width, canvas.height);
     }
 
     function applyViewportTransform() {

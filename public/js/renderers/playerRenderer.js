@@ -1,4 +1,6 @@
 import { isPointNearBounds } from "./viewportCulling.js";
+import { isPerformanceMode } from "../renderSettings.js";
+import { isDarkVisualTheme } from "../visualTheme.js";
 
 const blinkStates = new Map();
 
@@ -19,21 +21,31 @@ function isPlayerVisible(player, gameConfig, viewportBounds) {
 }
 
 function drawPlayer(context, player, gameConfig) {
+    const isDarkTheme = isDarkVisualTheme(gameConfig);
+    const performanceMode = isPerformanceMode(gameConfig);
+
     context.save();
     context.translate(player.x, player.y);
 
     context.save();
     context.rotate(player.angle);
 
-    context.fillStyle = "rgba(0,0,0,.12)";
+    context.fillStyle = isDarkTheme ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.12)";
     context.fillRect(-30, -30, 70, 70);
+
+    if (isDarkTheme) {
+        context.shadowColor = player.color;
+        context.shadowBlur = performanceMode ? 14 : 34;
+    }
 
     context.fillStyle = player.color;
     context.fillRect(-35, -35, 70, 70);
 
     context.lineWidth = 4;
-    context.strokeStyle = "#000";
+    context.strokeStyle = isDarkTheme ? "rgba(255,255,255,.82)" : "#000";
     context.strokeRect(-35, -35, 70, 70);
+    context.shadowColor = "transparent";
+    context.shadowBlur = 0;
 
     drawEyes(context, player, gameConfig);
 

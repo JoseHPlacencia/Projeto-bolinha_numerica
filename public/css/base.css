@@ -1,0 +1,32 @@
+/* Document reset and global element defaults. */
+
+html,
+body {
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+}
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Play", sans-serif;
+    font-weight: 500;
+    transition: background-color 180ms ease, color 180ms ease;
+}
+
+button,
+input,
+select {
+    font: inherit;
+}
+
+button {
+    cursor: pointer;
+}
+
+button:disabled {
+    cursor: default;
+}
+

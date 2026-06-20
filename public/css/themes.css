@@ -1,0 +1,156 @@
+/* Theme- and render-quality-specific visual overrides. */
+
+:root[data-theme="dark"] .card,
+:root[data-theme="dark"] .popup,
+:root[data-theme="dark"] .room-modal__content {
+    box-shadow: 0 0 30px rgba(99, 210, 255, 0.16), 0 24px 70px rgba(0, 0, 0, 0.72);
+}
+
+:root[data-theme="dark"] .color-swatch:hover:not(.selected) {
+    box-shadow: 0 0 8px currentColor, 0 0 20px rgba(255, 255, 255, 0.32);
+}
+
+:root[data-theme="dark"] .minimap {
+    filter: drop-shadow(0 0 10px rgba(56, 232, 255, 0.38));
+}
+
+:root[data-theme="dark"][data-render-quality="quality"] .card,
+:root[data-theme="dark"][data-render-quality="quality"] .popup,
+:root[data-theme="dark"][data-render-quality="quality"] .room-modal__content {
+    box-shadow:
+        0 0 24px rgba(99, 210, 255, 0.2),
+        0 0 58px rgba(99, 210, 255, 0.1),
+        0 24px 70px rgba(0, 0, 0, 0.76);
+}
+
+:root[data-theme="dark"][data-render-quality="quality"] .minimap {
+    filter: drop-shadow(0 0 6px rgba(56, 232, 255, 0.3));
+}
+
+:root[data-theme="dark"][data-render-quality="quality"] .color-swatch:hover:not(.selected) {
+    box-shadow:
+        0 0 3px rgba(255, 255, 255, 0.82),
+        0 0 5px currentColor,
+        0 0 10px currentColor;
+}
+
+:root[data-theme="light"] .color-swatch.selected {
+    outline-color: #102536;
+}
+
+:root[data-theme="light"] .color-swatch:hover:not(.selected) {
+    border-color: #102536;
+    box-shadow:
+        0 0 0 2px rgba(255, 255, 255, 0.9),
+        0 5px 12px rgba(16, 37, 54, 0.38);
+}
+
+:root[data-theme="light"] .popup-close:hover,
+:root[data-theme="light"] .room-modal__close:hover {
+    background: rgba(16, 37, 54, 0.07);
+}
+
+:root[data-theme="light"] .debug-panel,
+:root[data-theme="light"] .life-panel,
+:root[data-theme="light"] .rank-panel {
+    color: var(--text);
+}
+
+:root[data-theme="light"] .debug-panel span,
+:root[data-theme="light"] .life-panel__label,
+:root[data-theme="light"] .rank-panel__header,
+:root[data-theme="light"] .rank-panel__empty {
+    color: var(--muted);
+}
+
+:root[data-theme="light"] .debug-panel strong,
+:root[data-theme="light"] .life-panel__count {
+    color: var(--text);
+}
+
+:root[data-theme="light"] .rank-panel__row {
+    background: rgba(16, 37, 54, 0.06);
+    border-color: rgba(16, 37, 54, 0.1);
+}
+
+:root[data-theme="light"] .rank-panel__row.is-current {
+    background: rgba(0, 127, 174, 0.13);
+    border-color: rgba(0, 127, 174, 0.32);
+}
+
+:root[data-theme="light"] .room-toggle,
+:root[data-theme="light"] .room-button,
+:root[data-theme="light"] .room-link,
+:root[data-theme="light"] .room-info,
+:root[data-theme="light"] .room-status,
+:root[data-theme="light"] .rooms-filter__badge,
+:root[data-theme="light"] .rooms-list__title,
+:root[data-theme="light"] .room-icon-button,
+:root[data-theme="light"] .room-slider span,
+:root[data-theme="light"] .room-slider strong,
+:root[data-theme="light"] .room-details__list dd,
+:root[data-theme="light"] .rooms-list__empty,
+:root[data-theme="light"] .room-modal__input-label {
+    color: var(--text);
+}
+
+:root[data-theme="light"] .room-button,
+:root[data-theme="light"] .room-link,
+:root[data-theme="light"] .room-icon-button {
+    background: rgba(16, 37, 54, 0.07);
+}
+
+:root[data-theme="light"] .room-button--accent {
+    background: linear-gradient(135deg, #35c8f5 0%, #1398c5 100%);
+    color: #06131a;
+}
+
+:root[data-theme="light"] .room-toggle__track {
+    background: rgba(16, 37, 54, 0.18);
+}
+
+:root[data-theme="light"] .room-toggle__thumb {
+    background: #ffffff;
+}
+
+:root[data-theme="light"] .rooms-filter__badge--active {
+    color: #063247;
+}
+
+:root[data-theme="light"] .room-options__group {
+    background: rgba(16, 37, 54, 0.04);
+}
+
+:root[data-theme="light"] .room-details__list div {
+    border-bottom-color: rgba(16, 37, 54, 0.1);
+}
+
+:root[data-theme="light"] #themePanel .theme-inner,
+:root[data-theme="light"] #themePanel .theme-balance {
+    background: rgba(255, 255, 255, 0.88);
+    border-color: rgba(16, 37, 54, 0.16);
+    box-shadow: 0 6px 22px rgba(27, 58, 78, 0.22);
+}
+
+:root[data-theme="light"] #themePanel .theme-title,
+:root[data-theme="light"] #themePanel .theme-desc,
+:root[data-theme="light"] #themePanel .theme-balance {
+    color: var(--muted);
+}
+
+:root[data-theme="light"] #themePanel .theme-label,
+:root[data-theme="light"] #themePanel .theme-balance strong,
+:root[data-theme="light"] #themePanel .theme-balance--neutral strong {
+    color: var(--text);
+}
+
+:root[data-theme="light"] #collectNotif .notif-card {
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(16, 37, 54, 0.14);
+    box-shadow: 0 8px 26px rgba(27, 58, 78, 0.24);
+}
+
+:root[data-theme="light"] #collectNotif .notif-sets {
+    color: var(--muted);
+}
+
