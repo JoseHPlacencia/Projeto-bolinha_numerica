@@ -4,7 +4,17 @@ const { updateTrails } = require("../systems/trailSystem");
 const { handleNumberCollected } = require("../systems/catchModeSystem");
 const { getHighResolutionTime } = require("../utils/time");
 
-function startGameLoop(players, territories, io, roomCode, numberSystem, botManager = null, runtimeConfig = null, diagnostics = null) {
+function startGameLoop(
+    players,
+    territories,
+    io,
+    roomCode,
+    numberSystem,
+    botManager = null,
+    runtimeConfig = null,
+    diagnostics = null,
+    lifecycle = {}
+) {
     const intervalMs = 1000 / config.loop.tickRate;
     let previousTime = getHighResolutionTime();
     let tick = 0;
@@ -33,7 +43,12 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
         });
 
         measurePhase(phaseDurations, "trails", () => {
-            trailDiagnostics = updateTrails(players, territories, { io, roomCode });
+            trailDiagnostics = updateTrails(players, territories, {
+                io,
+                onRoomPopulationChanged: lifecycle.onRoomPopulationChanged,
+                roomCode,
+                runtimeConfig
+            });
         });
 
         const result = measurePhase(phaseDurations, "numbers", () => (
@@ -50,7 +65,12 @@ function startGameLoop(players, territories, io, roomCode, numberSystem, botMana
 
             for (const col of collisions) {
                 measurePhase(phaseDurations, "numberCollected", () => {
-                    handleNumberCollected(players, territories, col, { io, roomCode });
+                    handleNumberCollected(players, territories, col, {
+                        io,
+                        onRoomPopulationChanged: lifecycle.onRoomPopulationChanged,
+                        roomCode,
+                        runtimeConfig
+                    });
                 }, true);
 
                 const socket = io.sockets.sockets.get(col.playerId);

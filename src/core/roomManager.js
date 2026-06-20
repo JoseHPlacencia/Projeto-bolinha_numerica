@@ -94,7 +94,21 @@ function createRoom(io, options = {}) {
         runtimeConfig
     });
     room.botManager.ensureBots();
-    room.gameLoopInterval = startGameLoop(players, territories, io, roomCode, numberSystem, room.botManager, runtimeConfig, room.diagnostics.gameLoop);
+    room.gameLoopInterval = startGameLoop(
+        players,
+        territories,
+        io,
+        roomCode,
+        numberSystem,
+        room.botManager,
+        runtimeConfig,
+        room.diagnostics.gameLoop,
+        {
+            onRoomPopulationChanged: () => {
+                io.emit("roomsList", listRooms());
+            }
+        }
+    );
     room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig, room.diagnostics);
 
     rooms.set(roomCode, room);
@@ -202,7 +216,7 @@ function verifyPassword(password, hash, salt) {
     return computedHash === hash;
 }
 
-function leaveRoom(socket) {
+function leaveRoom(socket, options = {}) {
     const roomCode = socket.data.roomCode || socketIdToRoomCode.get(socket.id);
     if (!roomCode) return null;
 
@@ -221,7 +235,8 @@ function leaveRoom(socket) {
     delete socket.data.roomCode;
     room.lastActivity = Date.now();
 
-    const destroyed = getHumanPlayerCount(room.players) === 0;
+    const destroyed = !options.preserveRoom
+        && getHumanPlayerCount(room.players) === 0;
     if (destroyed) {
         destroyRoom(roomCode);
     }

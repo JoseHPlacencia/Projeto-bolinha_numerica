@@ -5,6 +5,7 @@ const {
 } = require("../state/territories");
 const { invalidateSnapshotCache } = require("./snapshotLoop");
 const { createRateLimiter } = require("../utils/rateLimiter");
+const { redirectSpectatorsAfterPlayerExit } = require("../systems/spectatorSystem");
 
 function registerSocket(io, roomManager) {
     io.on("connection", socket => {
@@ -16,11 +17,23 @@ function registerSocket(io, roomManager) {
         registerMenuBackgroundEvents(socket, io, roomManager);
 
         socket.on("disconnect", () => {
+            const roomCode = socket.data && socket.data.roomCode;
             leaveMenuBackground(socket);
 
-            const leaveResult = roomManager.leaveRoom(socket);
+            const leaveResult = roomManager.leaveRoom(socket, {
+                preserveRoom: hasRoomSpectators(io, roomCode)
+            });
 
             if (leaveResult && leaveResult.room && !leaveResult.destroyed) {
+                redirectSpectatorsAfterPlayerExit(
+                    io,
+                    leaveResult.room.code,
+                    leaveResult.room.players,
+                    leaveResult.room.territories,
+                    socket.id,
+                    null,
+                    leaveResult.room.runtimeConfig
+                );
                 io.to(leaveResult.room.code).emit("playerLeft", {
                     playerId: socket.id
                 });
@@ -155,14 +168,44 @@ function registerRoomEvents(socket, io, roomManager) {
     });
 
     socket.on("leaveRoom", () => {
-        const leaveResult = roomManager.leaveRoom(socket);
+        const roomCode = socket.data && socket.data.roomCode;
+        leaveMenuBackground(socket);
+        const leaveResult = roomManager.leaveRoom(socket, {
+            preserveRoom: hasRoomSpectators(io, roomCode)
+        });
 
         if (leaveResult && leaveResult.room && !leaveResult.destroyed) {
+            redirectSpectatorsAfterPlayerExit(
+                io,
+                leaveResult.room.code,
+                leaveResult.room.players,
+                leaveResult.room.territories,
+                socket.id,
+                null,
+                leaveResult.room.runtimeConfig
+            );
             io.to(leaveResult.room.code).emit("playerLeft", { playerId: socket.id });
         }
 
         io.emit("roomsList", buildRoomsList(roomManager));
     });
+}
+
+function hasRoomSpectators(io, roomCode) {
+    if (!io || !roomCode) {
+        return false;
+    }
+
+    for (const connectedSocket of io.sockets.sockets.values()) {
+        if (
+            connectedSocket.data
+            && connectedSocket.data.spectatorRoomCode === roomCode
+        ) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function registerMenuBackgroundEvents(socket, io, roomManager) {
@@ -253,8 +296,8 @@ function normalizePlayerOptions(rawPlayer) {
 }
 
 function registerInputEvents(socket, roomManager) {
-    const inputGuard = createInputGuard(socket);
-    const viewportGuard = createViewportGuard(socket);
+    const inputGuard = createInputGuard(socket, roomManager);
+    const viewportGuard = createViewportGuard(socket, roomManager);
     const snapshotGuard = createSnapshotGuard(socket);
 
     socket.on("inputDown", rawAction => {
@@ -357,12 +400,20 @@ function handleInputEvent(socket, roomManager, callback) {
     callback(room.players);
 }
 
-function createInputGuard(socket) {
-    return createSocketRateGuard(socket, config.security.inputRateLimit);
+function createInputGuard(socket, roomManager) {
+    return createSocketRateGuard(
+        socket,
+        config.security.inputRateLimit,
+        () => hasActivePlayerRoomContext(socket, roomManager)
+    );
 }
 
-function createViewportGuard(socket) {
-    return createSocketRateGuard(socket, config.security.viewportRateLimit);
+function createViewportGuard(socket, roomManager) {
+    return createSocketRateGuard(
+        socket,
+        config.security.viewportRateLimit,
+        () => hasActivePlayerRoomContext(socket, roomManager)
+    );
 }
 
 function createSnapshotGuard(socket) {
@@ -391,6 +442,15 @@ function createSocketRateGuard(socket, rateLimitConfig, hasContext = hasPlayerRo
 
 function hasPlayerRoomContext(socket) {
     return Boolean(socket.data && socket.data.roomCode);
+}
+
+function hasActivePlayerRoomContext(socket, roomManager) {
+    const roomCode = socket.data && socket.data.roomCode;
+    const room = roomCode && roomManager && roomManager.rooms
+        ? roomManager.rooms.get(roomCode)
+        : null;
+
+    return Boolean(room && room.players && room.players.has(socket.id));
 }
 
 function hasSnapshotContext(socket) {

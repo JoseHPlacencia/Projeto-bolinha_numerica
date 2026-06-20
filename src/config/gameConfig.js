@@ -102,7 +102,6 @@ const gameMode = Object.freeze({
     mode: "catch",
     catch: Object.freeze({
         defaultDifficulty: "medium",
-        gameOverDisconnectDelayMs: 250,
         livesByDifficulty: Object.freeze({
             easy: 3,
             medium: 2,

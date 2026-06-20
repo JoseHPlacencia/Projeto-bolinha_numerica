@@ -5,6 +5,7 @@ const {
     createClientSnapshotState,
     createSnapshot
 } = require("./snapshotSerializer");
+const { resolveSpectatorFollowId } = require("../systems/spectatorSystem");
 
 function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null, roomDiagnostics = null) {
     const intervalMs = 1000 / config.loop.snapshotRate;
@@ -40,16 +41,16 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
             continue;
         }
 
-        if (!socket.data.snapshotState) {
-            socket.data.snapshotState = createClientSnapshotState();
-        }
-
         const viewerId = isSpectatorSocket
-            ? pickSpectatorFollowId(socket, players)
+            ? resolveSpectatorFollowId(socket, players, territories, runtimeConfig)
             : socket.id;
 
         if (!viewerId) {
             continue;
+        }
+
+        if (!socket.data.snapshotState) {
+            socket.data.snapshotState = createClientSnapshotState();
         }
 
         if (retryPendingReliableSnapshot(socket)) {
@@ -83,23 +84,6 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         socket.data.snapshotState = nextSnapshotState;
         emitVolatileSnapshot(socket, snapshot, "volatile", null, sendDiagnostics);
     }
-}
-
-function pickSpectatorFollowId(socket, players) {
-    const currentFollowId = socket.data && socket.data.spectatorFollowId;
-
-    if (currentFollowId && players.has(currentFollowId)) {
-        return currentFollowId;
-    }
-
-    for (const player of players.values()) {
-        if (player && player.isBot) {
-            socket.data.spectatorFollowId = player.id;
-            return player.id;
-        }
-    }
-
-    return null;
 }
 
 function retryPendingReliableSnapshot(socket) {

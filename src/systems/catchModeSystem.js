@@ -1,9 +1,12 @@
-const config = require("../config/gameConfig");
 const {
     deletePlayerTerritory,
     isPointOwnedByPlayer
 } = require("../state/territories");
 const { findSpawnPointInsideTerritory } = require("./territoryRespawnSystem");
+const {
+    activateSpectator,
+    redirectSpectatorsAfterPlayerExit
+} = require("./spectatorSystem");
 
 function handleNumberCollected(players, territories, collection, context = {}) {
     const player = players.get(collection.playerId);
@@ -107,31 +110,60 @@ function setPlayerRespawnPoint(territories, player, point) {
 function endPlayerGame(players, territories, target, context = {}, options = {}) {
     const targetSocket = context.io && context.io.sockets.sockets.get(target.id);
     const attacker = options.attacker || null;
-    const eliminatedBy = attacker && attacker.id !== target.id
+    const eliminatorId = attacker && attacker.id !== target.id
+        ? attacker.id
+        : null;
+    const eliminatedBy = eliminatorId
         ? attacker.name
         : null;
+    const reason = options.reason || (eliminatedBy ? "eliminated" : "defeated");
+    const roomCode = context.roomCode
+        || (targetSocket && targetSocket.data && targetSocket.data.roomCode)
+        || null;
 
     clearPendingTarget(players, target.id);
     target.resetCatchProgress();
     players.delete(target.id);
     deletePlayerTerritory(territories, target.id);
 
+    if (typeof context.onRoomPopulationChanged === "function") {
+        context.onRoomPopulationChanged();
+    }
+
+    redirectSpectatorsAfterPlayerExit(
+        context.io,
+        roomCode,
+        players,
+        territories,
+        target.id,
+        eliminatorId,
+        context.runtimeConfig
+    );
+
     if (!targetSocket) {
         return;
     }
 
+    const spectatorFollowId = reason === "victory"
+        ? null
+        : activateSpectator(
+            targetSocket,
+            roomCode,
+            players,
+            territories,
+            eliminatorId,
+            context.runtimeConfig
+        );
+
     targetSocket.emit("gameOver", {
+        canSpectate: Boolean(spectatorFollowId),
         eliminatedBy,
+        eliminatedById: eliminatorId,
         eliminations: target.eliminations,
         maxLives: target.maxLives,
-        reason: options.reason || (eliminatedBy ? "eliminated" : "defeated")
+        reason,
+        spectatorFollowId
     });
-
-    setTimeout(() => {
-        if (targetSocket.connected) {
-            targetSocket.disconnect(true);
-        }
-    }, config.gameMode.catch.gameOverDisconnectDelayMs);
 }
 
 function handlePlayerVictory(players, territories, winner, context = {}) {

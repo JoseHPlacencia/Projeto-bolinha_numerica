@@ -33,6 +33,7 @@ export function registerPointerDirectionInput(inputState, options = {}) {
     function updateMouseInput(event) {
         if (!isInputEnabled(options)) {
             inputState.clearDirection("mouse");
+            clearPendingDirectionUpdate("mouse");
             return;
         }
 
@@ -69,7 +70,7 @@ export function registerPointerDirectionInput(inputState, options = {}) {
 
     function updatePointerInput(event) {
         if (!isInputEnabled(options)) {
-            resetPointerInput();
+            resetPointerInput({ silent: true });
             return;
         }
 
@@ -84,7 +85,7 @@ export function registerPointerDirectionInput(inputState, options = {}) {
 
     function releasePointerInput(event) {
         if (!isInputEnabled(options)) {
-            resetPointerInput();
+            resetPointerInput({ silent: true });
             return;
         }
 
@@ -96,8 +97,11 @@ export function registerPointerDirectionInput(inputState, options = {}) {
         resetPointerInput();
     }
 
-    function resetPointerInput() {
-        inputState.clearDirection("pointer", { force: true });
+    function resetPointerInput(options = {}) {
+        inputState.clearDirection("pointer", {
+            force: !options.silent,
+            silent: Boolean(options.silent)
+        });
         clearPendingDirectionUpdate("pointer");
         activePointerId = null;
         knob.style.transform = "translate(0, 0)";
@@ -137,6 +141,11 @@ export function registerPointerDirectionInput(inputState, options = {}) {
         pendingSource = null;
 
         if (!source) {
+            return;
+        }
+
+        if (!isInputEnabled(options)) {
+            inputState.clearDirection(source, { silent: true });
             return;
         }
 

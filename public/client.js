@@ -39,6 +39,8 @@ const gameOverPanel = document.getElementById("gameOverPanel");
 const gameOverTitle = document.getElementById("gameOverTitle");
 const gameOverMessage = document.getElementById("gameOverMessage");
 const gameOverReturnButton = document.getElementById("gameOverReturnButton");
+const gameOverSpectateButton = document.getElementById("gameOverSpectateButton");
+const spectatorBackButton = document.getElementById("spectatorBackButton");
 const statusMessage = createStatusMessage();
 const AUTO_START_TIMEOUT_MS = 10000;
 const PLAY_BUTTON_IDLE_LABEL = "▶ Partida rápida";
@@ -298,9 +300,15 @@ function attachFindRoomButton() {
 }
 
 function attachOverlayButtons() {
-    gameOverReturnButton?.addEventListener("click", () => {
+    gameOverReturnButton?.addEventListener("click", returnToMenuAfterGame);
+    spectatorBackButton?.addEventListener("click", returnToMenuAfterGame);
+
+    gameOverSpectateButton?.addEventListener("click", () => {
         hideGameOver();
-        showMenu();
+        document.body.classList.remove("is-game-ended");
+        document.body.classList.add("is-spectating");
+        spectatorBackButton.hidden = false;
+        spectatorBackButton.focus();
     });
 
     document.querySelectorAll("[data-close]").forEach(button => {
@@ -544,8 +552,9 @@ function showGame() {
     menuBackground?.stop();
     hideGameOver();
     closeAllOverlays();
-    document.body.classList.remove("is-menu-active");
+    document.body.classList.remove("is-game-ended", "is-menu-active", "is-spectating");
     document.body.classList.add("is-game-active");
+    if (spectatorBackButton) spectatorBackButton.hidden = true;
     mainMenu.setAttribute("aria-hidden", "true");
     gameLayer.setAttribute("aria-hidden", "false");
 }
@@ -553,8 +562,9 @@ function showGame() {
 function showMenu() {
     hideGameOver();
     closeAllOverlays();
-    document.body.classList.remove("is-game-active");
+    document.body.classList.remove("is-game-active", "is-game-ended", "is-spectating");
     document.body.classList.add("is-menu-active");
+    if (spectatorBackButton) spectatorBackButton.hidden = true;
     mainMenu.setAttribute("aria-hidden", "false");
     gameLayer.setAttribute("aria-hidden", "true");
     statusMessage.hide();
@@ -593,12 +603,23 @@ function showGameOver(data = {}) {
     }
 
     document.body.classList.remove("is-menu-active");
-    document.body.classList.add("is-game-active");
+    document.body.classList.remove("is-spectating");
+    document.body.classList.add("is-game-active", "is-game-ended");
+    if (gameOverSpectateButton) {
+        gameOverSpectateButton.hidden = data.reason === "victory" || !data.canSpectate;
+    }
+    if (spectatorBackButton) spectatorBackButton.hidden = true;
     mainMenu.setAttribute("aria-hidden", "true");
     gameLayer.setAttribute("aria-hidden", "false");
     gameOverPanel?.classList.add("is-open");
     gameOverPanel?.setAttribute("aria-hidden", "false");
     gameOverReturnButton?.focus();
+}
+
+function returnToMenuAfterGame() {
+    gameClient?.leaveCurrentRoom?.();
+    hideGameOver();
+    showMenu();
 }
 
 function hideGameOver() {

@@ -71,10 +71,22 @@ export function createInputState(socket) {
 
     function clearDirection(source, options = {}) {
         if (!activeDirections.has(source) && !options.force) {
+            if (options.silent) {
+                lastTransientDirections.delete(source);
+            }
             return;
         }
 
         activeDirections.delete(source);
+        lastTransientDirections.delete(source);
+
+        if (options.silent) {
+            if (activeDirectionSource === source) {
+                activeDirectionSource = null;
+                lastSentDirection = null;
+            }
+            return;
+        }
 
         if (activeDirectionSource !== source && activeDirectionSource !== null) {
             return;

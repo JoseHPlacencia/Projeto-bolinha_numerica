@@ -9,6 +9,12 @@
     border-radius: 99px;
 }
 
+@media (orientation: portrait) and (any-pointer: coarse) {
+    body.is-game-active:not(.is-game-ended):not(.is-spectating) .orientation-warning {
+        display: flex;
+    }
+}
+
 @media (max-width: 640px) {
     .main-menu {
         padding: 12px;

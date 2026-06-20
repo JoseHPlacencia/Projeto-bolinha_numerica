@@ -38,11 +38,12 @@ export function startClient(gameConfig, options = {}) {
     let lastClientFrameAt = Number.NEGATIVE_INFINITY;
     let lastViewportSentAt = 0;
     let lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
+    let spectatorFollowId = null;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles, {
         isEnabled: typeof options.isInputEnabled === "function"
             ? options.isInputEnabled
-            : () => document.body.classList.contains("is-game-active")
+            : isGameInputEnabled
     });
     const roomUi = createRoomUi(socket, {
         gameConfig,
@@ -67,14 +68,15 @@ export function startClient(gameConfig, options = {}) {
 
     socket.on("gameOver", data => {
         resetSessionState();
+        setSpectatorFollowId(data && data.spectatorFollowId);
         if (typeof options.onGameOver === "function") {
             options.onGameOver(data);
         }
-        socket.disconnect();
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
         applyRoomConfig(snapshot && snapshot.roomConfig);
+        syncSpectatorFromSnapshot(snapshot);
         renderer.processSnapshot(snapshot);
         const applyResult = snapshots.processSnapshot(snapshot);
 
@@ -96,6 +98,7 @@ export function startClient(gameConfig, options = {}) {
     render();
 
     return {
+        leaveCurrentRoom,
         networkDiagnostics,
         roomUi,
         setRenderingSettings,
@@ -138,7 +141,10 @@ export function startClient(gameConfig, options = {}) {
         }
 
         const state = snapshots.getRenderState();
-        const currentPlayer = state && myId ? state.players[myId] : null;
+        const cameraPlayerId = spectatorFollowId || myId;
+        const currentPlayer = state && cameraPlayerId
+            ? state.players[cameraPlayerId]
+            : null;
 
         numberHud.updateBalance(currentPlayer);
 
@@ -150,21 +156,21 @@ export function startClient(gameConfig, options = {}) {
             rendererStats: renderer.getDebugState(),
             snapshotStats: snapshots.getDebugState(),
             currentPlayer,
-            currentPlayerId: myId,
+            currentPlayerId: cameraPlayerId,
             leaderboard: state && state.leaderboard,
             playerDebug: currentPlayer && currentPlayer.debug
         });
 
-        if (!state || !myId) {
+        if (!state || !cameraPlayerId) {
             minimap.clear();
             return;
         }
 
         if (!isWorkerRenderer) {
-            renderer.renderWorld(state, myId);
+            renderer.renderWorld(state, cameraPlayerId);
         }
 
-        minimap.render(state, myId);
+        minimap.render(state, cameraPlayerId);
     }
 
     function shouldRenderClientFrame(now) {
@@ -207,6 +213,7 @@ export function startClient(gameConfig, options = {}) {
 
     function handleRoomJoinSuccess(result) {
         resetSessionState();
+        setSpectatorFollowId(null);
         sendViewportState(true);
 
         if (typeof options.onJoinSuccess === "function") {
@@ -220,6 +227,43 @@ export function startClient(gameConfig, options = {}) {
         minimap.clear();
         lastViewportSentAt = Number.NEGATIVE_INFINITY;
         lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
+    }
+
+    function leaveCurrentRoom() {
+        if (socket.connected) {
+            socket.emit("leaveRoom");
+        }
+
+        roomUi.clearRoomInfo();
+        resetSessionState();
+        setSpectatorFollowId(null);
+    }
+
+    function syncSpectatorFromSnapshot(snapshot) {
+        if (!snapshot || !snapshot.spectator) {
+            return;
+        }
+
+        setSpectatorFollowId(snapshot.spectator.followId);
+    }
+
+    function setSpectatorFollowId(playerId) {
+        const nextPlayerId = typeof playerId === "string" && playerId
+            ? playerId
+            : null;
+
+        if (spectatorFollowId === nextPlayerId) {
+            return;
+        }
+
+        spectatorFollowId = nextPlayerId;
+        renderer.setPlayerId(spectatorFollowId || myId);
+    }
+
+    function isGameInputEnabled() {
+        return document.body.classList.contains("is-game-active")
+            && !document.body.classList.contains("is-game-ended")
+            && !document.body.classList.contains("is-spectating");
     }
 
     function applyRoomConfig(roomConfig) {
