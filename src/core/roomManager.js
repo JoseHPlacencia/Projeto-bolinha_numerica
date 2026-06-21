@@ -17,6 +17,7 @@ const {
     createRoomRuntimeConfig,
     serializeRoomSettings
 } = require("./roomSettings");
+const { getPublicMatchCandidates: selectPublicMatchCandidates } = require("./matchmaking");
 
 const rooms = new Map();
 const socketIdToRoomCode = new Map();
@@ -272,6 +273,10 @@ function listRooms() {
         }));
 }
 
+function getPublicMatchCandidates(difficulty) {
+    return selectPublicMatchCandidates(rooms, difficulty);
+}
+
 function resetSocketSnapshotState(socket) {
     socket.data.snapshotState = null;
     socket.data.pendingReliableSnapshot = null;
@@ -303,6 +308,7 @@ function normalizeRoomDifficulty(raw) {
 module.exports = {
     createBackgroundRoom,
     createRoom,
+    getPublicMatchCandidates,
     joinRoom,
     leaveRoom,
     listRooms,

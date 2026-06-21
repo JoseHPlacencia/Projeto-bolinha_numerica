@@ -981,7 +981,7 @@ function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, b
         : getSelfTrailLookaheadDistance(options);
     const sampleCount = getSelfTrailLookaheadSampleCount(lookaheadDistance);
     const stepDistance = lookaheadDistance / sampleCount;
-    const stepDeltaTime = stepDistance / config.movement.speed;
+    const stepDeltaTime = stepDistance / getBotMovementSpeed(bot);
     let previousSamples = createSelfTrailAvoidanceSamplePoints(position, angle);
 
     addSelfTrailSafetyDiagnosticValue(diagnostics, "pathEvaluationCount", 1);
@@ -993,7 +993,7 @@ function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, b
             break;
         }
 
-        angle = lerpAngle(angle, targetAngle, getSelfTrailSimulationRotationBlend(stepDeltaTime));
+        angle = lerpAngle(angle, targetAngle, getSelfTrailSimulationRotationBlend(bot, stepDeltaTime));
         position = clampPointToMap({
             x: position.x + Math.cos(angle) * stepDistance,
             y: position.y + Math.sin(angle) * stepDistance
@@ -1133,10 +1133,29 @@ function createSelfTrailAvoidanceSamplePoints(position, angle) {
     ];
 }
 
-function getSelfTrailSimulationRotationBlend(deltaTime) {
+function getSelfTrailSimulationRotationBlend(bot, deltaTime) {
     const elapsedTicks = deltaTime * config.loop.tickRate;
+    const movement = getBotMovementConfig(bot);
 
-    return clamp(1 - Math.pow(1 - config.movement.rotationStrength, elapsedTicks), 0, 1);
+    return clamp(1 - Math.pow(1 - movement.rotationStrength, elapsedTicks), 0, 1);
+}
+
+function getBotMovementSpeed(bot) {
+    const speed = Number(getBotMovementConfig(bot).speed);
+
+    return Number.isFinite(speed) && speed > 0 ? speed : config.movement.speed;
+}
+
+function getBotMovementConfig(bot) {
+    const movement = bot && bot.runtimeConfig && bot.runtimeConfig.movement;
+    const rotationStrength = Number(movement && movement.rotationStrength);
+
+    return {
+        rotationStrength: Number.isFinite(rotationStrength)
+            ? clamp(rotationStrength, 0, 1)
+            : config.movement.rotationStrength,
+        speed: movement && movement.speed
+    };
 }
 
 function getSelfTrailLookaheadDistance(options = {}) {

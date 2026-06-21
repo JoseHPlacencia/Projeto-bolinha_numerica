@@ -69,6 +69,7 @@ export function createRoomUi(socket, options = {}) {
         openCreateModal: () => openCreateModal(elements, options),
         openFindModal: () => openFindModal(elements),
         openModal: () => openFindModal(elements),
+        quickMatch: () => quickMatch(socket, elements, options),
         resetActions: () => resetActions(elements)
     };
 }
@@ -85,6 +86,7 @@ function createEmptyRoomUi() {
         openCreateModal() {},
         openFindModal() {},
         openModal() {},
+        quickMatch() {},
         resetActions() {}
     };
 }
@@ -358,15 +360,33 @@ function createRoom(socket, elements, roomOptions = {}, options = {}) {
     if (elements.createRoomButton) {
         elements.createRoomButton.disabled = true;
     }
-    notifyJoinStart(options);
     const playerOpts = typeof options.getPlayerOptions === "function" ? options.getPlayerOptions() : {};
-    socket.emit("joinRoom", {
-        createNewRoom: true,
-        customOptions: roomOptions.customOptions || {},
-        difficulty: playerOpts.difficulty || "medium",
-        isPrivate,
-        password,
-        ...createPlayerPayload(options)
+    requestGameplayReady(options, () => {
+        notifyJoinStart(options);
+        socket.emit("joinRoom", {
+            createNewRoom: true,
+            customOptions: roomOptions.customOptions || {},
+            difficulty: playerOpts.difficulty || "medium",
+            isPrivate,
+            password,
+            ...createPlayerPayload(options)
+        });
+    });
+}
+
+function quickMatch(socket, elements, options = {}) {
+    const playerOptions = typeof options.getPlayerOptions === "function"
+        ? options.getPlayerOptions()
+        : {};
+
+    setStatus(elements, "Procurando partida pública...");
+    requestGameplayReady(options, () => {
+        notifyJoinStart(options);
+        socket.emit("joinRoom", {
+            difficulty: playerOptions.difficulty || "medium",
+            quickMatch: true,
+            ...createPlayerPayload(options)
+        });
     });
 }
 
@@ -385,12 +405,23 @@ function joinRoom(socket, elements, roomOptions = {}, options = {}) {
 
     setStatus(elements, "Entrando na sala...");
     setJoiningState(elements, true);
-    notifyJoinStart(options);
-    socket.emit("joinRoom", {
-        roomCode,
-        password,
-        ...createPlayerPayload(options)
+    requestGameplayReady(options, () => {
+        notifyJoinStart(options);
+        socket.emit("joinRoom", {
+            roomCode,
+            password,
+            ...createPlayerPayload(options)
+        });
     });
+}
+
+function requestGameplayReady(options, callback) {
+    if (typeof options.requestGameplayReady === "function") {
+        options.requestGameplayReady(callback);
+        return;
+    }
+
+    callback();
 }
 
 function renderRoomsList(socket, elements, rooms, currentFilter, currentCodeFilter, options = {}) {

@@ -87,7 +87,7 @@ function rotatePlayerToTargetInput(player, targetInput, deltaTime) {
     player.angle = lerpAngle(
         player.angle,
         targetAngle,
-        getRotationBlend(deltaTime)
+        getRotationBlend(player, deltaTime)
     );
 }
 
@@ -212,7 +212,7 @@ function evaluateBoundarySlideExit(player, targetAngle, deltaTime) {
 
     const lockedBoundarySlideAngle = getLockedBoundarySlideAngle(player);
     const baseAngle = lockedBoundarySlideAngle === null ? player.angle : lockedBoundarySlideAngle;
-    const candidateAngle = lerpAngle(baseAngle, targetAngle, getRotationBlend(deltaTime));
+    const candidateAngle = lerpAngle(baseAngle, targetAngle, getRotationBlend(player, deltaTime));
     const candidateMovement = createMovementVector(candidateAngle, getMovementSpeed(player), deltaTime);
     const candidatePosition = addVectors(position, candidateMovement);
     const candidateExitDepth = getMapMovementLimit(player) - vectorLength(candidatePosition);
@@ -269,9 +269,10 @@ function createMovementDebugState(player, targetInput, boundarySlideInput) {
     };
 }
 
-function getRotationBlend(deltaTime) {
+function getRotationBlend(player, deltaTime) {
     const elapsedTicks = deltaTime * config.loop.tickRate;
-    const blend = 1 - Math.pow(1 - config.movement.rotationStrength, elapsedTicks);
+    const rotationStrength = getRotationStrength(player);
+    const blend = 1 - Math.pow(1 - rotationStrength, elapsedTicks);
 
     return clamp(blend, 0, 1);
 }
@@ -284,7 +285,7 @@ function getBoundarySlideTriggerBaseAngle(player, targetAngle, deltaTime) {
     return lerpAngle(
         player.angle,
         targetAngle,
-        getRotationBlend(deltaTime)
+        getRotationBlend(player, deltaTime)
     );
 }
 
@@ -771,6 +772,14 @@ function getMapMovementLimit(player = null) {
 
 function getMovementSpeed(player) {
     return getRuntimeConfig(player).movement.speed;
+}
+
+function getRotationStrength(player) {
+    const rotationStrength = Number(getRuntimeConfig(player).movement.rotationStrength);
+
+    return Number.isFinite(rotationStrength)
+        ? clamp(rotationStrength, 0, 1)
+        : config.movement.rotationStrength;
 }
 
 function getRuntimeConfig(player = null) {

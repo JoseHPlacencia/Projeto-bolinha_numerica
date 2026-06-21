@@ -44,6 +44,7 @@ const spectatorBackButton = document.getElementById("spectatorBackButton");
 const statusMessage = createStatusMessage();
 const AUTO_START_TIMEOUT_MS = 10000;
 const PLAY_BUTTON_IDLE_LABEL = "▶ Partida rápida";
+const portraitMobileQuery = window.matchMedia("(orientation: portrait) and (any-pointer: coarse)");
 
 let selectedColor = DEFAULT_PLAYER_COLOR;
 let selectedDifficulty = "medium";
@@ -57,6 +58,8 @@ let pendingAutoStart = null;
 let pendingAutoStartTimer = null;
 let pendingSocketConnectCleanup = null;
 let pendingMenuRoomJoin = false;
+let pendingOrientationAction = null;
+let orientationJoinStartedFromGate = false;
 let nextAutoStartId = 0;
 
 initializeClient();
@@ -75,7 +78,8 @@ async function initializeClient() {
             onGameOver: showGameOver,
             onJoinFailure: handleJoinFailure,
             onJoinStart: handleRoomJoinStart,
-            onJoinSuccess: handleJoinSuccess
+            onJoinSuccess: handleJoinSuccess,
+            requestGameplayReady
         });
 
         initializeMenu();
@@ -95,6 +99,7 @@ function initializeMenu() {
     attachSettingsControls();
     attachThemeButton();
     attachOverlayButtons();
+    attachOrientationGate();
     syncThemeButton();
     syncSettingsControls();
     showMenu();
@@ -445,10 +450,10 @@ function requestPublicRoom(attempt) {
     }
 
     clearPendingSocketConnectWait();
+    clearAutoStartTimer();
     attempt.roomRequested = true;
-    startAutoStartTimer(attempt, "Tempo esgotado ao entrar na sala.");
-    statusMessage.update("Criando sala pública...");
-    gameClient.roomUi.createRoom({ isPrivate: false, password: "" });
+    statusMessage.update("Procurando partida pública...");
+    gameClient.roomUi.quickMatch();
 }
 
 function startAutoStartTimer(attempt, message) {
@@ -463,6 +468,8 @@ function startAutoStartTimer(attempt, message) {
 }
 
 function handleJoinSuccess() {
+    orientationJoinStartedFromGate = false;
+
     if (pendingAutoStart) {
         finishAutoStartAttempt();
         showGame();
@@ -490,6 +497,16 @@ function handleJoinSuccess() {
 
 function handleJoinFailure(result) {
     pendingMenuRoomJoin = false;
+    const message = result && result.message ? result.message : "Erro ao entrar na sala.";
+
+    if (orientationJoinStartedFromGate && !pendingAutoStart) {
+        orientationJoinStartedFromGate = false;
+        gameClient.roomUi.resetActions();
+        showMenu();
+        statusMessage.update(message);
+        setMenuBusy(false);
+        return;
+    }
 
     if (!pendingAutoStart) {
         return;
@@ -498,7 +515,7 @@ function handleJoinFailure(result) {
     finishAutoStartAttempt();
     gameClient.roomUi.resetActions();
     showMenu();
-    statusMessage.update(result && result.message ? result.message : "Erro ao entrar na sala.");
+    statusMessage.update(message);
     setMenuBusy(false);
 }
 
@@ -520,7 +537,49 @@ function cancelAutoStartAttempt() {
 }
 
 function handleRoomJoinStart() {
+    if (pendingAutoStart) {
+        startAutoStartTimer(pendingAutoStart, "Tempo esgotado ao entrar na sala.");
+    }
+
     pendingMenuRoomJoin = !pendingAutoStart && document.body.classList.contains("is-menu-active");
+}
+
+function attachOrientationGate() {
+    portraitMobileQuery.addEventListener("change", continuePendingOrientationAction);
+}
+
+function requestGameplayReady(action) {
+    if (typeof action !== "function") {
+        return;
+    }
+
+    if (!portraitMobileQuery.matches) {
+        action();
+        return;
+    }
+
+    pendingOrientationAction = action;
+    orientationJoinStartedFromGate = true;
+    clearAutoStartTimer();
+    showGame();
+    document.body.classList.add("is-awaiting-orientation");
+}
+
+function continuePendingOrientationAction() {
+    if (portraitMobileQuery.matches || typeof pendingOrientationAction !== "function") {
+        return;
+    }
+
+    const action = pendingOrientationAction;
+    pendingOrientationAction = null;
+    document.body.classList.remove("is-awaiting-orientation");
+    action();
+}
+
+function cancelPendingOrientationAction() {
+    pendingOrientationAction = null;
+    orientationJoinStartedFromGate = false;
+    document.body.classList.remove("is-awaiting-orientation");
 }
 
 function clearAutoStartTimer() {
@@ -560,6 +619,7 @@ function showGame() {
 }
 
 function showMenu() {
+    cancelPendingOrientationAction();
     hideGameOver();
     closeAllOverlays();
     document.body.classList.remove("is-game-active", "is-game-ended", "is-spectating");

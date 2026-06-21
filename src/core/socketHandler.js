@@ -92,6 +92,7 @@ function registerRoomEvents(socket, io, roomManager) {
         leaveMenuBackground(socket);
 
         const createNewRoom = Boolean(payload && payload.createNewRoom);
+        const quickMatch = Boolean(payload && payload.quickMatch);
         const requestedCode = String(payload && payload.roomCode || "").trim().toUpperCase();
         const password = String(payload && payload.password || "");
         const isPrivate = Boolean(payload && payload.isPrivate);
@@ -101,12 +102,31 @@ function registerRoomEvents(socket, io, roomManager) {
             : {};
         const playerOptions = normalizePlayerOptions(payload && payload.player);
 
-        if (createNewRoom) {
+        if (quickMatch) {
+            const matchedRoom = joinExistingPublicRoom(
+                roomManager,
+                socket,
+                roomDifficulty,
+                playerOptions
+            );
+
+            if (matchedRoom) {
+                socket.emit("joinRoomResult", {
+                    success: true,
+                    roomCode: matchedRoom.code,
+                    reusedRoom: true
+                });
+                io.emit("roomsList", buildRoomsList(roomManager));
+                return;
+            }
+        }
+
+        if (createNewRoom || quickMatch) {
             const createResult = roomManager.createRoom(io, {
-                customOptions,
+                customOptions: quickMatch ? {} : customOptions,
                 difficulty: roomDifficulty,
-                isPrivate,
-                password
+                isPrivate: quickMatch ? false : isPrivate,
+                password: quickMatch ? "" : password
             });
 
             if (!createResult.success) {
@@ -189,6 +209,36 @@ function registerRoomEvents(socket, io, roomManager) {
 
         io.emit("roomsList", buildRoomsList(roomManager));
     });
+}
+
+function joinExistingPublicRoom(roomManager, socket, difficulty, playerOptions) {
+    const candidates = typeof roomManager.getPublicMatchCandidates === "function"
+        ? roomManager.getPublicMatchCandidates(difficulty)
+        : [];
+
+    for (const room of candidates) {
+        const joinResult = roomManager.joinRoom(room.code, socket, "");
+
+        if (!joinResult.success) {
+            continue;
+        }
+
+        const player = initializeSocketPlayer(
+            joinResult.room,
+            socket,
+            joinResult.alreadyJoined,
+            playerOptions,
+            joinResult.spawn
+        );
+
+        if (player || joinResult.alreadyJoined) {
+            return joinResult.room;
+        }
+
+        roomManager.leaveRoom(socket);
+    }
+
+    return null;
 }
 
 function hasRoomSpectators(io, roomCode) {

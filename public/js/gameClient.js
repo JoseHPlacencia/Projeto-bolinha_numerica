@@ -34,6 +34,7 @@ export function startClient(gameConfig, options = {}) {
     const frameMonitor = createFrameMonitor();
     const isWorkerRenderer = renderer.getDebugState().mode === "worker";
     const workerMainUpdateIntervalMs = getMinimapUpdateIntervalMs(gameConfig);
+    const portraitMobileQuery = window.matchMedia("(orientation: portrait) and (any-pointer: coarse)");
     let myId = null;
     let lastClientFrameAt = Number.NEGATIVE_INFINITY;
     let lastViewportSentAt = 0;
@@ -52,7 +53,8 @@ export function startClient(gameConfig, options = {}) {
         onJoinFailure: options.onJoinFailure,
         onJoinStart: options.onJoinStart,
         onJoinSuccess: handleRoomJoinSuccess,
-        onRoomsList: options.onRoomsList
+        onRoomsList: options.onRoomsList,
+        requestGameplayReady: options.requestGameplayReady
     });
     window.addEventListener("resize", resizeCanvases);
 
@@ -262,6 +264,8 @@ export function startClient(gameConfig, options = {}) {
 
     function isGameInputEnabled() {
         return document.body.classList.contains("is-game-active")
+            && !portraitMobileQuery.matches
+            && !document.body.classList.contains("is-awaiting-orientation")
             && !document.body.classList.contains("is-game-ended")
             && !document.body.classList.contains("is-spectating");
     }

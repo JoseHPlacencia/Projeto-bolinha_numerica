@@ -21,7 +21,11 @@ function createRoomRuntimeConfig(rawOptions = {}, difficulty = config.gameMode.c
         }),
         movement: Object.freeze({
             ...config.movement,
-            speed: roundPositive(config.movement.speed * customOptions.playerSpeed)
+            speed: roundPositive(config.movement.speed * customOptions.playerSpeed),
+            rotationStrength: scaleRotationStrength(
+                config.movement.rotationStrength,
+                customOptions.playerSpeed
+            )
         }),
         territory: Object.freeze({
             ...config.territory
@@ -101,6 +105,7 @@ function serializeRoomSettings(runtimeConfig) {
             playerSize: roomConfig.world.playerSize
         },
         movement: {
+            rotationStrength: roomConfig.movement.rotationStrength,
             speed: roomConfig.movement.speed
         },
         numbers: {
@@ -124,6 +129,23 @@ function roundPositive(value, precision = 0) {
     return Number.isFinite(rounded) && rounded > 0 ? rounded : 1;
 }
 
+function scaleRotationStrength(baseStrength, speedMultiplier) {
+    const numericStrength = Number(baseStrength);
+    const numericMultiplier = Number(speedMultiplier);
+    const strength = Number.isFinite(numericStrength)
+        ? clamp(numericStrength, 0, 1)
+        : 0;
+    const multiplier = Number.isFinite(numericMultiplier)
+        ? Math.max(0, numericMultiplier)
+        : 1;
+
+    if (strength === 0 || strength === 1 || multiplier === 1) {
+        return strength;
+    }
+
+    return 1 - Math.pow(1 - strength, multiplier);
+}
+
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
@@ -131,5 +153,6 @@ function clamp(value, min, max) {
 module.exports = {
     createRoomRuntimeConfig,
     normalizeRoomCustomOptions,
+    scaleRotationStrength,
     serializeRoomSettings
 };
