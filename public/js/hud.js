@@ -119,7 +119,7 @@ export function createHud({ debugLevel }) {
     }
 
     function createRankRows(leaderboard, currentPlayerId) {
-        const entries = Array.isArray(leaderboard) ? leaderboard.slice(0, 8) : [];
+        const entries = selectRankEntries(leaderboard, currentPlayerId);
 
         if (entries.length === 0) {
             const row = document.createElement("div");
@@ -140,6 +140,21 @@ export function createHud({ debugLevel }) {
             );
             return row;
         });
+    }
+
+    function selectRankEntries(leaderboard, currentPlayerId) {
+        const entries = Array.isArray(leaderboard) ? leaderboard : [];
+        const visibleEntries = entries.slice(0, 5);
+        const currentPlayer = entries.find(entry => entry.id === currentPlayerId);
+
+        if (
+            currentPlayer
+            && !visibleEntries.some(entry => entry.id === currentPlayer.id)
+        ) {
+            visibleEntries.push(currentPlayer);
+        }
+
+        return visibleEntries;
     }
 
     function createRankCell(value) {

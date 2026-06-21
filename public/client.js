@@ -44,6 +44,7 @@ const spectatorBackButton = document.getElementById("spectatorBackButton");
 const statusMessage = createStatusMessage();
 const AUTO_START_TIMEOUT_MS = 10000;
 const PLAY_BUTTON_IDLE_LABEL = "▶ Partida rápida";
+const mobileDeviceQuery = window.matchMedia("(any-pointer: coarse) and (max-width: 1024px)");
 const portraitMobileQuery = window.matchMedia("(orientation: portrait) and (any-pointer: coarse)");
 
 let selectedColor = DEFAULT_PLAYER_COLOR;
@@ -145,9 +146,35 @@ function attachDifficultyButtons() {
 
 function attachPlayButton() {
     playButton.addEventListener("click", () => {
+        requestMobileFullscreen();
         savePreferences();
         startPublicGame();
     });
+}
+
+function requestMobileFullscreen() {
+    if (!mobileDeviceQuery.matches || document.fullscreenElement) {
+        return;
+    }
+
+    const root = document.documentElement;
+    const requestFullscreen = root.requestFullscreen || root.webkitRequestFullscreen;
+
+    if (typeof requestFullscreen !== "function") {
+        return;
+    }
+
+    try {
+        const request = requestFullscreen.call(root, {
+            navigationUI: "hide"
+        });
+
+        if (request && typeof request.catch === "function") {
+            request.catch(() => {});
+        }
+    } catch {
+        // Fullscreen support varies across mobile browsers.
+    }
 }
 
 function attachThemeButton() {
