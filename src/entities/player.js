@@ -100,6 +100,7 @@ class Player {
         this.catchMisses = 0;
         this.catchBalance = 0;
         this.pendingCatchEliminationTargets = new Set();
+        this.pendingCatchEliminationMarkedAt = new Map();
         this.pressedActions = new Set();
         this.lastAction = null;
         this.directionAngle = null;
@@ -217,6 +218,7 @@ class Player {
             && this.catchMisses === 0
             && this.catchBalance === 0
             && this.pendingCatchEliminationTargets.size === 0
+            && this.pendingCatchEliminationMarkedAt.size === 0
         ) {
             return;
         }
@@ -225,22 +227,36 @@ class Player {
         this.catchMisses = 0;
         this.catchBalance = 0;
         this.pendingCatchEliminationTargets.clear();
+        this.pendingCatchEliminationMarkedAt.clear();
         this.markInfoChanged();
     }
 
-    queueCatchEliminationTarget(playerId) {
+    queueCatchEliminationTarget(playerId, markedAt = Date.now()) {
         if (!playerId || playerId === this.id || this.pendingCatchEliminationTargets.has(playerId)) {
             return;
         }
 
         this.pendingCatchEliminationTargets.add(playerId);
+        this.pendingCatchEliminationMarkedAt.set(
+            playerId,
+            Number.isFinite(markedAt) ? markedAt : Date.now()
+        );
         this.markInfoChanged();
     }
 
     clearCatchEliminationTarget(playerId) {
-        if (this.pendingCatchEliminationTargets.delete(playerId)) {
+        const targetRemoved = this.pendingCatchEliminationTargets.delete(playerId);
+        const timestampRemoved = this.pendingCatchEliminationMarkedAt.delete(playerId);
+
+        if (targetRemoved || timestampRemoved) {
             this.markInfoChanged();
         }
+    }
+
+    getCatchEliminationMarkedAt(playerId) {
+        const markedAt = this.pendingCatchEliminationMarkedAt.get(playerId);
+
+        return Number.isFinite(markedAt) ? markedAt : null;
     }
 
     consumeCatchEliminationTargets() {
@@ -248,6 +264,7 @@ class Player {
 
         if (targets.length > 0) {
             this.pendingCatchEliminationTargets.clear();
+            this.pendingCatchEliminationMarkedAt.clear();
             this.markInfoChanged();
         }
 

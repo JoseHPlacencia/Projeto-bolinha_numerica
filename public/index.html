@@ -25,6 +25,7 @@ try {
 <link rel="stylesheet" href="/css/game-hud.css">
 <link rel="stylesheet" href="/css/rooms.css">
 <link rel="stylesheet" href="/css/settings.css">
+<link rel="stylesheet" href="/css/announcements.css">
 <link rel="stylesheet" href="/css/themes.css">
 <link rel="stylesheet" href="/css/responsive.css">
 </head>
@@ -106,6 +107,41 @@ try {
                 Sobre
             </button>
         </div>
+
+        <aside id="announcementsPanel" class="announcements-panel" aria-label="Comunicado" hidden>
+            <div class="announcements-panel__header">
+                <button
+                    id="announcementToggleButton"
+                    class="announcements-panel__toggle"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="announcementContent"
+                    aria-label="Expandir comunicado"
+                >
+                    <span class="announcements-panel__meta">
+                        <span id="announcementType" class="announcements-panel__badge"></span>
+                        <span id="announcementVersion"></span>
+                        <time id="announcementPublishedAt"></time>
+                    </span>
+                    <svg class="announcements-panel__chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="m6 9 6 6 6-6"></path>
+                    </svg>
+                </button>
+                <button id="dismissAnnouncementButton" class="announcements-panel__dismiss" type="button" aria-label="Dispensar comunicado">
+                    &times;
+                </button>
+            </div>
+            <div id="announcementContent" class="announcements-panel__content" hidden>
+                <h3 id="announcementTitle" class="announcements-panel__title" hidden></h3>
+                <p id="announcementMessage" class="announcements-panel__message" hidden></p>
+                <ul id="announcementHighlights" class="announcements-panel__highlights" hidden></ul>
+                <p id="announcementDetails" class="announcements-panel__details" hidden></p>
+                <a id="announcementLink" class="announcements-panel__link" href="https://hub.vennperio.site/" target="_blank" rel="noopener noreferrer">
+                    <span id="announcementLinkLabel">Ver comunicado completo</span>
+                    <span aria-hidden="true">&nearr;</span>
+                </a>
+            </div>
+        </aside>
     </section>
 
     <div id="roomCreateModal" class="room-modal menu-room-modal" aria-hidden="true">
@@ -177,6 +213,18 @@ try {
                             <span>Vidas</span>
                             <strong data-value>2</strong>
                             <input type="range" min="0" max="4" step="1" value="1">
+                        </label>
+                        <label class="room-number-option" for="roomMaxPlayersInput">
+                            <span>
+                                <strong>Quantidade de jogadores</strong>
+                                <small>Limite de jogadores humanos</small>
+                            </span>
+                            <input id="roomMaxPlayersInput" type="number" min="1" max="16" step="1" value="16" inputmode="numeric" required>
+                        </label>
+                        <label class="room-toggle room-toggle--option">
+                            <input id="roomAllowBotsCheckbox" type="checkbox" checked>
+                            <span class="room-toggle__track"><span class="room-toggle__thumb"></span></span>
+                            <span class="room-toggle__label">Permitir bots</span>
                         </label>
                     </div>
                 </div>

@@ -4,6 +4,7 @@ const {
     initializePlayerTerritory
 } = require("../state/territories");
 const { invalidateSnapshotCache } = require("./snapshotLoop");
+const { resetSocketSnapshotState } = require("./snapshotState");
 const { createRateLimiter } = require("../utils/rateLimiter");
 const { redirectSpectatorsAfterPlayerExit } = require("../systems/spectatorSystem");
 
@@ -279,7 +280,7 @@ function registerMenuBackgroundEvents(socket, io, roomManager) {
         socket.join(roomCode);
         socket.data.spectatorRoomCode = roomCode;
         socket.data.spectatorFollowId = null;
-        resetSpectatorSnapshotState(socket);
+        resetSocketSnapshotState(socket);
         socket.emit("menuBackgroundReady", {
             success: true,
             roomCode
@@ -301,13 +302,7 @@ function leaveMenuBackground(socket) {
     socket.leave(roomCode);
     delete socket.data.spectatorRoomCode;
     delete socket.data.spectatorFollowId;
-    resetSpectatorSnapshotState(socket);
-}
-
-function resetSpectatorSnapshotState(socket) {
-    socket.data.snapshotState = null;
-    socket.data.pendingReliableSnapshot = null;
-    socket.data.nextReliableSnapshotId = 0;
+    resetSocketSnapshotState(socket);
 }
 
 function initializeSocketPlayer(room, socket, alreadyJoined, playerOptions = {}, spawn = null) {
@@ -388,7 +383,7 @@ function registerInputEvents(socket, roomManager) {
     socket.on("snapshotResync", () => {
         if (!snapshotGuard.canHandleInput()) return;
         recordSnapshotResync(socket);
-        socket.data.snapshotState = null;
+        resetSocketSnapshotState(socket);
     });
 
     socket.on("snapshotCacheInvalid", rawInvalidations => {

@@ -1,5 +1,8 @@
 const MULTIPLIER_VALUES = Object.freeze([0.5, 0.75, 1, 1.5, 2]);
 const LIVES_VALUES = Object.freeze([1, 2, 3, 4, 5]);
+const DEFAULT_MAX_PLAYERS = 16;
+const MIN_MAX_PLAYERS = 1;
+const MAX_MAX_PLAYERS = 16;
 
 export function createRoomUi(socket, options = {}) {
     const elements = getRoomElements();
@@ -110,6 +113,7 @@ function getRoomElements() {
         joinRoomButton: document.getElementById("joinRoomButton"),
         leaveRoomButton: document.getElementById("leaveRoomButton"),
         privateRoomCheckbox: document.getElementById("privateRoomCheckbox"),
+        roomAllowBotsCheckbox: document.getElementById("roomAllowBotsCheckbox"),
         roomCodeDisplay: document.getElementById("roomCodeDisplay"),
         roomCodeCopyStatus: document.getElementById("roomCodeCopyStatus"),
         roomCodeFilterInput: document.getElementById("roomCodeFilterInput"),
@@ -124,6 +128,7 @@ function getRoomElements() {
         roomFindStatus: document.getElementById("roomFindStatus"),
         roomInfo: document.getElementById("roomInfo"),
         roomJoinPasswordInput: document.getElementById("roomJoinPasswordInput"),
+        roomMaxPlayersInput: document.getElementById("roomMaxPlayersInput"),
         roomMenuButton: document.getElementById("roomMenuButton"),
         roomPasswordModal: document.getElementById("roomPasswordModal"),
         roomPasswordPopupInput: document.getElementById("roomPasswordPopupInput"),
@@ -219,8 +224,21 @@ function bindCreateRoom(socket, elements, options) {
     if (!elements.createRoomButton) return;
 
     elements.createRoomButton.addEventListener("click", () => {
+        const customOptions = getCustomOptions(elements, options);
+
+        if (!isValidMaxPlayers(customOptions.maxPlayers)) {
+            setStatus(
+                elements,
+                `A quantidade de jogadores deve ser um número inteiro de ${MIN_MAX_PLAYERS} a ${MAX_MAX_PLAYERS}.`,
+                true
+            );
+            elements.roomMaxPlayersInput?.focus();
+            elements.roomMaxPlayersInput?.reportValidity();
+            return;
+        }
+
         createRoom(socket, elements, {
-            customOptions: getCustomOptions(elements, options),
+            customOptions,
             isPrivate: elements.privateRoomCheckbox.checked,
             password: elements.roomCreatePasswordInput.value.trim()
         }, options);
@@ -356,11 +374,23 @@ function createRoom(socket, elements, roomOptions = {}, options = {}) {
         return;
     }
 
+    if (roomOptions.customOptions
+        && roomOptions.customOptions.maxPlayers !== undefined
+        && !isValidMaxPlayers(roomOptions.customOptions.maxPlayers)) {
+        setStatus(
+            elements,
+            `A quantidade de jogadores deve ser um número inteiro de ${MIN_MAX_PLAYERS} a ${MAX_MAX_PLAYERS}.`,
+            true
+        );
+        return;
+    }
+
     setStatus(elements, "Criando sala...");
     if (elements.createRoomButton) {
         elements.createRoomButton.disabled = true;
     }
     const playerOpts = typeof options.getPlayerOptions === "function" ? options.getPlayerOptions() : {};
+    requestFullscreen(options);
     requestGameplayReady(options, () => {
         notifyJoinStart(options);
         socket.emit("joinRoom", {
@@ -405,6 +435,7 @@ function joinRoom(socket, elements, roomOptions = {}, options = {}) {
 
     setStatus(elements, "Entrando na sala...");
     setJoiningState(elements, true);
+    requestFullscreen(options);
     requestGameplayReady(options, () => {
         notifyJoinStart(options);
         socket.emit("joinRoom", {
@@ -413,6 +444,12 @@ function joinRoom(socket, elements, roomOptions = {}, options = {}) {
             ...createPlayerPayload(options)
         });
     });
+}
+
+function requestFullscreen(options) {
+    if (typeof options.requestFullscreen === "function") {
+        options.requestFullscreen();
+    }
 }
 
 function requestGameplayReady(options, callback) {
@@ -441,21 +478,28 @@ function renderRoomsList(socket, elements, rooms, currentFilter, currentCodeFilt
         return;
     }
 
-    elements.roomsList.innerHTML = filteredRooms.map(room => `
+    elements.roomsList.innerHTML = filteredRooms.map(room => {
+        const maxPlayers = Number.isInteger(room.maxPlayers)
+            ? room.maxPlayers
+            : DEFAULT_MAX_PLAYERS;
+        const isFull = room.playerCount >= maxPlayers;
+
+        return `
         <li class="rooms-list__item">
             <span class="rooms-list__title">
                 <strong>${escapeHtml(room.code)}</strong>
                 ${room.isPrivate ? '<span class="rooms-list__lock" aria-label="Sala privada">Privada</span>' : '<span class="rooms-list__lock">Publica</span>'}
-                <small>${room.playerCount} jogador${room.playerCount !== 1 ? "es" : ""}${room.botCount ? ` + ${room.botCount} bot${room.botCount !== 1 ? "s" : ""}` : ""}</small>
+                <small>${room.playerCount}/${maxPlayers} jogador${maxPlayers !== 1 ? "es" : ""}${room.botCount ? ` + ${room.botCount} bot${room.botCount !== 1 ? "s" : ""}` : ""}</small>
             </span>
             <span class="rooms-list__actions">
                 <button class="room-icon-button rooms-list__details" data-info-code="${escapeAttribute(room.code)}" type="button" aria-label="Ver propriedades da sala">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
                 </button>
-                <button class="room-button rooms-list__join" data-code="${escapeAttribute(room.code)}" data-private="${room.isPrivate ? "1" : "0"}" type="button">Entrar</button>
+                <button class="room-button rooms-list__join" data-code="${escapeAttribute(room.code)}" data-private="${room.isPrivate ? "1" : "0"}" type="button"${isFull ? " disabled" : ""}>${isFull ? "Cheia" : "Entrar"}</button>
             </span>
         </li>
-    `).join("");
+    `;
+    }).join("");
 
     elements.roomsList.querySelectorAll("[data-info-code]").forEach(button => {
         button.addEventListener("click", () => {
@@ -532,7 +576,16 @@ function getCustomOptions(elements, options = {}) {
         customOptions.lives = getDefaultLives(options);
     }
 
+    customOptions.maxPlayers = Number(elements.roomMaxPlayersInput?.value);
+    customOptions.allowBots = Boolean(elements.roomAllowBotsCheckbox?.checked);
+
     return customOptions;
+}
+
+function isValidMaxPlayers(value) {
+    return Number.isInteger(value)
+        && value >= MIN_MAX_PLAYERS
+        && value <= MAX_MAX_PLAYERS;
 }
 
 function getCustomOptionSliders(elements) {
@@ -620,6 +673,14 @@ function resetCustomOptions(elements, options = {}) {
         updateSliderValue(label);
     });
 
+    if (elements.roomMaxPlayersInput) {
+        elements.roomMaxPlayersInput.value = String(DEFAULT_MAX_PLAYERS);
+    }
+
+    if (elements.roomAllowBotsCheckbox) {
+        elements.roomAllowBotsCheckbox.checked = true;
+    }
+
     if (elements.customOptionsPanel) {
         elements.customOptionsPanel.classList.add("hidden");
         elements.customOptionsPanel.setAttribute("aria-hidden", "true");
@@ -690,12 +751,19 @@ function createRoomDetailsHtml(room) {
     const lives = settings.gameMode && settings.gameMode.catch
         ? settings.gameMode.catch.roomLives
         : custom.lives;
+    const maxPlayers = Number.isInteger(room.maxPlayers)
+        ? room.maxPlayers
+        : custom.maxPlayers || DEFAULT_MAX_PLAYERS;
+    const allowBots = typeof room.allowBots === "boolean"
+        ? room.allowBots
+        : custom.allowBots !== false;
 
     return `
         <dl class="room-details__list">
             <div><dt>Privacidade</dt><dd>${room.isPrivate ? "Privada" : "Publica"}</dd></div>
             <div><dt>Dificuldade</dt><dd>${formatDifficulty(room.difficulty)}</dd></div>
-            <div><dt>Jogadores</dt><dd>${room.playerCount} humanos, ${room.botCount || 0} bots</dd></div>
+            <div><dt>Jogadores</dt><dd>${room.playerCount}/${maxPlayers} humanos, ${room.botCount || 0} bots</dd></div>
+            <div><dt>Bots</dt><dd>${allowBots ? "Permitidos" : "Desativados"}</dd></div>
             <div><dt>Mapa</dt><dd>${formatNumber(world.mapRadius)} unidades (${formatMultiplier(custom.mapSize || 1)})</dd></div>
             <div><dt>Velocidade</dt><dd>${formatNumber(movement.speed)} u/s (${formatMultiplier(custom.playerSpeed || 1)})</dd></div>
             <div><dt>Números</dt><dd>${numbers.maxNumbers || "-"} no mapa (${formatMultiplier(custom.numberDensity || 1)})</dd></div>

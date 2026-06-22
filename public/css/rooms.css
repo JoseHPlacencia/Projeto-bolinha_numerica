@@ -436,6 +436,53 @@
     width: 100%;
 }
 
+.room-number-option {
+    align-items: center;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) 88px;
+}
+
+.room-number-option > span {
+    display: grid;
+    gap: 3px;
+}
+
+.room-number-option strong {
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 13px;
+}
+
+.room-number-option small {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.room-number-option input {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--text);
+    font: inherit;
+    min-width: 0;
+    padding: 9px 10px;
+    text-align: center;
+    width: 100%;
+}
+
+.room-number-option input:focus {
+    border-color: var(--accent);
+    outline: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
+    outline-offset: 1px;
+}
+
+.room-toggle--option {
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    padding-top: 10px;
+}
+
 .room-details {
     gap: 0;
 }

@@ -1,7 +1,11 @@
 const config = require("../config/gameConfig");
 const { updatePlayers } = require("../systems/movementSystem");
 const { updateTrails } = require("../systems/trailSystem");
-const { handleNumberCollected } = require("../systems/catchModeSystem");
+const {
+    createCatchCombatFrame,
+    handleNumberCollected,
+    resolveCatchCombatFrame
+} = require("../systems/catchModeSystem");
 const { getHighResolutionTime } = require("../utils/time");
 
 function startGameLoop(
@@ -27,6 +31,14 @@ function startGameLoop(
         const tickIntervalMs = now - previousTime;
         const phaseDurations = {};
         const deltaTime = Math.min((now - previousTime) / 1000, config.loop.maxDeltaTime);
+        const catchCombatFrame = createCatchCombatFrame(Date.now());
+        const gameplayContext = {
+            catchCombatFrame,
+            io,
+            onRoomPopulationChanged: lifecycle.onRoomPopulationChanged,
+            roomCode,
+            runtimeConfig
+        };
         let botDiagnostics = null;
         let trailDiagnostics = null;
         previousTime = now;
@@ -43,12 +55,7 @@ function startGameLoop(
         });
 
         measurePhase(phaseDurations, "trails", () => {
-            trailDiagnostics = updateTrails(players, territories, {
-                io,
-                onRoomPopulationChanged: lifecycle.onRoomPopulationChanged,
-                roomCode,
-                runtimeConfig
-            });
+            trailDiagnostics = updateTrails(players, territories, gameplayContext);
         });
 
         const result = measurePhase(phaseDurations, "numbers", () => (
@@ -57,37 +64,51 @@ function startGameLoop(
                 : { collisions: [], themeChanged: false }
         ));
         const collisions = Array.isArray(result && result.collisions) ? result.collisions : [];
+        const numberCollectionEvents = [];
 
         measurePhase(phaseDurations, "numberEvents", () => {
-            if (collisions.length <= 0 || !io) {
+            if (collisions.length <= 0) {
                 return;
             }
 
             for (const col of collisions) {
                 measurePhase(phaseDurations, "numberCollected", () => {
                     handleNumberCollected(players, territories, col, {
-                        io,
-                        onRoomPopulationChanged: lifecycle.onRoomPopulationChanged,
-                        roomCode,
-                        runtimeConfig
+                        ...gameplayContext
                     });
                 }, true);
+                numberCollectionEvents.push(col);
+            }
+        });
 
+        measurePhase(phaseDurations, "catchCombat", () => {
+            resolveCatchCombatFrame(players, territories, gameplayContext);
+        });
+
+        measurePhase(phaseDurations, "numberNotifications", () => {
+            if (!io) {
+                return;
+            }
+
+            for (const col of numberCollectionEvents) {
                 const socket = io.sockets.sockets.get(col.playerId);
-                if (socket) {
-                    const player = players.get(col.playerId);
 
-                    socket.emit("numberCollected", {
-                        display: col.display,
-                        value: col.value,
-                        sets: col.sets,
-                        belongsToTheme: col.belongsToTheme,
-                        catchBalance: player ? player.catchBalance : 0,
-                        eliminations: player ? player.eliminations : 0,
-                        lives: player ? player.lives : 0,
-                        maxLives: player ? player.maxLives : 0
-                    });
+                if (!socket) {
+                    continue;
                 }
+
+                const player = players.get(col.playerId);
+
+                socket.emit("numberCollected", {
+                    display: col.display,
+                    value: col.value,
+                    sets: col.sets,
+                    belongsToTheme: col.belongsToTheme,
+                    catchBalance: player ? player.catchBalance : 0,
+                    eliminations: player ? player.eliminations : 0,
+                    lives: player ? player.lives : 0,
+                    maxLives: player ? player.maxLives : 0
+                });
             }
         });
 

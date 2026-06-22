@@ -13,7 +13,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         territories: {},
         territoryPoints: {},
         trails: {},
-        trailAssemblies: {}
+        trailAssemblies: {},
+        trailTombstones: {}
     };
     const networkState = {
         bufferMs: networkConfig.initialBufferMs,
@@ -39,6 +40,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     const pendingTerritoryOperations = new Map();
     const suppressedCaptureOperationResyncIds = new Set();
     const failedTerritoryOperationKeys = new Map();
+    const retiredSnapshotEpochs = new Set();
+    let currentSnapshotEpoch = null;
     let hasServerClockSync = false;
     let lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
 
@@ -51,12 +54,25 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     };
 
     function reset() {
+        resetSnapshotContinuity();
+        currentSnapshotEpoch = null;
+        retiredSnapshotEpochs.clear();
+        networkDiagnosticsState.events.length = 0;
+        networkDiagnosticsState.lastServer = null;
+        networkDiagnosticsState.lastSnapshot = null;
+        networkDiagnosticsState.lastResync = null;
+        networkDiagnosticsState.lastResyncSuppressed = null;
+        lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
+    }
+
+    function resetSnapshotContinuity() {
         snapshots.length = 0;
         entityCache.playerInfo = {};
         entityCache.territories = {};
         entityCache.territoryPoints = {};
         entityCache.trails = {};
         entityCache.trailAssemblies = {};
+        entityCache.trailTombstones = {};
         networkState.bufferMs = networkConfig.initialBufferMs;
         networkState.serverOffset = 0;
         networkState.lastSnapshotReceivedAt = null;
@@ -67,21 +83,22 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         debugState.visiblePlayers = 0;
         debugState.visibleTerritories = 0;
         debugState.visibleTrails = 0;
-        networkDiagnosticsState.events.length = 0;
-        networkDiagnosticsState.lastServer = null;
-        networkDiagnosticsState.lastSnapshot = null;
-        networkDiagnosticsState.lastResync = null;
-        networkDiagnosticsState.lastResyncSuppressed = null;
         pendingTerritoryOperations.clear();
         suppressedCaptureOperationResyncIds.clear();
         failedTerritoryOperationKeys.clear();
         hasServerClockSync = false;
-        lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
     }
 
     function processSnapshot(rawSnapshot) {
         const now = performance.now();
         const applyResult = createApplyResult();
+        const epochResult = prepareSnapshotEpoch(rawSnapshot);
+
+        if (epochResult.ignored) {
+            applyResult.ignored = true;
+            return applyResult;
+        }
+
         const snapshot = expandSnapshot(rawSnapshot, applyResult);
         const shouldSave = applyResult.applied && isSnapshotNewerThanRenderBuffer(snapshot);
 
@@ -126,11 +143,49 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
             averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
             jitterMs: networkState.jitterMs,
+            snapshotEpoch: currentSnapshotEpoch,
             snapshotCount: snapshots.length,
             visiblePlayers: debugState.visiblePlayers,
             visibleTerritories: debugState.visibleTerritories,
             visibleTrails: debugState.visibleTrails
         };
+    }
+
+    function prepareSnapshotEpoch(rawSnapshot) {
+        const snapshotEpoch = normalizeSnapshotEpoch(
+            rawSnapshot && rawSnapshot.snapshotEpoch
+        );
+
+        if (snapshotEpoch === null) {
+            return { changed: false, ignored: false };
+        }
+
+        if (currentSnapshotEpoch === null) {
+            currentSnapshotEpoch = snapshotEpoch;
+            return { changed: false, ignored: false };
+        }
+
+        if (snapshotEpoch === currentSnapshotEpoch) {
+            return { changed: false, ignored: false };
+        }
+
+        if (retiredSnapshotEpochs.has(snapshotEpoch)) {
+            return { changed: false, ignored: true };
+        }
+
+        retireSnapshotEpoch(currentSnapshotEpoch);
+        resetSnapshotContinuity();
+        currentSnapshotEpoch = snapshotEpoch;
+        return { changed: true, ignored: false };
+    }
+
+    function retireSnapshotEpoch(snapshotEpoch) {
+        retiredSnapshotEpochs.add(snapshotEpoch);
+
+        while (retiredSnapshotEpochs.size > 32) {
+            const oldestEpoch = retiredSnapshotEpochs.values().next().value;
+            retiredSnapshotEpochs.delete(oldestEpoch);
+        }
     }
 
     function getNetworkDiagnostics() {
@@ -887,6 +942,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function expandCompactSnapshot(rawSnapshot, applyResult) {
+        const removedTerritoryIds = normalizeEntityIds(rawSnapshot.removedTerritoryIds);
+        const trailRemovals = normalizeTrailRemovals(
+            rawSnapshot.trailRemovals,
+            rawSnapshot.removedTrailIds
+        );
         updatePlayerInfoCache(rawSnapshot.playerInfo, rawSnapshot.sequence);
         updateTerritoryCache(rawSnapshot.territories, applyResult, rawSnapshot.sequence);
         updateTrailCache(rawSnapshot.trails, applyResult, rawSnapshot.sequence);
@@ -894,17 +954,35 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const failedTerritoryOperationIds = updateTerritoryOperations(rawSnapshot.territoryOps, activeTrailIds, applyResult);
         const ignoredTerritoryResyncIds = createIgnoredTerritoryResyncIds(failedTerritoryOperationIds);
 
+        if (applyResult.applied) {
+            applyTerritoryRemovals(removedTerritoryIds);
+            applyTrailRemovals(trailRemovals, rawSnapshot.sequence);
+        }
+
         const players = expandPlayers(rawSnapshot.players, rawSnapshot.debug);
-        const territories = selectCachedEntities(entityCache.territories, rawSnapshot.territoryIds);
+        const selectedTerritories = selectCachedEntities(entityCache.territories, rawSnapshot.territoryIds);
+        const selectedTrails = selectCachedEntities(entityCache.trails, rawSnapshot.trailIds);
+        const availableTrails = selectAvailableTrailEntities(rawSnapshot.trailIds);
+        const territories = mergeSnapshotEntities(
+            getPreviousSnapshotEntities("territories"),
+            selectedTerritories,
+            removedTerritoryIds,
+            hasExplicitRemovalProtocol(rawSnapshot)
+        );
         const trails = rawSnapshot.preserveTrails
             ? getPreviousSnapshotEntities("trails")
-            : selectCachedEntities(entityCache.trails, rawSnapshot.trailIds);
+            : mergeSnapshotEntities(
+                getPreviousSnapshotEntities("trails"),
+                selectedTrails,
+                Object.keys(trailRemovals),
+                hasExplicitRemovalProtocol(rawSnapshot)
+            );
 
-        requestRecoveryForMissingCachedEntities(rawSnapshot.territoryIds, territories, "territories", applyResult, ignoredTerritoryResyncIds);
-        requestRecoveryForStaleCachedVersions(rawSnapshot.territoryVersions, territories, applyResult, ignoredTerritoryResyncIds);
+        requestRecoveryForMissingCachedEntities(rawSnapshot.territoryIds, selectedTerritories, "territories", applyResult, ignoredTerritoryResyncIds);
+        requestRecoveryForStaleCachedVersions(rawSnapshot.territoryVersions, selectedTerritories, applyResult, ignoredTerritoryResyncIds);
 
         if (!rawSnapshot.preserveTrails) {
-            requestRecoveryForMissingCachedEntities(rawSnapshot.trailIds, trails, "trails", applyResult);
+            requestRecoveryForMissingCachedEntities(rawSnapshot.trailIds, availableTrails, "trails", applyResult);
         }
 
         debugState.visiblePlayers = Object.keys(players).length;
@@ -917,8 +995,9 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             players,
             territories,
             trails,
-            trailIds: rawSnapshot.trailIds || Object.keys(trails),
+            trailIds: Object.keys(trails),
             preserveTrails: Boolean(rawSnapshot.preserveTrails),
+            catchStatus: normalizeCatchStatus(rawSnapshot.catchStatus),
             leaderboard: rawSnapshot.leaderboard || [],
             mode: rawSnapshot.mode || null,
             numbers: rawSnapshot.numbers || null
@@ -945,6 +1024,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             trails: snapshot.trails || {},
             trailIds: Object.keys(snapshot.trails || {}),
             preserveTrails: false,
+            catchStatus: normalizeCatchStatus(snapshot.catchStatus),
             leaderboard: snapshot.leaderboard || [],
             mode: snapshot.mode || null,
             numbers: snapshot.numbers || null
@@ -1078,6 +1158,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createRenderState(snapshot, players) {
         return {
             players,
+            catchStatus: snapshot.catchStatus,
             leaderboard: snapshot.leaderboard || [],
             mode: snapshot.mode || null,
             numbers: snapshot.numbers || null,
@@ -1089,31 +1170,34 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function createInterpolatedRenderState(previous, next, players, amount) {
+        const geometrySnapshot = amount < 0.5 ? previous : next;
+
         return {
             players,
+            catchStatus: next.catchStatus || previous.catchStatus,
             leaderboard: next.leaderboard || previous.leaderboard || [],
             mode: next.mode || previous.mode || null,
             numbers: next.numbers || previous.numbers || null,
-            territories: next.territories,
-            trails: createPredictedTrailState(previous, next, players, amount),
-            trailIds: previous.trailIds || Object.keys(previous.trails || {}),
-            preserveTrails: Boolean(previous.preserveTrails)
+            territories: geometrySnapshot.territories,
+            trails: createPredictedTrailState(geometrySnapshot, players, amount),
+            trailIds: geometrySnapshot.trailIds || Object.keys(geometrySnapshot.trails || {}),
+            preserveTrails: Boolean(geometrySnapshot.preserveTrails)
         };
     }
 
-    function createPredictedTrailState(previous, next, players, amount) {
-        const baseTrails = previous.trails || {};
+    function createPredictedTrailState(snapshot, players, amount) {
+        const baseTrails = snapshot.trails || {};
 
-        if (!shouldPredictTrails(amount) || next.preserveTrails) {
+        if (!shouldPredictTrails(amount) || snapshot.preserveTrails) {
             return baseTrails;
         }
 
-        const activeNextTrailIds = new Set(next.trailIds || Object.keys(next.trails || {}));
-        const territories = next.territories || previous.territories || {};
+        const activeTrailIds = new Set(snapshot.trailIds || Object.keys(baseTrails));
+        const territories = snapshot.territories || {};
         let predictedTrails = null;
 
         for (const [id, trail] of Object.entries(baseTrails)) {
-            if (!activeNextTrailIds.has(id) || !next.trails || !next.trails[id]) {
+            if (!activeTrailIds.has(id)) {
                 continue;
             }
 
@@ -2016,22 +2100,28 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             const cachedTrail = entityCache.trails[id];
             const assembly = entityCache.trailAssemblies[id];
             const newestTrail = getNewestTrailState(cachedTrail, assembly);
+            const tombstone = entityCache.trailTombstones[id];
 
-            if (isTrailUpdateStale(update, snapshotSequence, newestTrail)) {
+            if (
+                isTrailUpdateStale(update, snapshotSequence, newestTrail)
+                || isTrailUpdateBlockedByTombstone(update, snapshotSequence, tombstone)
+            ) {
                 continue;
             }
 
+            delete entityCache.trailTombstones[id];
+
             if (update.full) {
                 const fullTrail = createFullTrail(id, update, snapshotSequence);
-                const shouldStage = Boolean(
-                    update.partial
-                    && cachedTrail
-                    && !cachedTrail.isPartial
-                    && isSameTrailGeneration(cachedTrail, fullTrail)
-                );
+                const shouldStage = Boolean(update.partial);
 
                 if (shouldStage) {
-                    entityCache.trailAssemblies[id] = fullTrail;
+                    if (cachedTrail && !cachedTrail.isPartial) {
+                        entityCache.trailAssemblies[id] = fullTrail;
+                    } else {
+                        entityCache.trails[id] = fullTrail;
+                        delete entityCache.trailAssemblies[id];
+                    }
                     continue;
                 }
 
@@ -2057,6 +2147,31 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             entityCache.trails[id] = patchedTrail;
             delete entityCache.trailAssemblies[id];
         }
+    }
+
+    function isTrailUpdateBlockedByTombstone(update, snapshotSequence, tombstone) {
+        if (!tombstone) {
+            return false;
+        }
+
+        const updateGeneration = Number.isSafeInteger(update && update.generation)
+            ? update.generation
+            : null;
+        const tombstoneGeneration = Number.isSafeInteger(tombstone.generation)
+            ? tombstone.generation
+            : null;
+
+        if (
+            updateGeneration !== null
+            && tombstoneGeneration !== null
+            && updateGeneration !== tombstoneGeneration
+        ) {
+            return updateGeneration < tombstoneGeneration;
+        }
+
+        return Number.isSafeInteger(snapshotSequence)
+            && Number.isSafeInteger(tombstone.snapshotSequence)
+            && snapshotSequence <= tombstone.snapshotSequence;
     }
 
     function getNewestTrailState(cachedTrail, assembly) {
@@ -2104,12 +2219,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             && snapshotSequence <= trail.snapshotSequence;
     }
 
-    function isSameTrailGeneration(first, second) {
-        return Number.isSafeInteger(first && first.generation)
-            && Number.isSafeInteger(second && second.generation)
-            && first.generation === second.generation;
-    }
-
     function expandPlayers(players, debug) {
         const expandedPlayers = {};
 
@@ -2149,6 +2258,96 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
 
         return selected;
+    }
+
+    function selectAvailableTrailEntities(ids) {
+        const selected = {};
+
+        for (const id of ids || []) {
+            const trail = getNewestTrailState(
+                entityCache.trails[id],
+                entityCache.trailAssemblies[id]
+            );
+
+            if (trail) {
+                selected[id] = trail;
+            }
+        }
+
+        return selected;
+    }
+
+    function mergeSnapshotEntities(previousEntities, selectedEntities, removedIds, useExplicitRemovals) {
+        if (!useExplicitRemovals) {
+            return selectedEntities;
+        }
+
+        const merged = {
+            ...(previousEntities || {}),
+            ...(selectedEntities || {})
+        };
+
+        for (const id of removedIds || []) {
+            delete merged[id];
+        }
+
+        return merged;
+    }
+
+    function hasExplicitRemovalProtocol(snapshot) {
+        return Array.isArray(snapshot && snapshot.removedTerritoryIds)
+            || Array.isArray(snapshot && snapshot.removedTrailIds)
+            || Boolean(
+                snapshot
+                && snapshot.trailRemovals
+                && typeof snapshot.trailRemovals === "object"
+            );
+    }
+
+    function normalizeEntityIds(ids) {
+        return Array.isArray(ids)
+            ? [...new Set(ids.filter(id => typeof id === "string" && id))]
+            : [];
+    }
+
+    function normalizeTrailRemovals(removals, removedIds) {
+        const normalized = {};
+
+        for (const [id, generation] of Object.entries(removals || {})) {
+            if (typeof id !== "string" || !id) {
+                continue;
+            }
+
+            normalized[id] = Number.isSafeInteger(generation) ? generation : null;
+        }
+
+        for (const id of normalizeEntityIds(removedIds)) {
+            if (!Object.prototype.hasOwnProperty.call(normalized, id)) {
+                normalized[id] = null;
+            }
+        }
+
+        return normalized;
+    }
+
+    function applyTerritoryRemovals(removedIds) {
+        for (const id of removedIds || []) {
+            delete entityCache.territories[id];
+            pendingTerritoryOperations.delete(id);
+            suppressedCaptureOperationResyncIds.delete(id);
+            clearFailedTerritoryOperationKeys(id);
+        }
+    }
+
+    function applyTrailRemovals(removals, snapshotSequence) {
+        for (const [id, generation] of Object.entries(removals || {})) {
+            delete entityCache.trails[id];
+            delete entityCache.trailAssemblies[id];
+            entityCache.trailTombstones[id] = {
+                generation,
+                snapshotSequence
+            };
+        }
     }
 
     function getPreviousSnapshotEntities(key) {
@@ -2389,6 +2588,35 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             }
         });
     }
+}
+
+function normalizeCatchStatus(status) {
+    const value = status && typeof status === "object" ? status : {};
+
+    return {
+        counterTargetCount: normalizeNonNegativeInteger(value.counterTargetCount),
+        counterRiskArmed: Boolean(value.counterRiskArmed),
+        counterRiskRemainingMs: normalizeRemainingMs(value.counterRiskRemainingMs),
+        threatCount: normalizeNonNegativeInteger(value.threatCount),
+        threatArmed: Boolean(value.threatArmed),
+        threatRemainingMs: normalizeRemainingMs(value.threatRemainingMs)
+    };
+}
+
+function normalizeSnapshotEpoch(value) {
+    if (typeof value === "string" && value) {
+        return value;
+    }
+
+    return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+function normalizeNonNegativeInteger(value) {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function normalizeRemainingMs(value) {
+    return Number.isFinite(value) ? Math.max(0, Math.ceil(value)) : null;
 }
 
 function unpackPolygon(polygon) {

@@ -66,21 +66,29 @@ function unionPolygons(...polygons) {
 }
 
 function subtractPolygon(subject, clipping) {
+    return getLargestSimplePolygon(subtractPolygonComponents(subject, clipping));
+}
+
+function subtractPolygonComponents(subject, clipping) {
     if (!hasPolygon(subject)) {
         return [];
     }
 
     if (!hasPolygon(clipping)) {
-        return normalizeSimplePolygon(subject);
+        const normalizedSubject = normalizeSimplePolygon(subject);
+
+        return hasPolygon(normalizedSubject) ? [normalizedSubject] : [];
     }
 
     try {
-        return getLargestSimplePolygon(polygonClipping.difference(
+        return normalizeMultiPolygon(polygonClipping.difference(
             polygonToMultiPolygon(subject),
             polygonToMultiPolygon(clipping)
         ));
     } catch (_error) {
-        return normalizeSimplePolygon(subject);
+        const normalizedSubject = normalizeSimplePolygon(subject);
+
+        return hasPolygon(normalizedSubject) ? [normalizedSubject] : [];
     }
 }
 
@@ -921,5 +929,6 @@ module.exports = {
     isPolygonInsidePolygon,
     serializePolygon,
     subtractPolygon,
+    subtractPolygonComponents,
     unionPolygons
 };

@@ -36,6 +36,16 @@
         padding: 9px 12px;
     }
 
+    .announcements-panel {
+        left: auto;
+        margin-top: 16px;
+        max-height: none;
+        padding: 12px 14px;
+        position: static;
+        top: auto;
+        width: min(440px, 100%);
+    }
+
     .gallery-grid {
         grid-template-columns: 1fr;
     }
@@ -110,6 +120,11 @@
         padding: 26px 22px 24px;
     }
 
+    .catch-alert__statuses {
+        max-width: calc(100vw - 20px);
+        top: 112px;
+    }
+
     .settings-row {
         align-items: stretch;
         gap: 14px;
@@ -122,6 +137,17 @@
 
     .settings-switch {
         justify-self: end;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1279px) {
+    .announcements-panel {
+        left: auto;
+        margin-top: 18px;
+        max-height: none;
+        position: static;
+        top: auto;
+        width: min(440px, 100%);
     }
 }
 
@@ -277,6 +303,33 @@
         height: clamp(88px, 28vmin, 132px) !important;
         right: max(8px, env(safe-area-inset-right));
         width: clamp(88px, 28vmin, 132px) !important;
+    }
+
+    .catch-alert__statuses {
+        gap: 5px;
+        max-width: 62vw;
+        top: max(48px, calc(env(safe-area-inset-top) + 44px));
+    }
+
+    .catch-alert__status {
+        border-radius: 8px;
+        gap: 6px;
+        min-height: 32px;
+        padding: 4px 8px 4px 5px;
+    }
+
+    .catch-alert__icon {
+        font-size: 14px;
+        height: 22px;
+        width: 22px;
+    }
+
+    .catch-alert__copy strong {
+        font-size: 9px;
+    }
+
+    .catch-alert__copy small {
+        font-size: 8px;
     }
 
     #collectNotif {

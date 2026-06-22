@@ -9,6 +9,7 @@ Os arquivos são carregados na ordem declarada em `public/index.html`.
 - `game-hud.css`: canvas, HUD, alertas e controles móveis.
 - `rooms.css`: criação, busca e detalhes de salas.
 - `settings.css`: painel de configurações de vídeo.
+- `announcements.css`: painel de comunicados oficiais no menu.
 - `themes.css`: variações por tema e qualidade gráfica.
 - `responsive.css`: ajustes responsivos globais e dos componentes.
 

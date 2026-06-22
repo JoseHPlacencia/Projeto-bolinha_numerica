@@ -17,7 +17,8 @@ const {
 const {
     endPlayerGame,
     handlePlayerLifeLoss,
-    handlePlayerVictory
+    handlePlayerVictory,
+    handleSuccessfulTrailCapture
 } = require("./catchModeSystem");
 const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
 
@@ -48,7 +49,8 @@ function captureClosedTrail(player, territories, players, context = {}) {
     const changedPlayerIds = measureTrailPhase(diagnostics, "captureApplyTerritory", () => (
         applyCapturedPolygon(territories, player.id, newlyCapturedPolygon, {
             diagnostics,
-            ownerPolygon
+            ownerPolygon,
+            players
         })
     ));
 
@@ -68,7 +70,9 @@ function captureClosedTrail(player, territories, players, context = {}) {
     measureTrailPhase(diagnostics, "captureDamagePlayers", () => {
         damagePlayersInsideCapturedPolygon(players, territories, player, newlyCapturedPolygon, context);
     });
-
+    measureTrailPhase(diagnostics, "captureCounterattack", () => {
+        handleSuccessfulTrailCapture(players, territories, player, context);
+    });
     const relocationPlayerIds = new Set(changedPlayerIds);
     relocationPlayerIds.delete(player.id);
 

@@ -5,6 +5,10 @@ const {
     createClientSnapshotState,
     createSnapshot
 } = require("./snapshotSerializer");
+const {
+    getSocketSnapshotEpoch,
+    resetSocketSnapshotState
+} = require("./snapshotState");
 const { resolveSpectatorFollowId } = require("../systems/spectatorSystem");
 
 function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null, roomDiagnostics = null) {
@@ -127,8 +131,11 @@ function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
         territoryVersions: {},
         territories: {},
         territoryOps: {},
+        removedTerritoryIds: [],
         trailIds: filterKnownIds(snapshot.trailIds, clientState.trails),
         trails: {},
+        removedTrailIds: [],
+        trailRemovals: {},
         payloadBudget: null,
         preserveTrails: true
     };
@@ -150,12 +157,14 @@ function assignSnapshotSequence(socket, snapshot) {
 
     socket.data.snapshotSequence = sequence;
     snapshot.sequence = sequence;
+    snapshot.snapshotEpoch = getSocketSnapshotEpoch(socket);
     return sequence;
 }
 
 function queueReliableSnapshot(socket, snapshot, nextSnapshotState, sendDiagnostics = null) {
     const pending = {
         createdAt: Date.now(),
+        epoch: snapshot.snapshotEpoch,
         id: getNextReliableSnapshotId(socket),
         lastSentAt: null,
         nextRetryAt: 0,
@@ -182,13 +191,23 @@ function sendReliableSnapshot(socket, pending) {
             pending.lastAckErrorAt = Date.now();
             return;
         }
-        acknowledgeReliableSnapshot(socket, pending.id, acknowledgement);
+        acknowledgeReliableSnapshot(socket, pending.id, acknowledgement, pending.epoch);
     });
 }
 
-function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { applied: true }) {
+function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { applied: true }, pendingEpoch = null) {
     const pending = socket.data.pendingReliableSnapshot;
-    if (!pending || pending.id !== pendingId) return;
+    const currentEpoch = getSocketSnapshotEpoch(socket);
+
+    if (
+        !pending
+        || pending.id !== pendingId
+        || (pendingEpoch !== null && pending.epoch !== pendingEpoch)
+        || (pending.epoch !== null && pending.epoch !== currentEpoch)
+    ) {
+        return;
+    }
+
     recordReliableSnapshotAcknowledgement(socket, pending, acknowledgement);
     if (!acknowledgement || acknowledgement.applied !== false) {
         socket.data.snapshotState = pending.snapshotState;
@@ -196,8 +215,7 @@ function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { appl
         return;
     }
     if (!hasAnyInvalidation(acknowledgement.invalidations)) {
-        socket.data.snapshotState = null;
-        socket.data.pendingReliableSnapshot = null;
+        resetSocketSnapshotState(socket);
         return;
     }
     socket.data.snapshotState = pending.snapshotState;
@@ -682,10 +700,7 @@ function recordReliableSnapshotAcknowledgement(socket, pending, acknowledgement)
 
 function invalidateSnapshotCache(socket, invalidations) {
     if (!hasAnyInvalidation(invalidations)) {
-        socket.data.snapshotState = null;
-        if (socket.data.pendingReliableSnapshot) {
-            socket.data.pendingReliableSnapshot = null;
-        }
+        resetSocketSnapshotState(socket);
         return;
     }
     if (!socket.data.snapshotState) {
@@ -748,11 +763,18 @@ function shouldSendReliably(snapshot) {
     return hasEntries(snapshot.playerInfo)
         || hasEntries(snapshot.territories)
         || hasEntries(snapshot.territoryOps)
+        || hasItems(snapshot.removedTerritoryIds)
+        || hasItems(snapshot.removedTrailIds)
+        || hasEntries(snapshot.trailRemovals)
         || hasReliableTrailUpdate(snapshot.trails);
 }
 
 function hasEntries(value) {
     return value && Object.keys(value).length > 0;
+}
+
+function hasItems(value) {
+    return Array.isArray(value) && value.length > 0;
 }
 
 function hasFullTrailUpdate(trails) {
@@ -859,11 +881,13 @@ function createSnapshotBreakdown(snapshot, options = {}) {
         territoryVersionCount: countObjectKeys(snapshot && snapshot.territoryVersions),
         territoryPayloadCount: countObjectKeys(territories),
         territoryOperationCount: countObjectKeys(territoryOps),
+        removedTerritoryCount: countArrayItems(snapshot && snapshot.removedTerritoryIds),
         captureOperationCount,
         captureOperationTrailPointCount,
         territoryPointDefinitionCount,
         territoryRingReferenceCount,
         trailUpdateCount: trailValues.length,
+        removedTrailCount: countArrayItems(snapshot && snapshot.removedTrailIds),
         fullTrailUpdateCount,
         fullTrailPointCount,
         partialTrailUpdateCount,

@@ -26,7 +26,8 @@ body.is-game-active .main-menu {
 body.is-menu-active #themePanel,
 body.is-menu-active #collectNotif,
 body.is-menu-active #lifePanel,
-body.is-menu-active #rankPanel {
+body.is-menu-active #rankPanel,
+body.is-menu-active #catchAlert {
     display: none;
 }
 
@@ -34,6 +35,7 @@ body.is-game-ended #hud,
 body.is-game-ended #rankPanel,
 body.is-game-ended #themePanel,
 body.is-game-ended #collectNotif,
+body.is-game-ended #catchAlert,
 body.is-game-ended .minimap,
 body.is-game-ended .touch-controls,
 body.is-game-ended .orientation-warning,
@@ -41,6 +43,7 @@ body.is-spectating #hud,
 body.is-spectating #rankPanel,
 body.is-spectating #themePanel,
 body.is-spectating #collectNotif,
+body.is-spectating #catchAlert,
 body.is-spectating .minimap,
 body.is-spectating .touch-controls,
 body.is-spectating .orientation-warning {
@@ -225,6 +228,140 @@ body.is-spectating #gameCanvas {
     color: #fff;
     font-size: 14px;
     line-height: 1;
+}
+
+.catch-alert {
+    inset: 0;
+    pointer-events: none;
+    position: fixed;
+    z-index: 320;
+}
+
+.catch-alert[hidden],
+.catch-alert__status[hidden] {
+    display: none;
+}
+
+.catch-alert__edge {
+    border: 2px solid rgba(251, 146, 60, 0.72);
+    box-shadow:
+        inset 0 0 24px rgba(249, 115, 22, 0.32),
+        inset 0 0 70px rgba(249, 115, 22, 0.13);
+    inset: 0;
+    position: absolute;
+}
+
+.catch-alert.has-threat .catch-alert__edge {
+    animation: catch-alert-threat-pulse 950ms ease-in-out infinite alternate;
+    border-color: rgba(248, 113, 113, 0.9);
+    box-shadow:
+        inset 0 0 28px rgba(239, 68, 68, 0.4),
+        inset 0 0 86px rgba(220, 38, 38, 0.18);
+}
+
+.catch-alert__statuses {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    left: 50%;
+    max-width: min(720px, calc(100vw - 32px));
+    position: absolute;
+    top: 112px;
+    transform: translateX(-50%);
+}
+
+.catch-alert__status {
+    align-items: center;
+    backdrop-filter: blur(8px);
+    border: 1px solid;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    color: #fff;
+    display: flex;
+    gap: 9px;
+    min-height: 42px;
+    padding: 7px 12px 7px 8px;
+}
+
+.catch-alert__status--threat {
+    background: rgba(69, 10, 10, 0.9);
+    border-color: rgba(248, 113, 113, 0.78);
+}
+
+.catch-alert__status--risk {
+    background: rgba(67, 31, 7, 0.9);
+    border-color: rgba(251, 146, 60, 0.78);
+}
+
+.catch-alert.is-threat-armed .catch-alert__status--threat {
+    background: rgba(107, 13, 13, 0.94);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.3),
+        0 0 18px rgba(239, 68, 68, 0.32);
+}
+
+.catch-alert.is-risk-armed .catch-alert__status--risk {
+    background: rgba(103, 45, 5, 0.94);
+    box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.3),
+        0 0 18px rgba(249, 115, 22, 0.3);
+}
+
+.catch-alert__icon {
+    align-items: center;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-size: 18px;
+    font-weight: 800;
+    height: 28px;
+    justify-content: center;
+    line-height: 1;
+    width: 28px;
+}
+
+.catch-alert__status--threat .catch-alert__icon {
+    color: #fca5a5;
+}
+
+.catch-alert__status--risk .catch-alert__icon {
+    color: #fdba74;
+}
+
+.catch-alert__copy {
+    display: grid;
+    gap: 2px;
+}
+
+.catch-alert__copy strong {
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    line-height: 1;
+}
+
+.catch-alert__copy small {
+    color: rgba(255, 255, 255, 0.76);
+    font-size: 10px;
+    line-height: 1.1;
+}
+
+@keyframes catch-alert-threat-pulse {
+    from {
+        opacity: 0.62;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .catch-alert.has-threat .catch-alert__edge {
+        animation: none;
+    }
 }
 
 #themePanel {
@@ -473,11 +610,13 @@ body.is-spectating #gameCanvas {
 }
 
 .rank-panel__header {
+    border: 1px solid transparent;
     color: #b9c2d0;
     font-size: 10px;
     font-weight: 700;
     letter-spacing: 0;
     line-height: 1;
+    padding: 0 7px;
     text-transform: uppercase;
 }
 

@@ -23,9 +23,12 @@ export function createHud({ debugLevel }) {
     const debugTouchingBoundary = document.getElementById("debugTouchingBoundary");
     const debugInputAccepted = document.getElementById("debugInputAccepted");
     const debugBoundaryDecision = document.getElementById("debugBoundaryDecision");
+    const catchAlert = createCatchAlert();
     let lastUpdatedAt = 0;
     let lastRankUpdatedAt = 0;
     let lastLifeSignature = null;
+
+    document.getElementById("gameLayer")?.appendChild(catchAlert.element);
 
     if (debugPanel) {
         debugPanel.hidden = debugLevel <= 0;
@@ -36,8 +39,9 @@ export function createHud({ debugLevel }) {
         update
     };
 
-    function update({ frameStats, rendererStats, snapshotStats, currentPlayer, currentPlayerId, leaderboard, playerDebug }) {
+    function update({ frameStats, rendererStats, snapshotStats, currentPlayer, currentPlayerId, catchStatus, leaderboard, playerDebug }) {
         updateLives(currentPlayer);
+        catchAlert.update(catchStatus);
         updateLeaderboard(leaderboard, currentPlayerId);
 
         if (debugLevel <= 0) {
@@ -197,6 +201,124 @@ export function createHud({ debugLevel }) {
         setText(debugInputAccepted, formatBoolean(debug && debug.inputAccepted));
         setText(debugBoundaryDecision, formatText(debug && debug.boundarySlideDecision));
     }
+}
+
+export function createCatchAlert() {
+    const element = document.createElement("section");
+    const edge = document.createElement("div");
+    const statuses = document.createElement("div");
+    const threat = createCatchAlertStatus("threat", "!");
+    const risk = createCatchAlertStatus("risk", "↩");
+    let lastSignature = null;
+
+    element.id = "catchAlert";
+    element.className = "catch-alert";
+    element.hidden = true;
+    element.setAttribute("aria-live", "polite");
+    element.setAttribute("aria-atomic", "true");
+    edge.className = "catch-alert__edge";
+    edge.setAttribute("aria-hidden", "true");
+    statuses.className = "catch-alert__statuses";
+    statuses.append(threat.element, risk.element);
+    element.append(edge, statuses);
+
+    return {
+        element,
+        update
+    };
+
+    function update(status) {
+        const normalized = normalizeCatchStatus(status);
+        const signature = JSON.stringify(normalized);
+
+        if (signature === lastSignature) {
+            return;
+        }
+
+        lastSignature = signature;
+        const hasThreat = normalized.threatCount > 0;
+        const hasRisk = normalized.counterTargetCount > 0;
+
+        element.hidden = !hasThreat && !hasRisk;
+        element.classList.toggle("has-threat", hasThreat);
+        element.classList.toggle("has-risk", hasRisk);
+        element.classList.toggle("is-threat-armed", hasThreat && normalized.threatArmed);
+        element.classList.toggle("is-risk-armed", hasRisk && normalized.counterRiskArmed);
+        updateCatchAlertStatus(threat, {
+            count: normalized.threatCount,
+            detail: normalized.threatArmed
+                ? "ARMADO · Retorne para contra-atacar"
+                : `Contra-ataque em ${formatCounterattackTime(normalized.threatRemainingMs)}`,
+            title: "VOCÊ ESTÁ MARCADO"
+        });
+        updateCatchAlertStatus(risk, {
+            count: normalized.counterTargetCount,
+            detail: normalized.counterRiskArmed
+                ? "ARMADO · Confirme antes do retorno"
+                : `Contra-ataque rival em ${formatCounterattackTime(normalized.counterRiskRemainingMs)}`,
+            title: "ALVO MARCADO"
+        });
+    }
+}
+
+function createCatchAlertStatus(type, iconText) {
+    const element = document.createElement("div");
+    const icon = document.createElement("span");
+    const copy = document.createElement("span");
+    const title = document.createElement("strong");
+    const detail = document.createElement("small");
+
+    element.className = `catch-alert__status catch-alert__status--${type}`;
+    element.hidden = true;
+    icon.className = "catch-alert__icon";
+    icon.textContent = iconText;
+    icon.setAttribute("aria-hidden", "true");
+    copy.className = "catch-alert__copy";
+    copy.append(title, detail);
+    element.append(icon, copy);
+
+    return {
+        detail,
+        element,
+        title
+    };
+}
+
+function updateCatchAlertStatus(status, options) {
+    status.element.hidden = options.count <= 0;
+    status.title.textContent = options.count > 1
+        ? `${options.title} ×${options.count}`
+        : options.title;
+    status.detail.textContent = options.detail;
+}
+
+function normalizeCatchStatus(status) {
+    const value = status && typeof status === "object" ? status : {};
+
+    return {
+        counterTargetCount: normalizeCount(value.counterTargetCount),
+        counterRiskArmed: Boolean(value.counterRiskArmed),
+        counterRiskRemainingMs: normalizeRemainingMs(value.counterRiskRemainingMs),
+        threatCount: normalizeCount(value.threatCount),
+        threatArmed: Boolean(value.threatArmed),
+        threatRemainingMs: normalizeRemainingMs(value.threatRemainingMs)
+    };
+}
+
+function normalizeCount(value) {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function normalizeRemainingMs(value) {
+    return Number.isFinite(value) ? Math.max(0, Math.ceil(value)) : null;
+}
+
+function formatCounterattackTime(remainingMs) {
+    if (!Number.isFinite(remainingMs)) {
+        return "—";
+    }
+
+    return `${(remainingMs / 1000).toFixed(1).replace(".", ",")} s`;
 }
 
 function formatPercent(value) {

@@ -15,9 +15,11 @@ const { createNumberSystem } = require("../systems/numberSystem");
 const { createSpawn } = require("../systems/spawnSystem");
 const {
     createRoomRuntimeConfig,
-    serializeRoomSettings
+    serializeRoomSettings,
+    validateRoomCustomOptions
 } = require("./roomSettings");
 const { getPublicMatchCandidates: selectPublicMatchCandidates } = require("./matchmaking");
+const { resetSocketSnapshotState } = require("./snapshotState");
 
 const rooms = new Map();
 const socketIdToRoomCode = new Map();
@@ -32,6 +34,12 @@ function createRoom(io, options = {}) {
 
     if (rooms.has(roomCode)) {
         return { success: false, message: "Room code already exists." };
+    }
+
+    const customOptionsError = validateRoomCustomOptions(options.customOptions);
+
+    if (customOptionsError) {
+        return { success: false, message: customOptionsError };
     }
 
     const isPrivate = Boolean(options.isPrivate);
@@ -64,6 +72,8 @@ function createRoom(io, options = {}) {
         snapshotLoopInterval: null,
         isPrivate,
         isSystemRoom,
+        allowBots: runtimeConfig.customOptions.allowBots,
+        maxPlayers: runtimeConfig.customOptions.maxPlayers,
         runtimeConfig,
         passwordHash: null,
         passwordSalt: null
@@ -90,7 +100,7 @@ function createRoom(io, options = {}) {
         players,
         territories,
         numberSystem,
-        botCount: options.botCount,
+        botCount: runtimeConfig.customOptions.allowBots ? options.botCount : 0,
         botDifficulty: options.botDifficulty || difficultyKey,
         runtimeConfig
     });
@@ -167,7 +177,7 @@ function joinRoom(roomCode, socket, password = "") {
 
     const alreadyJoined = socket.data.roomCode === normalizedRoomCode && room.players.has(socket.id);
 
-    if (!alreadyJoined && getHumanPlayerCount(room.players) >= config.rooms.maxPlayersPerRoom) {
+    if (!alreadyJoined && getHumanPlayerCount(room.players) >= room.maxPlayers) {
         return { success: false, message: "Room is full." };
     }
 
@@ -268,6 +278,8 @@ function listRooms() {
             playerCount: getHumanPlayerCount(room.players),
             difficulty: room.difficulty || "medium",
             isPrivate: Boolean(room.isPrivate),
+            allowBots: room.allowBots,
+            maxPlayers: room.maxPlayers,
             settings: serializeRoomSettings(room.runtimeConfig),
             createdAt: room.createdAt
         }));
@@ -275,12 +287,6 @@ function listRooms() {
 
 function getPublicMatchCandidates(difficulty) {
     return selectPublicMatchCandidates(rooms, difficulty);
-}
-
-function resetSocketSnapshotState(socket) {
-    socket.data.snapshotState = null;
-    socket.data.pendingReliableSnapshot = null;
-    socket.data.nextReliableSnapshotId = 0;
 }
 
 function generateRoomCode() {

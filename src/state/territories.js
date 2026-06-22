@@ -11,9 +11,10 @@ const {
     isPointInPolygon,
     isPolygonInsidePolygon,
     serializePolygon,
-    subtractPolygon,
+    subtractPolygonComponents,
     unionPolygons
 } = require("../utils/geometry");
+const { selectRetainedTerritoryPolygon } = require("./territoryRetention");
 const { getHighResolutionTime } = require("../utils/time");
 
 const territoryChangeAreaEpsilon = 1;
@@ -177,17 +178,21 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         capturedOperation = capturedOperation || getCapturedOperationPolygon(capturedPolygon, captureApply, diagnostics);
         const operationSubjectArea = calculatePolygonArea(subjectOperation.polygon);
         const subtract = measureCaptureApplyOperation(diagnostics, "captureApplySubtract", () => (
-            subtractPolygon(subjectOperation.polygon, capturedOperation.polygon)
+            subtractPolygonComponents(subjectOperation.polygon, capturedOperation.polygon)
         ));
-        const resultPointCount = getPolygonPointCount(subtract.value);
-        const operationResultArea = calculatePolygonArea(subtract.value);
+        const retainedPolygon = selectRetainedTerritoryPolygon(
+            subtract.value,
+            options.players && options.players.get(playerId)
+        );
+        const resultPointCount = getPolygonPointCount(retainedPolygon);
+        const operationResultArea = calculatePolygonArea(retainedPolygon);
         const operationAreaDelta = Math.abs(operationSubjectArea - operationResultArea);
         addCaptureApplyCount(captureApply, "subtractOperationPointCount", subjectOperation.outputPointCount);
         addCaptureApplyCount(captureApply, "subtractOperationClippingPointCount", capturedOperation.outputPointCount);
         addCaptureApplyCount(captureApply, "subtractResultPointCount", resultPointCount);
         const changed = operationAreaDelta > territoryChangeAreaEpsilon
             && measureCaptureApplyPhase(diagnostics, "captureApplyUpdateTerritory", () => (
-                updateTerritoryPolygon(otherTerritory, subtract.value)
+                updateTerritoryPolygon(otherTerritory, retainedPolygon)
             ));
 
         recordSlowestCaptureApplySubtract(captureApply, {

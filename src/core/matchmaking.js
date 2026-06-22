@@ -21,12 +21,20 @@ function getPublicMatchCandidates(rooms, rawDifficulty, options = {}) {
 }
 
 function isPublicMatchCandidate(room, humanPlayerCount, difficulty, maxPlayers) {
+    const roomMaxPlayers = normalizeMaxPlayers(
+        room && room.maxPlayers !== undefined
+            ? room.maxPlayers
+            : room && room.runtimeConfig && room.runtimeConfig.customOptions
+                ? room.runtimeConfig.customOptions.maxPlayers
+                : maxPlayers
+    );
+
     return Boolean(room)
         && !room.hiddenFromList
         && !room.isPrivate
         && !room.isSystemRoom
         && normalizeDifficulty(room.difficulty) === difficulty
-        && humanPlayerCount < maxPlayers;
+        && humanPlayerCount < roomMaxPlayers;
 }
 
 function compareCandidates(first, second) {

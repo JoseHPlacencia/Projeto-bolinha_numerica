@@ -1,4 +1,5 @@
 import { loadGameConfig } from "./js/config.js";
+import { createAnnouncementsPanel } from "./js/announcements.js";
 import { startClient } from "./js/gameClient.js";
 import { createMenuBackground } from "./js/menuBackground.js";
 import {
@@ -33,6 +34,7 @@ const themeButton = document.getElementById("btn-theme");
 const fpsLimitSelect = document.getElementById("fpsLimitSelect");
 const performanceModeCheckbox = document.getElementById("performanceModeCheckbox");
 const performanceModeHint = document.getElementById("performanceModeHint");
+const announcementsPanel = document.getElementById("announcementsPanel");
 const mainMenu = document.getElementById("mainMenu");
 const gameLayer = document.getElementById("gameLayer");
 const gameOverPanel = document.getElementById("gameOverPanel");
@@ -53,6 +55,7 @@ let selectedFpsLimit = DEFAULT_FPS_LIMIT;
 let selectedPerformanceMode = DEFAULT_PERFORMANCE_MODE;
 let selectedTheme = normalizeVisualTheme(document.documentElement.dataset.theme);
 let activeGameConfig = null;
+let announcementsController = null;
 let gameClient = null;
 let menuBackground = null;
 let pendingAutoStart = null;
@@ -80,6 +83,7 @@ async function initializeClient() {
             onJoinFailure: handleJoinFailure,
             onJoinStart: handleRoomJoinStart,
             onJoinSuccess: handleJoinSuccess,
+            requestFullscreen: requestMobileFullscreen,
             requestGameplayReady
         });
 
@@ -91,6 +95,7 @@ async function initializeClient() {
 }
 
 function initializeMenu() {
+    announcementsController = createAnnouncementsPanel(announcementsPanel);
     loadPreferences();
     attachColorPicker();
     attachDifficultyButtons();
@@ -657,6 +662,7 @@ function showMenu() {
     statusMessage.hide();
     setMenuBusy(false);
     menuBackground?.start();
+    announcementsController?.refresh();
 }
 
 function showGameOver(data = {}) {
@@ -678,6 +684,11 @@ function showGameOver(data = {}) {
         gameOverMessage.textContent = eliminatedBy
             ? `Você foi englobado pela captura de ${eliminatedBy} e ficou sem vidas.`
             : "Você foi englobado por uma captura e ficou sem vidas.";
+    } else if (data.reason === "counterattack") {
+        if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
+        gameOverMessage.textContent = eliminatedBy
+            ? `${eliminatedBy} completou uma captura e contra-atacou sua marca.`
+            : "Um jogador completou uma captura e contra-atacou sua marca.";
     } else if (data.reason === "noRespawnSpace") {
         if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
         gameOverMessage.textContent = "Seu território não tinha espaço suficiente para respawn.";

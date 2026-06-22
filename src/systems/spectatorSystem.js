@@ -1,4 +1,5 @@
 const config = require("../config/gameConfig");
+const { resetSocketSnapshotState } = require("../core/snapshotState");
 const { calculatePolygonArea } = require("../utils/geometry");
 
 function activateSpectator(
@@ -20,7 +21,7 @@ function activateSpectator(
         preferredFollowId,
         runtimeConfig
     );
-    resetSpectatorSnapshotState(socket);
+    resetSocketSnapshotState(socket);
 
     return socket.data.spectatorFollowId;
 }
@@ -53,7 +54,7 @@ function redirectSpectatorsAfterPlayerExit(
             eliminatorId,
             runtimeConfig
         );
-        resetSpectatorSnapshotState(socket);
+        resetSocketSnapshotState(socket);
     }
 }
 
@@ -70,7 +71,7 @@ function resolveSpectatorFollowId(socket, players, territories, runtimeConfig = 
 
     if (socket && socket.data && followId !== currentFollowId) {
         socket.data.spectatorFollowId = followId;
-        resetSpectatorSnapshotState(socket);
+        resetSocketSnapshotState(socket);
     }
 
     return followId;
@@ -120,12 +121,6 @@ function pickHighestRankedPlayerId(players, territories, runtimeConfig = null) {
     }
 
     return highestRankedPlayer ? highestRankedPlayer.id : null;
-}
-
-function resetSpectatorSnapshotState(socket) {
-    socket.data.snapshotState = null;
-    socket.data.pendingReliableSnapshot = null;
-    socket.data.nextReliableSnapshotId = 0;
 }
 
 module.exports = {

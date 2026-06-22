@@ -54,6 +54,7 @@ export function startClient(gameConfig, options = {}) {
         onJoinStart: options.onJoinStart,
         onJoinSuccess: handleRoomJoinSuccess,
         onRoomsList: options.onRoomsList,
+        requestFullscreen: options.requestFullscreen,
         requestGameplayReady: options.requestGameplayReady
     });
     window.addEventListener("resize", resizeCanvases);
@@ -159,6 +160,7 @@ export function startClient(gameConfig, options = {}) {
             snapshotStats: snapshots.getDebugState(),
             currentPlayer,
             currentPlayerId: cameraPlayerId,
+            catchStatus: state && state.catchStatus,
             leaderboard: state && state.leaderboard,
             playerDebug: currentPlayer && currentPlayer.debug
         });

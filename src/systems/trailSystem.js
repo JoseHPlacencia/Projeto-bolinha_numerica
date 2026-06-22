@@ -1,5 +1,8 @@
 const config = require("../config/gameConfig");
-const { getPlayerTerritoryPolygon } = require("../state/territories");
+const {
+    getPlayerTerritoryPolygon,
+    isPointOwnedByPlayer
+} = require("../state/territories");
 const {
     calculatePolygonArea,
     createPolygonFromPoints,
@@ -9,7 +12,10 @@ const {
 } = require("../utils/geometry");
 const { distanceBetween } = require("../utils/math");
 const { getHighResolutionTime } = require("../utils/time");
-const { handlePlayerLifeLoss } = require("./catchModeSystem");
+const {
+    clearCatchEliminationMarksForTarget,
+    handlePlayerLifeLoss
+} = require("./catchModeSystem");
 const { captureClosedTrail } = require("./dominationSystem");
 
 const geometryEpsilon = 1e-7;
@@ -187,6 +193,12 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
         addTrailDiagnosticCount(diagnostics, "activeTrailPlayers", 1);
     }
 
+    if (isInsideOwnTerritory && !hasTrailSegment) {
+        measureTrailPhase(diagnostics, "clearEliminationMarks", () => {
+            clearCatchEliminationMarksForTarget(players, player.id);
+        });
+    }
+
     player.lastLeftTrailPoint = clonePoint(sample.leftPoint);
     player.lastRightTrailPoint = clonePoint(sample.rightPoint);
 
@@ -204,7 +216,7 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
 
     if (!isInsideOwnTerritory) {
         measureTrailPhase(diagnostics, "ownerCrossing", () => {
-            markCrossedTrailOwners(player, players, previousSample, sample, diagnostics);
+            markCrossedTrailOwners(player, players, territories, previousSample, sample, diagnostics);
         });
     }
 
@@ -223,11 +235,9 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
             }
         }
 
-        if (!capturedPolygon) {
-            measureTrailPhase(diagnostics, "clearEliminationMarks", () => {
-                clearCatchEliminationMarksForTrailOwner(players, player.id);
-            });
-        }
+        measureTrailPhase(diagnostics, "clearEliminationMarks", () => {
+            clearCatchEliminationMarksForTarget(players, player.id);
+        });
 
         measureTrailPhase(diagnostics, "clearTrail", () => {
             addTrailDiagnosticCount(diagnostics, "clearTrailCount", 1);
@@ -437,13 +447,22 @@ function hasSelfTrailCollision(player, previousSample, sample, diagnostics = nul
     );
 }
 
-function markCrossedTrailOwners(player, players, previousSample, sample, diagnostics = null) {
+function markCrossedTrailOwners(player, players, territories, previousSample, sample, diagnostics = null) {
     if (!previousSample.leftPoint || !previousSample.rightPoint) {
         return;
     }
 
     for (const trailOwner of players.values()) {
-        if (trailOwner.id === player.id || !hasAnyTrailSegment(trailOwner)) {
+        if (
+            trailOwner.id === player.id
+            || !hasAnyTrailSegment(trailOwner)
+            || isPointOwnedByPlayer(
+                territories,
+                trailOwner.id,
+                trailOwner.x,
+                trailOwner.y
+            )
+        ) {
             continue;
         }
 
@@ -452,14 +471,6 @@ function markCrossedTrailOwners(player, players, previousSample, sample, diagnos
         if (doesPlayerMovementCrossTrailOwner(previousSample, sample, trailOwner, diagnostics)) {
             addTrailDiagnosticCount(diagnostics, "trailOwnerHits", 1);
             player.queueCatchEliminationTarget(trailOwner.id);
-        }
-    }
-}
-
-function clearCatchEliminationMarksForTrailOwner(players, trailOwnerId) {
-    for (const player of players.values()) {
-        if (player.id !== trailOwnerId) {
-            player.clearCatchEliminationTarget(trailOwnerId);
         }
     }
 }

@@ -8,6 +8,14 @@ const {
     redirectSpectatorsAfterPlayerExit
 } = require("./spectatorSystem");
 
+function createCatchCombatFrame(now = Date.now()) {
+    return {
+        damagedPlayerIds: new Set(),
+        intents: [],
+        now: Number.isFinite(now) ? now : Date.now()
+    };
+}
+
 function handleNumberCollected(players, territories, collection, context = {}) {
     const player = players.get(collection.playerId);
 
@@ -27,7 +35,15 @@ function eliminatePendingTargets(players, territories, attacker, context) {
         const target = players.get(targetId);
 
         if (target) {
-            eliminatePlayer(players, territories, attacker, target, context);
+            if (context.catchCombatFrame) {
+                context.catchCombatFrame.intents.push({
+                    attackerId: attacker.id,
+                    targetId: target.id,
+                    type: "elimination"
+                });
+            } else {
+                eliminatePlayer(players, territories, attacker, target, context);
+            }
         }
     }
 }
@@ -53,6 +69,21 @@ function handlePlayerLifeLoss(players, territories, target, context = {}, option
         return false;
     }
 
+    if (
+        options.reason !== "captured"
+        && isPlayerInsideOwnTerritory(territories, target)
+    ) {
+        clearPendingTarget(players, target.id);
+        return false;
+    }
+
+    const combatFrame = context.catchCombatFrame;
+
+    if (combatFrame && combatFrame.damagedPlayerIds.has(target.id)) {
+        return false;
+    }
+
+    combatFrame?.damagedPlayerIds.add(target.id);
     clearPendingTarget(players, target.id);
 
     if (target.loseLife() > 0) {
@@ -73,6 +104,150 @@ function handlePlayerLifeLoss(players, territories, target, context = {}, option
 
     endPlayerGame(players, territories, target, context, options);
     return true;
+}
+
+function handleSuccessfulTrailCapture(players, territories, trailOwner, context = {}) {
+    if (!trailOwner) {
+        return;
+    }
+
+    const now = getCatchCombatTime(context);
+    const graceMs = getCounterattackGraceMs(context, trailOwner);
+
+    for (const marker of players.values()) {
+        if (marker.id === trailOwner.id
+            || !marker.pendingCatchEliminationTargets.has(trailOwner.id)) {
+            continue;
+        }
+
+        const markedAt = marker.getCatchEliminationMarkedAt(trailOwner.id);
+        const isArmed = Number.isFinite(markedAt) && now - markedAt >= graceMs;
+
+        if (context.catchCombatFrame) {
+            context.catchCombatFrame.intents.push({
+                attackerId: trailOwner.id,
+                markerId: marker.id,
+                targetId: marker.id,
+                trailOwnerId: trailOwner.id,
+                type: isArmed ? "counterattack" : "counterCancel"
+            });
+            continue;
+        }
+
+        marker.clearCatchEliminationTarget(trailOwner.id);
+
+        if (isArmed) {
+            applyCatchLifeLossIntent(players, territories, {
+                attackerId: trailOwner.id,
+                targetId: marker.id,
+                type: "counterattack"
+            }, context);
+        }
+    }
+}
+
+function resolveCatchCombatFrame(players, territories, context = {}) {
+    const combatFrame = context.catchCombatFrame;
+
+    if (!combatFrame || combatFrame.intents.length === 0) {
+        return;
+    }
+
+    const intents = combatFrame.intents.splice(0);
+    const cancelledIntents = findSimultaneousCounterPairs(intents);
+
+    for (const intent of intents) {
+        if (intent.type === "counterattack" || intent.type === "counterCancel") {
+            players.get(intent.markerId)?.clearCatchEliminationTarget(intent.trailOwnerId);
+        }
+    }
+
+    for (let index = 0; index < intents.length; index++) {
+        if (cancelledIntents.has(index)) {
+            continue;
+        }
+
+        const intent = intents[index];
+
+        if (intent.type === "counterCancel") {
+            continue;
+        }
+
+        applyCatchLifeLossIntent(players, territories, intent, context);
+    }
+}
+
+function findSimultaneousCounterPairs(intents) {
+    const cancelled = new Set();
+
+    for (let firstIndex = 0; firstIndex < intents.length; firstIndex++) {
+        const first = intents[firstIndex];
+
+        if (first.type !== "elimination") {
+            continue;
+        }
+
+        for (let secondIndex = 0; secondIndex < intents.length; secondIndex++) {
+            const second = intents[secondIndex];
+
+            if ((second.type === "counterattack" || second.type === "counterCancel")
+                && first.attackerId === second.targetId
+                && first.targetId === second.attackerId) {
+                cancelled.add(firstIndex);
+                cancelled.add(secondIndex);
+            }
+        }
+    }
+
+    return cancelled;
+}
+
+function applyCatchLifeLossIntent(players, territories, intent, context) {
+    const attacker = players.get(intent.attackerId);
+    const target = players.get(intent.targetId);
+
+    if (!attacker || !target || attacker.id === target.id) {
+        return false;
+    }
+
+    if (
+        (intent.type === "elimination" || intent.type === "counterattack")
+        && isPlayerInsideOwnTerritory(territories, target)
+    ) {
+        clearPendingTarget(players, target.id);
+        return false;
+    }
+
+    if (context.catchCombatFrame?.damagedPlayerIds.has(target.id)) {
+        return false;
+    }
+
+    attacker.addElimination();
+    handlePlayerLifeLoss(players, territories, target, context, {
+        attacker,
+        reason: intent.type === "counterattack" ? "counterattack" : "eliminated"
+    });
+    return true;
+}
+
+function getCatchCombatTime(context) {
+    return Number.isFinite(context.catchCombatFrame && context.catchCombatFrame.now)
+        ? context.catchCombatFrame.now
+        : Number.isFinite(context.now)
+            ? context.now
+            : Date.now();
+}
+
+function getCounterattackGraceMs(context, player) {
+    const runtimeConfig = context.runtimeConfig || player.runtimeConfig;
+    const configuredValue = runtimeConfig
+        && runtimeConfig.gameMode
+        && runtimeConfig.gameMode.catch
+        && runtimeConfig.gameMode.catch.counterattackGraceMs;
+
+    return Number.isFinite(configuredValue) && configuredValue >= 0
+        ? configuredValue
+        : 1200;
 }
 
 function findRespawnPointForPlayer(territories, player) {
@@ -183,9 +358,17 @@ function clearPendingTarget(players, targetId) {
     }
 }
 
+function clearCatchEliminationMarksForTarget(players, targetId) {
+    clearPendingTarget(players, targetId);
+}
+
 module.exports = {
+    clearCatchEliminationMarksForTarget,
+    createCatchCombatFrame,
     endPlayerGame,
     handleNumberCollected,
     handlePlayerLifeLoss,
-    handlePlayerVictory
+    handlePlayerVictory,
+    handleSuccessfulTrailCapture,
+    resolveCatchCombatFrame
 };

@@ -61,6 +61,10 @@ function normalizeRoomCustomOptions(rawOptions = {}, difficulty = config.gameMod
     }
 
     normalized.lives = normalizeLives(source.lives, difficulty);
+    normalized.maxPlayers = normalizeMaxPlayers(source.maxPlayers);
+    normalized.allowBots = typeof source.allowBots === "boolean"
+        ? source.allowBots
+        : config.roomCustomOptions.allowBotsDefault !== false;
     return Object.freeze(normalized);
 }
 
@@ -92,6 +96,40 @@ function normalizeLives(value, difficulty) {
     return Number.isInteger(difficultyLives)
         ? clamp(difficultyLives, config.roomCustomOptions.lives.min, config.roomCustomOptions.lives.max)
         : 2;
+}
+
+function normalizeMaxPlayers(value) {
+    const numericValue = Number(value);
+    const playerOptions = config.roomCustomOptions.players;
+
+    if (!Number.isInteger(numericValue)) {
+        return playerOptions.default;
+    }
+
+    return clamp(numericValue, playerOptions.min, playerOptions.max);
+}
+
+function validateRoomCustomOptions(rawOptions = {}) {
+    if (!rawOptions || typeof rawOptions !== "object") {
+        return null;
+    }
+
+    if (rawOptions.maxPlayers !== undefined) {
+        const maxPlayers = rawOptions.maxPlayers;
+        const playerOptions = config.roomCustomOptions.players;
+
+        if (!Number.isInteger(maxPlayers)
+            || maxPlayers < playerOptions.min
+            || maxPlayers > playerOptions.max) {
+            return `A quantidade de jogadores deve ser um número inteiro de ${playerOptions.min} a ${playerOptions.max}.`;
+        }
+    }
+
+    if (rawOptions.allowBots !== undefined && typeof rawOptions.allowBots !== "boolean") {
+        return "A opção de permitir bots deve ser verdadeira ou falsa.";
+    }
+
+    return null;
 }
 
 function serializeRoomSettings(runtimeConfig) {
@@ -154,5 +192,6 @@ module.exports = {
     createRoomRuntimeConfig,
     normalizeRoomCustomOptions,
     scaleRotationStrength,
-    serializeRoomSettings
+    serializeRoomSettings,
+    validateRoomCustomOptions
 };

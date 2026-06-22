@@ -88,6 +88,7 @@
 :root[data-theme="light"] .room-icon-button,
 :root[data-theme="light"] .room-slider span,
 :root[data-theme="light"] .room-slider strong,
+:root[data-theme="light"] .room-number-option strong,
 :root[data-theme="light"] .room-details__list dd,
 :root[data-theme="light"] .rooms-list__empty,
 :root[data-theme="light"] .room-modal__input-label {
@@ -119,6 +120,10 @@
 
 :root[data-theme="light"] .room-options__group {
     background: rgba(16, 37, 54, 0.04);
+}
+
+:root[data-theme="light"] .room-number-option input {
+    background: rgba(16, 37, 54, 0.05);
 }
 
 :root[data-theme="light"] .room-details__list div {

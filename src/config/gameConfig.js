@@ -101,6 +101,7 @@ const player = Object.freeze({
 const gameMode = Object.freeze({
     mode: "catch",
     catch: Object.freeze({
+        counterattackGraceMs: 1200,
         defaultDifficulty: "medium",
         livesByDifficulty: Object.freeze({
             easy: 3,
@@ -193,6 +194,8 @@ const network = Object.freeze({
     diagnosticsSlowBufferMs: 150,
     snapshotPayloadBudgetBytes: 42000,
     interestMargin: 800,
+    interestExitMargin: 1200,
+    interestRetentionMs: 500,
     maxViewportWorldWidth: 3200,
     maxViewportWorldHeight: 2200,
     cullPlayerPositionsByViewport: false,
@@ -206,7 +209,7 @@ const network = Object.freeze({
     reliableTrailUpdatesEnabled: true,
     coordinatePrecision: 10,
     anglePrecision: 1000,
-    forcedFullSyncsEnabled: false,
+    forcedFullSyncsEnabled: true,
     volatileSnapshotsWhileReliablePendingEnabled: true,
     reliableSnapshotAckTimeoutMs: 3000,
     reliableSnapshotRetryMs: 4000,
@@ -261,6 +264,12 @@ const roomOptionMultipliers = Object.freeze([0.5, 0.75, 1, 1.5, 2]);
 
 const roomCustomOptions = Object.freeze({
     multipliers: roomOptionMultipliers,
+    players: Object.freeze({
+        default: rooms.maxPlayersPerRoom,
+        min: 1,
+        max: rooms.maxPlayersPerRoom
+    }),
+    allowBotsDefault: true,
     lives: Object.freeze({
         min: 1,
         max: 5
