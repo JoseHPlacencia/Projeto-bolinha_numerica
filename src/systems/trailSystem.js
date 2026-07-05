@@ -288,7 +288,10 @@ function startSideSegment(player, side, currentPoint, territoryPolygon) {
     const segment = [];
 
     appendPoint(segment, boundaryPoint, true);
-    appendPoint(segment, currentPoint, true);
+    appendTrailEdgePoint(player, segment, currentPoint, {
+        force: true,
+        interpolate: Boolean(previousPoint)
+    });
     player[side.segmentsKey].push(segment);
     player[side.activeKey] = true;
 
@@ -315,7 +318,12 @@ function closeActiveSideSegment(player, side, currentPoint, territoryPolygon) {
         ? contact.point
         : findClosestBoundaryPoint(territoryPolygon, previousPoint || currentPoint);
 
-    appendPoint(segment, boundaryPoint, true);
+    const previousLength = segment.length;
+
+    appendTrailEdgePoint(player, segment, boundaryPoint, {
+        force: true,
+        interpolate: Boolean(previousPoint)
+    });
     player[side.activeKey] = false;
 
     if (segment.length < 2) {
@@ -323,7 +331,7 @@ function closeActiveSideSegment(player, side, currentPoint, territoryPolygon) {
         return [];
     }
 
-    return previousPoint ? [previousPoint, boundaryPoint] : segment.slice();
+    return previousLength > 0 ? segment.slice(previousLength - 1) : segment.slice();
 }
 
 function appendPointToActiveSegment(player, side, point, force) {
@@ -335,11 +343,15 @@ function appendPointToActiveSegment(player, side, point, force) {
 
     const previousPoint = segment[segment.length - 1];
 
-    if (!appendPoint(segment, point, force)) {
+    const previousLength = segment.length;
+
+    if (!appendTrailEdgePoint(player, segment, point, { force })) {
         return [];
     }
 
-    return previousPoint ? [previousPoint, point] : [point];
+    return previousPoint && previousLength > 0
+        ? segment.slice(previousLength - 1)
+        : segment.slice(previousLength);
 }
 
 function updateTrailFill(player, sample, previousSample, territoryPolygon, leftUpdate, rightUpdate, diagnostics = null) {
@@ -384,7 +396,14 @@ function updateTrailFill(player, sample, previousSample, territoryPolygon, leftU
     }
 }
 
-function appendPoint(points, point, force) {
+function appendTrailEdgePoint(player, points, point, options = {}) {
+    return appendPoint(points, point, Boolean(options.force), {
+        interpolate: options.interpolate !== false,
+        spacing: getTrailPointSpacing(player)
+    });
+}
+
+function appendPoint(points, point, force, options = {}) {
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
         return false;
     }
@@ -393,10 +412,54 @@ function appendPoint(points, point, force) {
 
     if (lastPoint) {
         const distance = distanceBetween(point.x, point.y, lastPoint.x, lastPoint.y);
+        const spacing = getNormalizedTrailPointSpacing(options.spacing);
 
-        if (distance <= Number.EPSILON || (!force && distance < getTrailPointSpacing())) {
+        if (distance <= Number.EPSILON || (!force && distance < spacing)) {
             return false;
         }
+
+        if (options.interpolate) {
+            return appendInterpolatedPoints(points, lastPoint, point, spacing, force);
+        }
+    }
+
+    appendRawPoint(points, point);
+
+    return true;
+}
+
+function appendInterpolatedPoints(points, startPoint, endPoint, spacing, force) {
+    const distance = distanceBetween(endPoint.x, endPoint.y, startPoint.x, startPoint.y);
+    const safeSpacing = getNormalizedTrailPointSpacing(spacing);
+    const steps = Math.floor(distance / safeSpacing);
+    const previousLength = points.length;
+
+    for (let step = 1; step <= steps; step++) {
+        const t = (safeSpacing * step) / distance;
+
+        if (t >= 1 - geometryEpsilon) {
+            appendRawPoint(points, endPoint);
+            return points.length > previousLength;
+        }
+
+        appendRawPoint(points, {
+            x: startPoint.x + (endPoint.x - startPoint.x) * t,
+            y: startPoint.y + (endPoint.y - startPoint.y) * t
+        });
+    }
+
+    if (force) {
+        appendRawPoint(points, endPoint);
+    }
+
+    return points.length > previousLength;
+}
+
+function appendRawPoint(points, point) {
+    const lastPoint = points[points.length - 1];
+
+    if (lastPoint && arePointsEqual(lastPoint, point)) {
+        return false;
     }
 
     points.push({
@@ -593,11 +656,22 @@ function getRecentSelfTrailCollisionPointSkip(player, movingSide, storedSide) {
 
 function isPlayerSlidingOnMapBoundary(player) {
     return isBoundarySlideDirection(player.boundarySlideDirection)
-        && Math.hypot(player.x, player.y) >= getMapMovementLimit(player) - Number.EPSILON;
+        && Math.hypot(player.x, player.y) >= getMapMovementLimit(player) - getBoundarySlideTolerance(player);
 }
 
 function isBoundarySlideDirection(value) {
     return value === -1 || value === 1;
+}
+
+function getBoundarySlideTolerance(player = null) {
+    const runtimeConfig = getRuntimeConfig(player);
+    const configuredTolerance = Number(
+        runtimeConfig.movement && runtimeConfig.movement.boundaryTouchTolerance
+    );
+
+    return Number.isFinite(configuredTolerance) && configuredTolerance > 0
+        ? configuredTolerance
+        : runtimeConfig.world.playerSize / 2;
 }
 
 function getMapMovementLimit(player = null) {
@@ -673,7 +747,25 @@ function createTrailSample(player) {
 }
 
 function getTrailPointSpacing(player = null) {
-    return getRuntimeConfig(player).territory.trailPointSpacing;
+    const territoryConfig = getRuntimeConfig(player).territory;
+    const baseSpacing = getNormalizedTrailPointSpacing(territoryConfig.trailPointSpacing);
+
+    if (!isPlayerSlidingOnMapBoundary(player)) {
+        return baseSpacing;
+    }
+
+    return Math.min(
+        baseSpacing,
+        getNormalizedTrailPointSpacing(territoryConfig.boundarySlideTrailPointSpacing, baseSpacing)
+    );
+}
+
+function getNormalizedTrailPointSpacing(value, fallback = config.territory.trailPointSpacing) {
+    const spacing = Number(value);
+
+    return Number.isFinite(spacing) && spacing > Number.EPSILON
+        ? spacing
+        : Number(fallback) || 1;
 }
 
 function getRuntimeConfig(player = null) {

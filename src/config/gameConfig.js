@@ -62,7 +62,8 @@ const territory = Object.freeze({
     operationSimplifySubjectMinPoints: 512,
     operationSimplifySubjectTargetPoints: 384,
     operationSimplifyTolerance: 4,
-    trailPointSpacing: 14,
+    boundarySlideTrailPointSpacing: 5,
+    trailPointSpacing: 15,
     victoryAreaRatio: 0.9995
 });
 
@@ -71,6 +72,7 @@ const movement = Object.freeze({
     boundarySlideExitAlignment: 0.2,
     boundarySlideExitDistance: 1,
     boundaryTouchTolerance: 4,
+    boundarySlideActivationTangentAlignment: 0.85,
     boundarySlideTriggerMinOutwardAlignment: 0.25,
     boundarySlideTriggerPerpendicularPlayerSizeRatio: 2.5,
     boundarySlideTriggerRotationCurveSharpness: 10,

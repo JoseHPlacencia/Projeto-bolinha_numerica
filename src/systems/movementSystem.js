@@ -62,6 +62,11 @@ function rotatePlayerToTargetInput(player, targetInput, deltaTime) {
         : getBoundarySlideTrigger(player, targetAngle);
 
     if (boundarySlideTrigger !== null) {
+        if (boundarySlideTrigger.shouldActivateSlide) {
+            player.angle = boundarySlideTrigger.angle;
+            return;
+        }
+
         const baseAngle = getBoundarySlideTriggerBaseAngle(player, targetAngle, deltaTime);
 
         player.angle = lerpAngle(
@@ -324,7 +329,7 @@ function getBoundaryAwareMovement(player, deltaTime) {
 }
 
 function resolveMapBoundary(player, movementVector, movementAngle = player.angle) {
-    const position = getPlayerPosition(player);
+    const position = getBoundarySlideSurfacePosition(player, getPlayerPosition(player));
     const nextPosition = addVectors(position, movementVector);
     const distanceFromCenter = vectorLength(nextPosition);
     const mapLimit = getMapMovementLimit(player);
@@ -339,15 +344,14 @@ function resolveMapBoundary(player, movementVector, movementAngle = player.angle
         };
     }
 
-    return resolveSlidingBoundary(player, movementVector, movementAngle, nextPosition, distanceFromCenter);
+    return resolveSlidingBoundary(player, position, movementVector, movementAngle, nextPosition, distanceFromCenter);
 }
 
-function resolveSlidingBoundary(player, movementVector, movementAngle, nextPosition, distanceFromCenter) {
+function resolveSlidingBoundary(player, position, movementVector, movementAngle, nextPosition, distanceFromCenter) {
     const wallNormal = scaleVector(nextPosition, 1 / distanceFromCenter);
     const wallPush = dotProduct(movementVector, wallNormal);
 
     if (wallPush > 0) {
-        const position = getPlayerPosition(player);
         const hitTime = getMapBoundaryHitTime(player, position, movementVector);
         const hitPosition = addVectors(position, scaleVector(movementVector, hitTime));
         const hitNormal = getBoundaryNormal(hitPosition) || wallNormal;
@@ -409,11 +413,14 @@ function getBoundarySlideTrigger(player, targetAngle) {
         currentDirection
     );
     const tangent = createBoundaryTangent(wallNormal, slideDirection);
+    const tangentAlignment = getBoundarySlideTangentAlignment(currentDirection, tangent);
 
     return {
         angle: Math.atan2(tangent.y, tangent.x),
         alignment: outwardAlignment,
-        progress: getBoundarySlideTriggerProgress(player, position, triggerRadius)
+        progress: getBoundarySlideTriggerProgress(player, position, triggerRadius),
+        shouldActivateSlide: shouldActivateBoundarySlide(player, position, tangentAlignment),
+        tangentAlignment
     };
 }
 
@@ -610,6 +617,21 @@ function getOutwardBoundaryAlignment(wallNormal, direction) {
     return clamp(dotProduct(direction, wallNormal), 0, 1);
 }
 
+function getBoundarySlideTangentAlignment(direction, tangent) {
+    return clamp(Math.abs(dotProduct(direction, tangent)), 0, 1);
+}
+
+function shouldActivateBoundarySlide(player, position, tangentAlignment) {
+    return isPlayerHitboxTouchingMapBoundary(player, position)
+        && tangentAlignment >= getBoundarySlideActivationTangentAlignment();
+}
+
+function getBoundarySlideActivationTangentAlignment() {
+    const alignment = Number(config.movement.boundarySlideActivationTangentAlignment);
+
+    return Number.isFinite(alignment) ? clamp(alignment, 0, 1) : 0.85;
+}
+
 function createBoundarySlideVector(movementVector, wallNormal, fallbackSlideDirection = null) {
     const wallPush = dotProduct(movementVector, wallNormal);
     const slidingVector = {
@@ -731,6 +753,21 @@ function isNearMapBoundary(player, position, distanceFromBoundary) {
     const mapLimit = getMapMovementLimit(player);
 
     return distanceFromCenter >= mapLimit - distanceFromBoundary - Number.EPSILON;
+}
+
+function getBoundarySlideSurfacePosition(player, position) {
+    if (
+        !isBoundarySlideDirection(player.boundarySlideDirection)
+        || !isPlayerHitboxTouchingMapBoundary(player, position)
+    ) {
+        return position;
+    }
+
+    const wallNormal = getBoundaryNormal(position);
+
+    return wallNormal
+        ? scaleVector(wallNormal, getMapMovementLimit(player))
+        : position;
 }
 
 function getBoundaryNormal(position) {
