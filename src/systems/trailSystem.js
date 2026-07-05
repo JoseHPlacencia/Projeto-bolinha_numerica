@@ -13,6 +13,7 @@ const {
 const { distanceBetween } = require("../utils/math");
 const { getHighResolutionTime } = require("../utils/time");
 const {
+    clearCatchEliminationMarksByMarker,
     clearCatchEliminationMarksForTarget,
     handlePlayerLifeLoss
 } = require("./catchModeSystem");
@@ -196,6 +197,7 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
     if (isInsideOwnTerritory && !hasTrailSegment) {
         measureTrailPhase(diagnostics, "clearEliminationMarks", () => {
             clearCatchEliminationMarksForTarget(players, player.id);
+            clearCatchEliminationMarksByMarker(player);
         });
     }
 
@@ -237,6 +239,7 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
 
         measureTrailPhase(diagnostics, "clearEliminationMarks", () => {
             clearCatchEliminationMarksForTarget(players, player.id);
+            clearCatchEliminationMarksByMarker(player);
         });
 
         measureTrailPhase(diagnostics, "clearTrail", () => {

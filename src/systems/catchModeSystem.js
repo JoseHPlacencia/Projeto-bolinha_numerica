@@ -362,7 +362,14 @@ function clearCatchEliminationMarksForTarget(players, targetId) {
     clearPendingTarget(players, targetId);
 }
 
+function clearCatchEliminationMarksByMarker(marker) {
+    if (marker && typeof marker.clearCatchEliminationTargets === "function") {
+        marker.clearCatchEliminationTargets();
+    }
+}
+
 module.exports = {
+    clearCatchEliminationMarksByMarker,
     clearCatchEliminationMarksForTarget,
     createCatchCombatFrame,
     endPlayerGame,

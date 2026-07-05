@@ -253,6 +253,19 @@ class Player {
         }
     }
 
+    clearCatchEliminationTargets() {
+        if (
+            this.pendingCatchEliminationTargets.size === 0
+            && this.pendingCatchEliminationMarkedAt.size === 0
+        ) {
+            return;
+        }
+
+        this.pendingCatchEliminationTargets.clear();
+        this.pendingCatchEliminationMarkedAt.clear();
+        this.markInfoChanged();
+    }
+
     getCatchEliminationMarkedAt(playerId) {
         const markedAt = this.pendingCatchEliminationMarkedAt.get(playerId);
 
@@ -263,9 +276,7 @@ class Player {
         const targets = [...this.pendingCatchEliminationTargets];
 
         if (targets.length > 0) {
-            this.pendingCatchEliminationTargets.clear();
-            this.pendingCatchEliminationMarkedAt.clear();
-            this.markInfoChanged();
+            this.clearCatchEliminationTargets();
         }
 
         return targets;

@@ -9,7 +9,8 @@ const {
 const {
     createBotManager,
     getBotPlayerCount,
-    getHumanPlayerCount
+    getHumanPlayerCount,
+    getTargetBotCount
 } = require("../systems/botSystem");
 const { createNumberSystem } = require("../systems/numberSystem");
 const { createSpawn } = require("../systems/spawnSystem");
@@ -47,6 +48,9 @@ function createRoom(io, options = {}) {
     const players = new Map();
     const difficultyKey = normalizeRoomDifficulty(options.difficulty);
     const runtimeConfig = createRoomRuntimeConfig(options.customOptions, difficultyKey);
+    const targetBotCount = runtimeConfig.customOptions.allowBots
+        ? getTargetBotCount({ botCount: options.botCount })
+        : 0;
     const numberSystem = createNumberSystem(
         runtimeConfig.world.mapRadius,
         players,
@@ -74,6 +78,7 @@ function createRoom(io, options = {}) {
         isSystemRoom,
         allowBots: runtimeConfig.customOptions.allowBots,
         maxPlayers: runtimeConfig.customOptions.maxPlayers,
+        targetBotCount,
         runtimeConfig,
         passwordHash: null,
         passwordSalt: null
@@ -100,7 +105,7 @@ function createRoom(io, options = {}) {
         players,
         territories,
         numberSystem,
-        botCount: runtimeConfig.customOptions.allowBots ? options.botCount : 0,
+        botCount: targetBotCount,
         botDifficulty: options.botDifficulty || difficultyKey,
         runtimeConfig
     });
@@ -116,7 +121,7 @@ function createRoom(io, options = {}) {
         room.diagnostics.gameLoop,
         {
             onRoomPopulationChanged: () => {
-                io.emit("roomsList", listRooms());
+                handleRoomPopulationChanged(io, roomCode);
             }
         }
     );
@@ -134,9 +139,12 @@ function createBackgroundRoom(io) {
     }
 
     const roomCode = String(backgroundConfig.roomCode || "BOTS").trim().toUpperCase();
+    const existingRoom = rooms.get(roomCode);
 
-    if (rooms.has(roomCode)) {
-        return { success: true, room: rooms.get(roomCode) };
+    if (existingRoom) {
+        const restartResult = restartBackgroundRoomIfNeeded(io, existingRoom);
+
+        return restartResult || { success: true, room: existingRoom };
     }
 
     return createRoom(io, {
@@ -148,6 +156,111 @@ function createBackgroundRoom(io) {
         isSystemRoom: true,
         roomCode
     });
+}
+
+function handleRoomPopulationChanged(io, roomCode) {
+    const room = rooms.get(roomCode);
+
+    if (!room) {
+        return;
+    }
+
+    if (restartBackgroundRoomIfNeeded(io, room)) {
+        return;
+    }
+
+    io?.emit?.("roomsList", listRooms());
+}
+
+function restartBackgroundRoomIfNeeded(io, room) {
+    if (!shouldRestartBackgroundRoom(room)) {
+        return null;
+    }
+
+    return restartBackgroundRoom(io, room.code);
+}
+
+function shouldRestartBackgroundRoom(room) {
+    if (!room || !room.isSystemRoom || room.code !== getBackgroundRoomCode()) {
+        return false;
+    }
+
+    const targetBotCount = getRoomTargetBotCount(room);
+
+    if (targetBotCount <= 0) {
+        return false;
+    }
+
+    return getBotPlayerCount(room.players) * 2 < targetBotCount;
+}
+
+function restartBackgroundRoom(io, roomCode) {
+    const normalizedRoomCode = String(roomCode || "").trim().toUpperCase();
+
+    if (!normalizedRoomCode || !rooms.has(normalizedRoomCode)) {
+        return null;
+    }
+
+    const viewerSockets = getRoomViewerSockets(io, normalizedRoomCode);
+
+    destroyRoom(normalizedRoomCode);
+
+    const backgroundConfig = config.menuBackground || {};
+    const result = createRoom(io, {
+        botCount: backgroundConfig.botCount,
+        botDifficulty: backgroundConfig.difficulty,
+        difficulty: backgroundConfig.difficulty,
+        hiddenFromList: true,
+        isPrivate: true,
+        isSystemRoom: true,
+        roomCode: normalizedRoomCode
+    });
+
+    if (!result.success || !result.room) {
+        return result;
+    }
+
+    for (const socket of viewerSockets) {
+        if (socket.data && socket.data.spectatorRoomCode === normalizedRoomCode) {
+            socket.data.spectatorFollowId = null;
+        }
+
+        resetSocketSnapshotState(socket);
+        socket.emit?.("menuBackgroundReady", {
+            success: true,
+            roomCode: normalizedRoomCode
+        });
+    }
+
+    return result;
+}
+
+function getRoomTargetBotCount(room) {
+    const backgroundConfig = config.menuBackground || {};
+
+    return getTargetBotCount({
+        botCount: room && Number.isInteger(room.targetBotCount)
+            ? room.targetBotCount
+            : backgroundConfig.botCount
+    });
+}
+
+function getBackgroundRoomCode() {
+    const backgroundConfig = config.menuBackground || {};
+
+    return String(backgroundConfig.roomCode || "BOTS").trim().toUpperCase();
+}
+
+function getRoomViewerSockets(io, roomCode) {
+    if (!io || !io.sockets || !io.sockets.sockets || typeof io.sockets.sockets.values !== "function") {
+        return [];
+    }
+
+    return Array.from(io.sockets.sockets.values()).filter(socket => (
+        socket
+        && socket.data
+        && (socket.data.roomCode === roomCode || socket.data.spectatorRoomCode === roomCode)
+    ));
 }
 
 function joinRoom(roomCode, socket, password = "") {
