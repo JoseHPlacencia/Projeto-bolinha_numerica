@@ -11,6 +11,10 @@ const {
     isPointInPolygon
 } = require("../utils/geometry");
 const { distanceBetween } = require("../utils/math");
+const {
+    createPathPrimitivesFromPoints,
+    doesLineCrossPathPrimitive
+} = require("../utils/pathSegments");
 const { getHighResolutionTime } = require("../utils/time");
 const {
     clearCatchEliminationMarksByMarker,
@@ -21,6 +25,7 @@ const {
 const { captureClosedTrail } = require("./dominationSystem");
 
 const geometryEpsilon = 1e-7;
+const pathPrimitiveCache = new WeakMap();
 
 const trailSides = Object.freeze({
     left: Object.freeze({
@@ -53,6 +58,10 @@ function createTrailUpdateDiagnostics() {
         fillPathCount: 0,
         fillPolygonCount: 0,
         ownerTrailSegmentChecks: 0,
+        pathPrimitiveCacheHits: 0,
+        pathPrimitiveCacheMisses: 0,
+        pathPrimitiveCount: 0,
+        pathPrimitiveInputPointCount: 0,
         phases: {},
         playersProcessed: 0,
         selfCollisionTests: 0,
@@ -576,20 +585,22 @@ function doesMovementLineCrossStoredSegments(startPoint, endPoint, segments, dia
         return false;
     }
 
-    let checkedSegmentCount = 0;
+    let checkedPrimitiveCount = 0;
 
     for (const segment of segments) {
-        for (let index = 0; index < segment.length - 1; index++) {
-            checkedSegmentCount++;
+        const primitives = getTrailCollisionPrimitives(segment, null, diagnostics);
 
-            if (segmentsCross(startPoint, endPoint, segment[index], segment[index + 1])) {
-                addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedSegmentCount);
+        for (const primitive of primitives) {
+            checkedPrimitiveCount++;
+
+            if (doesLineCrossPathPrimitive(startPoint, endPoint, primitive)) {
+                addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedPrimitiveCount);
                 return true;
             }
         }
     }
 
-    addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedSegmentCount);
+    addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedPrimitiveCount);
     return false;
 }
 
@@ -609,37 +620,140 @@ function doesLineCrossSideTrails(player, movingSide, storedSide, startPoint, end
         return false;
     }
 
-    let checkedSegmentCount = 0;
+    let checkedPrimitiveCount = 0;
 
     for (const segment of segments) {
-        for (let index = 0; index < segment.length - 1; index++) {
-            if (shouldSkipSelfTrailSegment(player, movingSide, storedSide, segment, index)) {
-                continue;
-            }
+        const maxPointCount = getSelfTrailCollisionPointLimit(player, movingSide, storedSide, segment);
 
-            checkedSegmentCount++;
+        if (maxPointCount !== null && maxPointCount < 2) {
+            continue;
+        }
 
-            if (segmentsCross(startPoint, endPoint, segment[index], segment[index + 1])) {
-                addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedSegmentCount);
+        const primitives = getTrailCollisionPrimitives(segment, maxPointCount, diagnostics);
+
+        for (const primitive of primitives) {
+            checkedPrimitiveCount++;
+
+            if (doesLineCrossPathPrimitive(startPoint, endPoint, primitive)) {
+                addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedPrimitiveCount);
                 return true;
             }
         }
     }
 
-    addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedSegmentCount);
+    addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedPrimitiveCount);
     return false;
 }
 
-function shouldSkipSelfTrailSegment(player, movingSide, storedSide, segment, pointIndex) {
+function getSelfTrailCollisionPointLimit(player, movingSide, storedSide, segment) {
     const activeSegment = getActiveSegment(player, storedSide);
 
     if (segment !== activeSegment) {
-        return false;
+        return null;
     }
 
     const recentPointSkip = getRecentSelfTrailCollisionPointSkip(player, movingSide, storedSide);
+    const checkedSegmentEndIndex = segment.length - recentPointSkip;
 
-    return pointIndex >= Math.max(0, segment.length - recentPointSkip);
+    return Math.max(0, checkedSegmentEndIndex + 1);
+}
+
+function getTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics = null) {
+    if (!Array.isArray(segment)) {
+        return [];
+    }
+
+    const sourcePointCount = Number.isInteger(maxPointCount)
+        ? Math.min(segment.length, Math.max(0, maxPointCount))
+        : segment.length;
+
+    if (sourcePointCount < 2) {
+        return [];
+    }
+
+    const cached = pathPrimitiveCache.get(segment);
+    const cacheKey = Number.isInteger(maxPointCount) ? sourcePointCount : "all";
+    const lastPoint = segment[sourcePointCount - 1];
+    const cacheEntry = cached && cached.get(cacheKey);
+
+    if (cacheEntry
+        && cacheEntry.sourcePointCount === sourcePointCount
+        && cacheEntry.lastX === lastPoint.x
+        && cacheEntry.lastY === lastPoint.y) {
+        addTrailDiagnosticCount(diagnostics, "pathPrimitiveCacheHits", 1);
+        addTrailDiagnosticCount(diagnostics, "pathPrimitiveCount", cacheEntry.primitives.length);
+        addTrailDiagnosticCount(diagnostics, "pathPrimitiveInputPointCount", sourcePointCount);
+        return cacheEntry.primitives;
+    }
+
+    const points = sourcePointCount === segment.length
+        ? segment
+        : segment.slice(0, sourcePointCount);
+    const primitives = createPathPrimitivesFromPoints(points, {
+        angleThresholdRadians: getPathSegmentAngleThresholdRadians(),
+        maxArcSweepRadians: getPathSegmentArcMaxSweepRadians(),
+        maxArcRadialDrift: getPathSegmentArcMaxRadialDrift()
+    });
+    const safePrimitives = primitives.length > 0
+        ? primitives
+        : createFallbackLinePrimitives(points);
+    const nextCache = cached || new Map();
+
+    nextCache.set(cacheKey, {
+        lastX: lastPoint.x,
+        lastY: lastPoint.y,
+        primitives: safePrimitives,
+        sourcePointCount
+    });
+    pathPrimitiveCache.set(segment, nextCache);
+
+    addTrailDiagnosticCount(diagnostics, "pathPrimitiveCacheMisses", 1);
+    addTrailDiagnosticCount(diagnostics, "pathPrimitiveCount", safePrimitives.length);
+    addTrailDiagnosticCount(diagnostics, "pathPrimitiveInputPointCount", sourcePointCount);
+
+    return safePrimitives;
+}
+
+function createFallbackLinePrimitives(points) {
+    const primitives = [];
+
+    for (let index = 0; index < points.length - 1; index++) {
+        primitives.push({
+            bounds: {
+                minX: Math.min(points[index].x, points[index + 1].x),
+                minY: Math.min(points[index].y, points[index + 1].y),
+                maxX: Math.max(points[index].x, points[index + 1].x),
+                maxY: Math.max(points[index].y, points[index + 1].y)
+            },
+            endIndex: index + 1,
+            from: points[index],
+            startIndex: index,
+            to: points[index + 1],
+            type: "line"
+        });
+    }
+
+    return primitives;
+}
+
+function getPathSegmentAngleThresholdRadians() {
+    return degreesToRadians(config.territory.pathSegmentAngleThresholdDegrees, 1);
+}
+
+function getPathSegmentArcMaxSweepRadians() {
+    return degreesToRadians(config.territory.pathSegmentArcMaxSweepDegrees, 135);
+}
+
+function getPathSegmentArcMaxRadialDrift() {
+    const value = Number(config.territory.pathSegmentArcMaxRadialDrift);
+
+    return Number.isFinite(value) && value >= 0 ? value : 2;
+}
+
+function degreesToRadians(value, fallbackDegrees) {
+    const degrees = Number.isFinite(value) && value > 0 ? value : fallbackDegrees;
+
+    return degrees * Math.PI / 180;
 }
 
 function getRecentSelfTrailCollisionPointSkip(player, movingSide, storedSide) {
@@ -680,47 +794,6 @@ function getMapMovementLimit(player = null) {
     const runtimeConfig = getRuntimeConfig(player);
 
     return runtimeConfig.world.mapRadius - runtimeConfig.world.playerSize / 2;
-}
-
-function segmentsCross(firstStart, firstEnd, secondStart, secondEnd) {
-    if (!doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd)) {
-        return false;
-    }
-
-    const firstDirection = subtractPoints(firstEnd, firstStart);
-    const secondDirection = subtractPoints(secondEnd, secondStart);
-    const denominator = crossProduct(firstDirection, secondDirection);
-
-    if (Math.abs(denominator) <= geometryEpsilon) {
-        return false;
-    }
-
-    const startDelta = subtractPoints(secondStart, firstStart);
-    const firstT = crossProduct(startDelta, secondDirection) / denominator;
-    const secondT = crossProduct(startDelta, firstDirection) / denominator;
-
-    return firstT > geometryEpsilon
-        && firstT <= 1 + geometryEpsilon
-        && secondT > geometryEpsilon
-        && secondT < 1 - geometryEpsilon;
-}
-
-function doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
-    return Math.max(Math.min(firstStart.x, firstEnd.x), Math.min(secondStart.x, secondEnd.x))
-        <= Math.min(Math.max(firstStart.x, firstEnd.x), Math.max(secondStart.x, secondEnd.x)) + geometryEpsilon
-        && Math.max(Math.min(firstStart.y, firstEnd.y), Math.min(secondStart.y, secondEnd.y))
-        <= Math.min(Math.max(firstStart.y, firstEnd.y), Math.max(secondStart.y, secondEnd.y)) + geometryEpsilon;
-}
-
-function subtractPoints(first, second) {
-    return {
-        x: first.x - second.x,
-        y: first.y - second.y
-    };
-}
-
-function crossProduct(first, second) {
-    return first.x * second.y - first.y * second.x;
 }
 
 function clearTrail(player) {
