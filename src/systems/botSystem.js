@@ -1,6 +1,13 @@
 const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
-const { initializePlayerTerritory } = require("../state/territories");
+const {
+    getPlayerTerritoryPolygon,
+    initializePlayerTerritory
+} = require("../state/territories");
+const {
+    findClosestPolygonBoundaryContact,
+    isPointInPolygon
+} = require("../utils/geometry");
 const { clamp, distanceBetween, lerpAngle } = require("../utils/math");
 const { getHighResolutionTime } = require("../utils/time");
 
@@ -69,7 +76,7 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
         diagnostics.pendingBefore = state.pendingDecisionIds.length;
 
         measureBotPhase(diagnostics, "decisions", () => {
-            const tickContext = createBotDecisionTickContext(state.decisionContext, diagnostics);
+            const tickContext = createBotDecisionTickContext(state.decisionContext, diagnostics, nowMs);
             const maxDecisions = getMaxBotDecisionsPerTick();
             let processed = 0;
 
@@ -152,12 +159,13 @@ function createBotDecisionContext(numberSystem) {
     };
 }
 
-function createBotDecisionTickContext(decisionContext, diagnostics) {
+function createBotDecisionTickContext(decisionContext, diagnostics, nowMs = Date.now()) {
     return {
         correctNumbers: decisionContext && Array.isArray(decisionContext.correctNumbers)
             ? decisionContext.correctNumbers
             : [],
         diagnostics,
+        nowMs,
         selfTrailSegmentCache: new Map(),
         trailPointCache: new Map()
     };
@@ -370,6 +378,12 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
         ? context.correctNumbers
         : getCorrectNumbers(numberSystem);
     const nearestCorrect = findNearestPoint(bot, correctNumbers);
+    const incomingMarkResponse = chooseIncomingMarkResponse(bot, players, territories, correctNumbers, context);
+
+    if (incomingMarkResponse) {
+        return incomingMarkResponse;
+    }
+
     const pendingTarget = choosePendingEliminationTarget(bot, correctNumbers);
 
     if (pendingTarget) {
@@ -377,7 +391,7 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
     }
 
     const threat = measureBotPhase(diagnostics, "threat", () => (
-        evaluateThreat(bot, players, correctNumbers, context)
+        evaluateThreat(bot, players, territories, correctNumbers, context)
     ));
 
     if (bot.catchBalance <= 0) {
@@ -385,11 +399,11 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
     }
 
     if (threat.isThreatened) {
-        return getReturnTarget(bot);
+        return getReturnTarget(bot, territories);
     }
 
     const huntTarget = measureBotPhase(diagnostics, "hunt", () => (
-        chooseHuntTarget(bot, players, correctNumbers, context)
+        chooseHuntTarget(bot, players, territories, correctNumbers, threat, context)
     ));
 
     if (huntTarget && Math.random() >= config.bots.mistakeChance) {
@@ -397,10 +411,10 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
     }
 
     if (threat.canExpand) {
-        return getExpansionTarget(bot);
+        return getExpansionTarget(bot, players, territories, threat, context);
     }
 
-    return getReturnTarget(bot);
+    return getReturnTarget(bot, territories);
 }
 
 function choosePendingEliminationTarget(bot, correctNumbers) {
@@ -410,6 +424,171 @@ function choosePendingEliminationTarget(bot, correctNumbers) {
 
     return findNearestPoint(bot, correctNumbers);
 }
+
+function chooseIncomingMarkResponse(bot, players, territories, correctNumbers, context = null) {
+    const incomingMarkers = getIncomingCatchMarkers(bot, players);
+
+    if (incomingMarkers.length === 0) {
+        return null;
+    }
+
+    return chooseMarkedCounterattackNumber(bot, incomingMarkers, correctNumbers, context)
+        || getReturnTarget(bot, territories);
+}
+
+function getIncomingCatchMarkers(bot, players) {
+    const markers = [];
+
+    if (!bot || !players) {
+        return markers;
+    }
+
+    for (const player of players.values()) {
+        if (player.id === bot.id
+            || !player.pendingCatchEliminationTargets
+            || !player.pendingCatchEliminationTargets.has(bot.id)) {
+            continue;
+        }
+
+        markers.push(player);
+    }
+
+    return markers;
+}
+
+function chooseMarkedCounterattackNumber(bot, incomingMarkers, correctNumbers, context = null) {
+    if (!bot.pendingCatchEliminationTargets
+        || bot.pendingCatchEliminationTargets.size === 0
+        || !Array.isArray(correctNumbers)
+        || correctNumbers.length === 0
+        || !incomingMarkers.some(marker => bot.pendingCatchEliminationTargets.has(marker.id))) {
+        return null;
+    }
+
+    const number = findNearestPoint(bot, correctNumbers);
+
+    if (!number) {
+        return null;
+    }
+
+    const botConfirmTime = estimateTravelTime(bot, number);
+    const incomingConfirmTime = estimateIncomingMarkConfirmTime(incomingMarkers, correctNumbers);
+    const counterattackRemainingTime = estimateIncomingCounterattackRemainingTime(bot, incomingMarkers, context);
+    const effectiveBotConfirmTime = Math.max(botConfirmTime, counterattackRemainingTime);
+    const requiredMargin = getMarkedCounterattackMarginSec();
+
+    if (effectiveBotConfirmTime + requiredMargin >= incomingConfirmTime) {
+        return null;
+    }
+
+    return botConfirmTime < counterattackRemainingTime
+        ? createMarkedCounterattackWaitTarget(bot, number)
+        : number;
+}
+
+function estimateIncomingMarkConfirmTime(incomingMarkers, correctNumbers) {
+    let bestTime = Infinity;
+
+    for (const marker of incomingMarkers) {
+        const number = findNearestPoint(marker, correctNumbers);
+
+        if (!number) {
+            continue;
+        }
+
+        bestTime = Math.min(bestTime, estimateTravelTime(marker, number));
+    }
+
+    return bestTime;
+}
+
+function estimateIncomingCounterattackRemainingTime(bot, incomingMarkers, context = null) {
+    const nowMs = Number.isFinite(context && context.nowMs) ? context.nowMs : Date.now();
+    let remainingMs = Infinity;
+
+    for (const marker of incomingMarkers) {
+        if (!bot.pendingCatchEliminationTargets
+            || !bot.pendingCatchEliminationTargets.has(marker.id)
+            || typeof marker.getCatchEliminationMarkedAt !== "function") {
+            continue;
+        }
+
+        const markedAt = marker.getCatchEliminationMarkedAt(bot.id);
+
+        if (!Number.isFinite(markedAt)) {
+            continue;
+        }
+
+        remainingMs = Math.min(
+            remainingMs,
+            Math.max(0, getCounterattackGraceMs(bot) - (nowMs - markedAt))
+        );
+    }
+
+    return Number.isFinite(remainingMs) ? remainingMs / 1000 : Infinity;
+}
+
+function createMarkedCounterattackWaitTarget(bot, number) {
+    const collisionRadius = config.numbers.radius + config.world.playerSize / 2;
+    const waitRadius = collisionRadius + config.world.playerSize * 1.25;
+    const deltaX = bot.x - number.x;
+    const deltaY = bot.y - number.y;
+    const distance = Math.hypot(deltaX, deltaY);
+    const fallbackAngle = Number.isFinite(bot.angle) ? bot.angle + Math.PI : 0;
+    const outward = distance > Number.EPSILON
+        ? {
+            x: deltaX / distance,
+            y: deltaY / distance
+        }
+        : {
+            x: Math.cos(fallbackAngle),
+            y: Math.sin(fallbackAngle)
+        };
+
+    if (distance < waitRadius) {
+        return clampPointToMap({
+            x: number.x + outward.x * waitRadius,
+            y: number.y + outward.y * waitRadius
+        });
+    }
+
+    const orbitDirection = isExpansionDirection(bot.botAi && bot.botAi.orbitDirection)
+        ? bot.botAi.orbitDirection
+        : 1;
+    const tangent = {
+        x: -outward.y * orbitDirection,
+        y: outward.x * orbitDirection
+    };
+
+    return clampPointToMap({
+        x: bot.x + tangent.x * config.world.playerSize * 3,
+        y: bot.y + tangent.y * config.world.playerSize * 3
+    });
+}
+
+function getMarkedCounterattackMarginSec() {
+    const margin = Number(config.bots.markedCounterattackMarginSec);
+
+    return Number.isFinite(margin) ? Math.max(0, margin) : 0.25;
+}
+
+function getCounterattackGraceMs(player) {
+    const runtimeConfig = player && player.runtimeConfig;
+    const configuredValue = runtimeConfig
+        && runtimeConfig.gameMode
+        && runtimeConfig.gameMode.catch
+        && runtimeConfig.gameMode.catch.counterattackGraceMs;
+    const fallbackValue = config.gameMode
+        && config.gameMode.catch
+        && config.gameMode.catch.counterattackGraceMs;
+
+    if (Number.isFinite(configuredValue) && configuredValue >= 0) {
+        return configuredValue;
+    }
+
+    return Number.isFinite(fallbackValue) && fallbackValue >= 0 ? fallbackValue : 1200;
+}
+
 
 function getCorrectNumbers(numberSystem) {
     if (!numberSystem || typeof numberSystem.getTheme !== "function") {
@@ -429,7 +608,7 @@ function getCorrectNumbers(numberSystem) {
         .filter(number => theme.check(number));
 }
 
-function evaluateThreat(bot, players, correctNumbers, context = null) {
+function evaluateThreat(bot, players, territories, correctNumbers, context = null) {
     const trailPoints = getTrailPointsCached(context, bot);
 
     if (trailPoints.length === 0 || correctNumbers.length === 0) {
@@ -440,7 +619,7 @@ function evaluateThreat(bot, players, correctNumbers, context = null) {
         };
     }
 
-    const returnTime = estimateTravelTime(bot, getReturnTarget(bot));
+    const returnTime = estimateTravelTime(bot, getReturnTarget(bot, territories));
     let bestEnemyTime = Infinity;
 
     for (const enemy of players.values()) {
@@ -480,14 +659,14 @@ function estimatePunishTime(enemy, trailPoints, correctNumbers) {
         bestTime = Math.min(
             bestTime,
             (distanceBetween(enemy.x, enemy.y, trailPoint.x, trailPoint.y)
-                + distanceBetween(trailPoint.x, trailPoint.y, number.x, number.y)) / config.movement.speed
+                + distanceBetween(trailPoint.x, trailPoint.y, number.x, number.y)) / getPlayerMovementSpeed(enemy)
         );
     }
 
     return bestTime;
 }
 
-function chooseHuntTarget(bot, players, correctNumbers, context = null) {
+function chooseHuntTarget(bot, players, territories, correctNumbers, threat = null, context = null) {
     if (correctNumbers.length === 0) {
         return null;
     }
@@ -526,16 +705,28 @@ function chooseHuntTarget(bot, players, correctNumbers, context = null) {
         const botTime = hasPendingTarget
             ? estimateTravelTime(bot, number)
             : (distanceBetween(bot.x, bot.y, enemyTrailPoint.x, enemyTrailPoint.y)
-                + distanceBetween(enemyTrailPoint.x, enemyTrailPoint.y, number.x, number.y)) / config.movement.speed;
-        const enemyReturnTime = estimateTravelTime(enemy, getReturnTarget(enemy));
+                + distanceBetween(enemyTrailPoint.x, enemyTrailPoint.y, number.x, number.y)) / getPlayerMovementSpeed(bot);
+        const enemyReturnTime = estimateTravelTime(enemy, getReturnTarget(enemy, territories));
+        const eliminationWindow = enemyReturnTime - botTime;
+        const requiredMargin = getHuntRequiredMargin(bot, enemy, threat, enemyReturnTime);
 
-        if (botTime + config.bots.huntMarginSec >= enemyReturnTime) {
+        if (eliminationWindow < requiredMargin) {
             continue;
         }
 
-        if (!bestHunt || botTime < bestHunt.time) {
+        const huntScore = scoreHuntTarget({
+            bot,
+            botTime,
+            eliminationWindow,
+            enemy,
+            enemyReturnTime,
+            threat
+        });
+
+        if (!bestHunt || huntScore > bestHunt.score) {
             bestHunt = {
                 target: hasPendingTarget ? number : enemyTrailPoint,
+                score: huntScore,
                 time: botTime
             };
         }
@@ -544,15 +735,58 @@ function chooseHuntTarget(bot, players, correctNumbers, context = null) {
     return bestHunt && bestHunt.target;
 }
 
-function getExpansionTarget(bot) {
+function getHuntRequiredMargin(bot, enemy, threat, enemyReturnTime) {
+    const safetyScore = getThreatMarginSafetyScore(threat && threat.marginSec);
+    const vulnerabilityScore = getEnemyVulnerabilityScore(enemy, enemyReturnTime);
+    const aggression = clamp(
+        (safetyScore * 0.55 + vulnerabilityScore * 0.45) * getBotDifficultyAggression(bot),
+        0,
+        1
+    );
+    const reduction = clamp(Number(config.bots.huntAggressiveMarginReduction), 0, 0.75);
+
+    return config.bots.huntMarginSec * (1 - aggression * reduction);
+}
+
+function scoreHuntTarget(options) {
+    const safetyScore = getThreatMarginSafetyScore(options.threat && options.threat.marginSec);
+    const vulnerabilityScore = getEnemyVulnerabilityScore(options.enemy, options.enemyReturnTime);
+    const difficultyAggression = getBotDifficultyAggression(options.bot);
+
+    return options.eliminationWindow * 2.2
+        + vulnerabilityScore * 1.4 * difficultyAggression
+        + safetyScore * 0.8
+        - options.botTime * 0.35;
+}
+
+function getEnemyVulnerabilityScore(enemy, enemyReturnTime) {
+    if (!Number.isFinite(enemyReturnTime)) {
+        return 0;
+    }
+
+    const distanceFromBase = distanceBetween(enemy.x, enemy.y, enemy.territoryX, enemy.territoryY);
+    const distanceScore = clamp(
+        distanceFromBase / Math.max(config.world.initialTerritoryRadius * 5, config.world.playerSize),
+        0,
+        1
+    );
+    const timeScore = clamp(enemyReturnTime / Math.max(config.bots.huntMarginSec * 4, 1), 0, 1);
+
+    return Math.max(distanceScore, timeScore);
+}
+
+function getExpansionTarget(bot, players = new Map(), territories = null, threat = null, context = null) {
     const ai = getBotAi(bot);
     const distanceFromBase = distanceBetween(bot.x, bot.y, bot.territoryX, bot.territoryY);
+    const riskProfile = getExpansionRiskProfile(bot, players, threat, context);
 
     if (!hasAnyTrail(bot) && !bot.isLeftTrailActive && !bot.isRightTrailActive) {
         ai.expansionPlan = null;
     }
 
-    const plan = getExpansionPlan(bot, ai, distanceFromBase);
+    const plan = getExpansionPlan(bot, ai, distanceFromBase, players, riskProfile);
+
+    updateExpansionPlanForRisk(bot, plan, riskProfile);
 
     if (distanceFromBase > plan.radius * 1.28) {
         plan.phase = "return";
@@ -585,27 +819,71 @@ function getExpansionTarget(bot) {
     }
 
     if (plan.phase === "return") {
-        return getReturnTarget(bot);
+        return getExpansionReturnTarget(bot, territories, plan, riskProfile);
     }
 
-    return getReturnTarget(bot);
+    return getReturnTarget(bot, territories);
 }
 
-function getExpansionPlan(bot, ai, distanceFromBase) {
+function getExpansionPlan(bot, ai, distanceFromBase, players, riskProfile) {
     if (ai.expansionPlan) {
         return ai.expansionPlan;
     }
 
+    const startAngle = getBaseRelativeAngle(bot, distanceFromBase);
+    const radius = getExpansionRadius(bot, riskProfile);
+    const arcRadians = getExpansionArcRadians(bot, riskProfile);
+
     ai.expansionPlan = {
-        arcRadians: getExpansionArcRadians(bot),
-        direction: ai.orbitDirection,
+        arcRadians,
+        direction: chooseExpansionDirection(bot, players, startAngle, radius, arcRadians, ai.orbitDirection),
         phase: "outbound",
-        radius: getExpansionRadius(bot),
-        startAngle: getBaseRelativeAngle(bot, distanceFromBase)
+        radius,
+        riskSafetyScore: riskProfile.safetyScore,
+        startAngle
     };
 
     ai.orbitDirection *= Math.random() < 0.28 ? -1 : 1;
     return ai.expansionPlan;
+}
+
+function updateExpansionPlanForRisk(bot, plan, riskProfile) {
+    if (!plan || plan.phase === "return") {
+        return;
+    }
+
+    if (shouldReturnFromExpansionRisk(riskProfile)) {
+        plan.phase = "return";
+        return;
+    }
+
+    const nextRadius = getExpansionRadius(bot, riskProfile);
+    const nextArcRadians = getExpansionArcRadians(bot, riskProfile);
+
+    if (nextRadius > plan.radius) {
+        plan.radius = Math.min(nextRadius, plan.radius * 1.12);
+    }
+
+    if (Math.abs(nextArcRadians) > Math.abs(plan.arcRadians)) {
+        plan.arcRadians = Math.min(nextArcRadians, plan.arcRadians * 1.1);
+    }
+
+    plan.riskSafetyScore = riskProfile.safetyScore;
+}
+
+function shouldReturnFromExpansionRisk(riskProfile) {
+    if (!riskProfile) {
+        return false;
+    }
+
+    if (riskProfile.isThreatened) {
+        return true;
+    }
+
+    const returnMargin = getExpansionRiskReturnMarginSec();
+
+    return Number.isFinite(riskProfile.marginSec)
+        && riskProfile.marginSec < returnMargin;
 }
 
 function getExpansionPlanPoint(bot, angle, radius) {
@@ -615,18 +893,174 @@ function getExpansionPlanPoint(bot, angle, radius) {
     });
 }
 
-function getExpansionRadius(bot) {
+function getExpansionRadius(bot, riskProfile = null) {
     const balanceBonus = Math.min(Math.max(bot.catchBalance - 1, 0), 4) * 0.09;
-    const radius = config.bots.captureLoopRadius * (1.24 + balanceBonus);
-    const maxRadius = config.world.mapRadius * 0.52;
+    const safetyBonus = getExpansionSafetyBonus(riskProfile, config.bots.expansionMaxRadiusBonus);
+    const radius = config.bots.captureLoopRadius
+        * (1.24 + balanceBonus)
+        * getBotDifficultyExpansionMultiplier(bot)
+        * (1 + safetyBonus);
+    const maxRadius = config.world.mapRadius * 0.68;
 
     return Math.min(radius, maxRadius);
 }
 
-function getExpansionArcRadians(bot) {
+function getExpansionArcRadians(bot, riskProfile = null) {
     const balanceBonus = Math.min(Math.max(bot.catchBalance - 1, 0), 3) * 0.08;
+    const safetyBonus = getExpansionSafetyBonus(riskProfile, config.bots.expansionMaxArcBonus);
 
-    return 1.65 + balanceBonus;
+    return (1.65 + balanceBonus)
+        * getBotDifficultyExpansionMultiplier(bot)
+        * (1 + safetyBonus);
+}
+
+function getExpansionSafetyBonus(riskProfile, maxBonus) {
+    const bonus = Number(maxBonus);
+    const safetyScore = riskProfile && Number.isFinite(riskProfile.safetyScore)
+        ? riskProfile.safetyScore
+        : 0;
+
+    return clamp(safetyScore, 0, 1) * (Number.isFinite(bonus) ? Math.max(0, bonus) : 0);
+}
+
+function getExpansionRiskProfile(bot, players, threat = null, context = null) {
+    const pressureDistance = getNearestEnemyPressureDistance(bot, players, context);
+    const pressureScore = getExpansionPressureSafetyScore(pressureDistance);
+    const marginScore = getThreatMarginSafetyScore(threat && threat.marginSec);
+    const safetyScore = Math.min(pressureScore, marginScore);
+
+    return {
+        isThreatened: Boolean(threat && threat.isThreatened),
+        marginSec: threat && Number.isFinite(threat.marginSec)
+            ? threat.marginSec
+            : Infinity,
+        pressureDistance,
+        pressureScore,
+        safetyScore
+    };
+}
+
+function getExpansionPressureSafetyScore(pressureDistance) {
+    if (!Number.isFinite(pressureDistance)) {
+        return 1;
+    }
+
+    const dangerRadius = Math.max(config.bots.dangerRadius, config.world.playerSize);
+    const safeRadius = Math.max(Number(config.bots.expansionPressureRadius) || dangerRadius, dangerRadius + 1);
+
+    return clamp((pressureDistance - dangerRadius) / (safeRadius - dangerRadius), 0, 1);
+}
+
+function getNearestEnemyPressureDistance(bot, players, context = null) {
+    let nearestDistance = Infinity;
+    const trailPoints = getTrailPointsCached(context, bot, {
+        skipRecent: getSelfTrailClearanceRecentPointSkip()
+    });
+    const pressurePoints = createPressureSamplePoints(bot, trailPoints);
+
+    for (const enemy of players.values()) {
+        if (enemy.id === bot.id) {
+            continue;
+        }
+
+        for (const point of pressurePoints) {
+            nearestDistance = Math.min(
+                nearestDistance,
+                distanceBetween(enemy.x, enemy.y, point.x, point.y)
+            );
+        }
+    }
+
+    return nearestDistance;
+}
+
+function createPressureSamplePoints(bot, trailPoints) {
+    const points = [{
+        x: bot.x,
+        y: bot.y
+    }];
+    const maxSamples = getExpansionPressureSampleCount();
+
+    if (!Array.isArray(trailPoints) || trailPoints.length === 0) {
+        return points;
+    }
+
+    const stride = Math.max(1, Math.ceil(trailPoints.length / maxSamples));
+
+    for (let index = 0; index < trailPoints.length; index += stride) {
+        points.push(trailPoints[index]);
+    }
+
+    const lastPoint = trailPoints[trailPoints.length - 1];
+
+    if (lastPoint) {
+        points.push(lastPoint);
+    }
+
+    return points;
+}
+
+function chooseExpansionDirection(bot, players, startAngle, radius, arcRadians, preferredDirection) {
+    const directions = isExpansionDirection(preferredDirection)
+        ? [preferredDirection, -preferredDirection]
+        : [1, -1];
+    let bestDirection = directions[0];
+    let bestScore = -Infinity;
+
+    for (const direction of directions) {
+        const score = scoreExpansionDirection(bot, players, startAngle, radius, arcRadians, direction);
+
+        if (score > bestScore) {
+            bestDirection = direction;
+            bestScore = score;
+        }
+    }
+
+    return bestDirection;
+}
+
+function scoreExpansionDirection(bot, players, startAngle, radius, arcRadians, direction) {
+    const sampleAngles = [
+        startAngle,
+        startAngle + direction * arcRadians * 0.5,
+        startAngle + direction * arcRadians
+    ];
+    let nearestEnemyDistance = Infinity;
+
+    for (const enemy of players.values()) {
+        if (enemy.id === bot.id) {
+            continue;
+        }
+
+        for (const angle of sampleAngles) {
+            const point = getExpansionPlanPoint(bot, angle, radius);
+
+            nearestEnemyDistance = Math.min(
+                nearestEnemyDistance,
+                distanceBetween(enemy.x, enemy.y, point.x, point.y)
+            );
+        }
+    }
+
+    return Number.isFinite(nearestEnemyDistance)
+        ? nearestEnemyDistance
+        : 0;
+}
+
+function isExpansionDirection(value) {
+    return value === -1 || value === 1;
+}
+
+function getExpansionPressureSampleCount() {
+    const count = Number(config.bots.expansionPressureSampleCount);
+
+    return Number.isInteger(count) && count > 0 ? count : 24;
+}
+
+function getExpansionRiskReturnMarginSec() {
+    const margin = Number(config.bots.expansionRiskReturnMarginSec);
+
+    return Number.isFinite(margin) ? Math.max(0, margin) : config.bots.safetyMarginSec;
 }
 
 function getBaseRelativeAngle(bot, distanceFromBase) {
@@ -648,16 +1082,144 @@ function getWanderTarget(bot) {
     });
 }
 
-function getReturnTarget(player) {
+function getExpansionReturnTarget(bot, territories, plan, riskProfile) {
+    const territoryPolygon = getReturnTerritoryPolygon(bot, territories);
+
+    if (!territoryPolygon || !plan) {
+        return getReturnTarget(bot, territories);
+    }
+
+    const safetyScore = riskProfile && Number.isFinite(riskProfile.safetyScore)
+        ? riskProfile.safetyScore
+        : 0;
+
+    if (safetyScore <= 0.1 || shouldReturnFromExpansionRisk(riskProfile)) {
+        return getReturnTarget(bot, territories);
+    }
+
+    const distanceFromBase = distanceBetween(bot.x, bot.y, bot.territoryX, bot.territoryY);
+    const currentAngle = getBaseRelativeAngle(bot, distanceFromBase);
+    const leadRadians = getExpansionReturnLeadRadians(plan, riskProfile);
+    const ledTarget = getAngledTerritoryReturnTarget(
+        bot,
+        territoryPolygon,
+        currentAngle + plan.direction * leadRadians
+    );
+
+    return ledTarget || getReturnTarget(bot, territories);
+}
+
+function getExpansionReturnLeadRadians(plan, riskProfile) {
+    const safetyScore = riskProfile && Number.isFinite(riskProfile.safetyScore)
+        ? riskProfile.safetyScore
+        : 0;
+    const maxLead = Math.min(Math.abs(plan.arcRadians || 0) * 0.28, 0.58);
+
+    return maxLead * clamp(safetyScore, 0, 1);
+}
+
+function getReturnTarget(player, territories = null) {
+    const territoryPolygon = getReturnTerritoryPolygon(player, territories);
+
+    if (!territoryPolygon) {
+        return createReturnTarget(getBaseReturnTarget(player));
+    }
+
+    const nearestContact = findClosestPolygonBoundaryContact(territoryPolygon, player);
+    const boundaryTarget = nearestContact && createInsideTerritoryReturnTarget(
+        player,
+        territoryPolygon,
+        nearestContact.point
+    );
+
+    return boundaryTarget || createReturnTarget(getBaseReturnTarget(player));
+}
+
+function getReturnTerritoryPolygon(player, territories) {
+    if (!player || !territories) {
+        return null;
+    }
+
+    const polygon = getPlayerTerritoryPolygon(territories, player.id);
+
+    return Array.isArray(polygon) && polygon.length > 0 ? polygon : null;
+}
+
+function getAngledTerritoryReturnTarget(player, territoryPolygon, angle) {
+    if (!Number.isFinite(angle)) {
+        return null;
+    }
+
+    const anchor = getBaseReturnTarget(player);
+    const farPoint = {
+        x: anchor.x + Math.cos(angle) * config.world.mapRadius * 2,
+        y: anchor.y + Math.sin(angle) * config.world.mapRadius * 2
+    };
+    const contact = findClosestPolygonBoundaryContact(territoryPolygon, farPoint);
+
+    return contact
+        ? createInsideTerritoryReturnTarget(player, territoryPolygon, contact.point)
+        : null;
+}
+
+function createInsideTerritoryReturnTarget(player, territoryPolygon, boundaryPoint) {
+    const anchor = getBaseReturnTarget(player);
+    const direction = {
+        x: anchor.x - boundaryPoint.x,
+        y: anchor.y - boundaryPoint.y
+    };
+    const length = Math.hypot(direction.x, direction.y);
+
+    if (length <= Number.EPSILON) {
+        return createReturnTarget(anchor);
+    }
+
+    const unit = {
+        x: direction.x / length,
+        y: direction.y / length
+    };
+    const distances = [
+        config.world.playerSize * 1.25,
+        config.world.playerSize * 0.65,
+        config.world.playerSize * 2,
+        config.world.playerSize * 3
+    ];
+
+    for (const distance of distances) {
+        const point = {
+            x: boundaryPoint.x + unit.x * Math.min(distance, length),
+            y: boundaryPoint.y + unit.y * Math.min(distance, length)
+        };
+
+        if (isPointInPolygon(territoryPolygon, point.x, point.y)) {
+            return createReturnTarget(point);
+        }
+    }
+
+    return isPointInPolygon(territoryPolygon, anchor.x, anchor.y)
+        ? createReturnTarget(anchor)
+        : null;
+}
+
+function getBaseReturnTarget(player) {
     return {
         x: player.territoryX,
         y: player.territoryY
     };
 }
 
+function createReturnTarget(point) {
+    return {
+        ...point,
+        isReturnTarget: true
+    };
+}
+
 function isReturnTarget(bot, target) {
-    return Boolean(target)
-        && distanceBetween(target.x, target.y, bot.territoryX, bot.territoryY) <= config.world.playerSize;
+    return Boolean(target && (
+        target.isReturnTarget
+        || distanceBetween(target.x, target.y, bot.territoryX, bot.territoryY) <= config.world.playerSize
+    ));
 }
 
 function findNearestPoint(origin, points) {
@@ -709,7 +1271,59 @@ function normalizeAngle(angle) {
 }
 
 function estimateTravelTime(player, target) {
-    return distanceBetween(player.x, player.y, target.x, target.y) / config.movement.speed;
+    return distanceBetween(player.x, player.y, target.x, target.y) / getPlayerMovementSpeed(player);
+}
+
+function getThreatMarginSafetyScore(marginSec) {
+    if (!Number.isFinite(marginSec)) {
+        return 1;
+    }
+
+    const safeMargin = Math.max(
+        Number(config.bots.expansionGreedSafeMarginSec) || config.bots.expandMarginSec,
+        config.bots.expandMarginSec + 0.1
+    );
+
+    return clamp(
+        (marginSec - config.bots.expandMarginSec) / (safeMargin - config.bots.expandMarginSec),
+        0,
+        1
+    );
+}
+
+function getBotDifficultyAggression(bot) {
+    switch (bot && bot.difficulty) {
+        case "hard":
+            return 1.18;
+        case "medium":
+            return 1;
+        default:
+            return 0.82;
+    }
+}
+
+function getBotDifficultyExpansionMultiplier(bot) {
+    switch (bot && bot.difficulty) {
+        case "hard":
+            return 1.12;
+        case "medium":
+            return 1;
+        default:
+            return 0.9;
+    }
+}
+
+function getPlayerMovementSpeed(player) {
+    const speed = Number(
+        player
+        && player.runtimeConfig
+        && player.runtimeConfig.movement
+        && player.runtimeConfig.movement.speed
+    );
+
+    return Number.isFinite(speed) && speed > 0
+        ? speed
+        : config.movement.speed;
 }
 
 function applyDecisionNoise(angle, options = {}) {
