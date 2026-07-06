@@ -222,6 +222,12 @@ function getBotSelfTrailSafetyMaxCandidates() {
     return Number.isInteger(value) && value > 0 ? value : 24;
 }
 
+function getBotSelfTrailSafetyTrapMaxCandidates() {
+    const value = Number(config.bots.selfTrailSafetyTrapMaxCandidates);
+
+    return Number.isInteger(value) && value > 0 ? value : Math.max(36, getBotSelfTrailSafetyMaxCandidates());
+}
+
 function getBotSelfTrailSafetyMaxLocalCandidates() {
     const value = Number(config.bots.selfTrailSafetyMaxLocalCandidates);
 
@@ -232,6 +238,20 @@ function getBotSelfTrailLookaheadMaxDistance() {
     const value = Number(config.bots.selfTrailLookaheadMaxDistance);
 
     return Number.isFinite(value) && value > 0 ? value : config.world.playerSize * 12;
+}
+
+function getBotSelfTrailTrapLookaheadMaxDistance() {
+    const value = Number(config.bots.selfTrailTrapLookaheadMaxDistance);
+
+    return Number.isFinite(value) && value > 0
+        ? value
+        : Math.max(getBotSelfTrailLookaheadMaxDistance(), config.world.playerSize * 20);
+}
+
+function getBotSelfTrailEscapeMemoryMs() {
+    const value = Number(config.bots.selfTrailEscapeMemoryMs);
+
+    return Number.isFinite(value) && value > 0 ? value : 650;
 }
 
 function getSelfTrailSafetyDiagnostics(context) {
@@ -341,7 +361,9 @@ function createBot(roomCode, players, territories, botNumber, botDifficulty = nu
     bot.botAi = {
         expansionPlan: null,
         orbitDirection: Math.random() < 0.5 ? -1 : 1,
-        orbitPhase: Math.random() * Math.PI * 2
+        orbitPhase: Math.random() * Math.PI * 2,
+        selfTrailEscapeAngle: null,
+        selfTrailEscapeUntilMs: 0
     };
     initializePlayerTerritory(territories, bot, runtimeConfig || config);
 
@@ -363,10 +385,12 @@ function updateBotDecision(bot, players, territories, numberSystem, context = nu
     const targetDistance = distanceBetween(bot.x, bot.y, target.x, target.y);
     const decision = measureBotPhase(diagnostics, "selfTrailSafety", () => chooseSelfTrailSafeAngle(bot, targetAngle, {
         allowReverse: isReturnTarget(bot, target),
+        territories,
         targetDistance
     }, context));
     const angle = applyDecisionNoise(decision.angle, {
-        avoidingSelfTrail: decision.avoidingSelfTrail
+        avoidingSelfTrail: decision.avoidingSelfTrail,
+        suppressNoise: decision.suppressNoise
     });
 
     bot.setDirectionAngle(angle, "bot");
@@ -1327,6 +1351,10 @@ function getPlayerMovementSpeed(player) {
 }
 
 function applyDecisionNoise(angle, options = {}) {
+    if (options.suppressNoise) {
+        return angle;
+    }
+
     if (!options.avoidingSelfTrail && Math.random() < config.bots.mistakeChance) {
         return angle + (Math.random() * 2 - 1) * Math.PI * 0.65;
     }
@@ -1344,6 +1372,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
     const trailSegments = getSelfTrailSegmentsCached(context, bot, { skipRecent: getSelfTrailCollisionRecentPointSkip() });
 
     if ((trailPoints.length === 0 && trailSegments.length === 0) || !Number.isFinite(targetAngle)) {
+        clearSelfTrailEscapeMemory(bot);
         addSelfTrailSafetyDiagnosticValue(diagnostics, "bypassCount", 1);
         return {
             angle: targetAngle,
@@ -1359,6 +1388,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
         trailGeometry.points.length === 0
         && trailGeometry.segments.length === 0
     ) {
+        clearSelfTrailEscapeMemory(bot);
         addSelfTrailSafetyDiagnosticValue(diagnostics, "bypassCount", 1);
         return {
             angle: targetAngle,
@@ -1370,6 +1400,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
         nearestSelfTrailDistanceSquared > bypassDistance * bypassDistance
         && trailGeometry.segments.length === 0
     ) {
+        clearSelfTrailEscapeMemory(bot);
         addSelfTrailSafetyDiagnosticValue(diagnostics, "bypassCount", 1);
         return {
             angle: targetAngle,
@@ -1381,6 +1412,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
     const targetSafety = getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options, budget, diagnostics);
 
     if (!isSelfTrailPathUnsafe(targetSafety)) {
+        clearSelfTrailEscapeMemory(bot);
         finishSelfTrailSafetyBudget(budget);
         return {
             angle: targetAngle,
@@ -1390,15 +1422,47 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
 
     addSelfTrailSafetyDiagnosticValue(diagnostics, "unsafeTargetCount", 1);
 
-    const candidates = limitSelfTrailAvoidanceCandidates(createSelfTrailAvoidanceCandidates(bot, targetAngle, options));
+    const riskOptions = createSelfTrailRiskOptions(options, targetSafety, nearestSelfTrailDistanceSquared);
+    const activeTrailGeometry = riskOptions.trapMode
+        ? createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, riskOptions, diagnostics)
+        : trailGeometry;
+    const activeTargetSafety = riskOptions.trapMode
+        ? getSelfTrailPathSafety(bot, targetAngle, activeTrailGeometry, riskOptions, budget, diagnostics)
+        : targetSafety;
+    const rememberedCandidate = chooseRememberedSelfTrailEscapeCandidate(
+        bot,
+        targetAngle,
+        activeTrailGeometry,
+        riskOptions,
+        context,
+        budget,
+        diagnostics
+    );
+
+    if (rememberedCandidate) {
+        finishSelfTrailSafetyBudget(budget);
+        return {
+            angle: rememberedCandidate.angle,
+            avoidingSelfTrail: true,
+            suppressNoise: true
+        };
+    }
+
+    const candidates = limitSelfTrailAvoidanceCandidates(
+        createSelfTrailAvoidanceCandidates(bot, targetAngle, riskOptions, activeTrailGeometry),
+        riskOptions
+    );
     addSelfTrailSafetyDiagnosticValue(diagnostics, "candidateCount", candidates.length);
 
     let bestAnyCandidate = {
         angle: targetAngle,
-        safety: targetSafety,
-        score: scoreSelfTrailCandidate(targetAngle, targetAngle, targetSafety, options)
+        safety: activeTargetSafety,
+        score: scoreSelfTrailCandidate(targetAngle, targetAngle, activeTargetSafety, riskOptions)
     };
-    let bestNonCrossingCandidate = targetSafety.crossesTrail || targetSafety.budgetHit
+    let bestSafeCandidate = isSelfTrailPathUnsafe(activeTargetSafety)
+        ? null
+        : bestAnyCandidate;
+    let bestNonCrossingCandidate = activeTargetSafety.crossesTrail || activeTargetSafety.budgetHit
         ? null
         : bestAnyCandidate;
 
@@ -1413,11 +1477,19 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
 
         addSelfTrailSafetyDiagnosticValue(diagnostics, "evaluatedCandidateCount", 1);
 
-        const safety = getSelfTrailPathSafety(bot, angle, trailGeometry, options, budget, diagnostics);
-        const score = scoreSelfTrailCandidate(angle, targetAngle, safety, options);
+        const safety = getSelfTrailPathSafety(bot, angle, activeTrailGeometry, riskOptions, budget, diagnostics);
+        const score = scoreSelfTrailCandidate(angle, targetAngle, safety, riskOptions);
 
         if (score > bestAnyCandidate.score) {
             bestAnyCandidate = {
+                angle,
+                safety,
+                score
+            };
+        }
+
+        if (!isSelfTrailPathUnsafe(safety) && (!bestSafeCandidate || score > bestSafeCandidate.score)) {
+            bestSafeCandidate = {
                 angle,
                 safety,
                 score
@@ -1433,18 +1505,112 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
         }
     }
 
-    const bestCandidate = bestNonCrossingCandidate
+    const bestCandidate = bestSafeCandidate
         || (hasSelfTrailSafetyBudgetRemaining(budget)
-            ? chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, trailGeometry, candidates, options, budget, diagnostics)
+            ? chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, activeTrailGeometry, candidates, riskOptions, budget, diagnostics)
             : null)
+        || bestNonCrossingCandidate
         || bestAnyCandidate;
 
+    rememberSelfTrailEscapeCandidate(bot, bestCandidate, activeTargetSafety, riskOptions, context);
     finishSelfTrailSafetyBudget(budget);
 
     return {
         angle: bestCandidate.angle,
-        avoidingSelfTrail: true
+        avoidingSelfTrail: true,
+        suppressNoise: shouldSuppressSelfTrailEscapeNoise(activeTargetSafety, bestCandidate)
     };
+}
+
+function createSelfTrailRiskOptions(options = {}, targetSafety = {}, nearestSelfTrailDistanceSquared = Infinity) {
+    const nearestDistance = Math.sqrt(nearestSelfTrailDistanceSquared);
+    const trapMode = Boolean(
+        targetSafety.crossesTrail
+        || targetSafety.budgetHit
+        || targetSafety.clearance < config.bots.selfTrailAvoidDistance * 1.25
+        || nearestDistance < config.bots.selfTrailAvoidDistance * 1.4
+    );
+
+    if (!trapMode) {
+        return options;
+    }
+
+    return {
+        ...options,
+        includeReturnRoute: true,
+        selfTrailLookaheadDistance: getBotSelfTrailTrapLookaheadMaxDistance(),
+        trapMode: true
+    };
+}
+
+function chooseRememberedSelfTrailEscapeCandidate(bot, targetAngle, trailGeometry, options = {}, context = null, budget = null, diagnostics = null) {
+    const ai = getBotAi(bot);
+    const nowMs = getSelfTrailDecisionNowMs(context);
+
+    if (!Number.isFinite(ai.selfTrailEscapeAngle)
+        || !Number.isFinite(ai.selfTrailEscapeUntilMs)
+        || ai.selfTrailEscapeUntilMs <= nowMs) {
+        return null;
+    }
+
+    const safety = getSelfTrailPathSafety(bot, ai.selfTrailEscapeAngle, trailGeometry, options, budget, diagnostics);
+
+    if (isSelfTrailPathUnsafe(safety)) {
+        clearSelfTrailEscapeMemory(bot);
+        return null;
+    }
+
+    return {
+        angle: ai.selfTrailEscapeAngle,
+        safety,
+        score: scoreSelfTrailCandidate(ai.selfTrailEscapeAngle, targetAngle, safety, options)
+    };
+}
+
+function rememberSelfTrailEscapeCandidate(bot, candidate, targetSafety = {}, options = {}, context = null) {
+    if (!candidate || !Number.isFinite(candidate.angle)) {
+        clearSelfTrailEscapeMemory(bot);
+        return;
+    }
+
+    if (!options.trapMode && !isSelfTrailCriticalSafety(targetSafety)) {
+        clearSelfTrailEscapeMemory(bot);
+        return;
+    }
+
+    const ai = getBotAi(bot);
+    const nowMs = getSelfTrailDecisionNowMs(context);
+
+    ai.selfTrailEscapeAngle = candidate.angle;
+    ai.selfTrailEscapeUntilMs = nowMs + getBotSelfTrailEscapeMemoryMs();
+}
+
+function clearSelfTrailEscapeMemory(bot) {
+    if (!bot || !bot.botAi) {
+        return;
+    }
+
+    bot.botAi.selfTrailEscapeAngle = null;
+    bot.botAi.selfTrailEscapeUntilMs = 0;
+}
+
+function getSelfTrailDecisionNowMs(context = null) {
+    return Number.isFinite(context && context.nowMs) ? context.nowMs : Date.now();
+}
+
+function shouldSuppressSelfTrailEscapeNoise(targetSafety = {}, candidate = null) {
+    return isSelfTrailCriticalSafety(targetSafety)
+        || !candidate
+        || !candidate.safety
+        || isSelfTrailPathUnsafe(candidate.safety, 0.8);
+}
+
+function isSelfTrailCriticalSafety(safety = {}) {
+    return Boolean(
+        safety.budgetHit
+        || safety.crossesTrail
+        || safety.clearance < config.bots.selfTrailAvoidDistance * 0.85
+    );
 }
 
 function scoreSelfTrailCandidate(angle, targetAngle, safety, options = {}) {
@@ -1461,10 +1627,10 @@ function scoreSelfTrailCandidate(angle, targetAngle, safety, options = {}) {
     return clearanceScore - targetPenalty - crossPenalty - budgetPenalty;
 }
 
-function createSelfTrailAvoidanceCandidates(bot, targetAngle, options = {}) {
-    const returnTarget = getReturnTarget(bot);
+function createSelfTrailAvoidanceCandidates(bot, targetAngle, options = {}, trailGeometry = null) {
+    const returnTarget = getReturnTarget(bot, options.territories);
     const returnAngle = Math.atan2(returnTarget.y - bot.y, returnTarget.x - bot.x);
-    const baseAngles = options.allowReverse
+    const baseAngles = options.allowReverse || options.includeReturnRoute
         ? [targetAngle, bot.angle, returnAngle].filter(Number.isFinite)
         : [targetAngle, bot.angle].filter(Number.isFinite);
     const offsets = options.allowReverse
@@ -1485,11 +1651,113 @@ function createSelfTrailAvoidanceCandidates(bot, targetAngle, options = {}) {
         addSelfTrailCandidate(candidates, seen, targetAngle + (Math.PI * 2 * index) / fullCircleSteps);
     }
 
+    if (options.trapMode) {
+        addSelfTrailTrapEscapeCandidates(candidates, seen, bot, targetAngle, trailGeometry);
+    }
+
     return candidates;
 }
 
-function limitSelfTrailAvoidanceCandidates(candidates) {
-    const maxCandidates = getBotSelfTrailSafetyMaxCandidates();
+function addSelfTrailTrapEscapeCandidates(candidates, seen, bot, targetAngle, trailGeometry = null) {
+    const feature = getNearestSelfTrailFeature(bot, trailGeometry);
+
+    addSelfTrailCandidate(candidates, seen, bot.angle + Math.PI);
+    addSelfTrailCandidate(candidates, seen, bot.angle + Math.PI / 2);
+    addSelfTrailCandidate(candidates, seen, bot.angle - Math.PI / 2);
+
+    if (!feature) {
+        return;
+    }
+
+    if (Number.isFinite(feature.awayAngle)) {
+        addSelfTrailCandidate(candidates, seen, feature.awayAngle);
+        addSelfTrailCandidate(candidates, seen, feature.awayAngle + 0.45);
+        addSelfTrailCandidate(candidates, seen, feature.awayAngle - 0.45);
+        addSelfTrailCandidate(candidates, seen, feature.awayAngle + Math.PI / 2);
+        addSelfTrailCandidate(candidates, seen, feature.awayAngle - Math.PI / 2);
+    }
+
+    if (Number.isFinite(feature.segmentAngle)) {
+        addSelfTrailCandidate(candidates, seen, feature.segmentAngle);
+        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + Math.PI);
+        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + 0.55);
+        addSelfTrailCandidate(candidates, seen, feature.segmentAngle - 0.55);
+        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + Math.PI + 0.55);
+        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + Math.PI - 0.55);
+    }
+
+    addSelfTrailCandidate(candidates, seen, targetAngle + Math.PI);
+}
+
+function getNearestSelfTrailFeature(bot, trailGeometry = null) {
+    if (!bot || !trailGeometry) {
+        return null;
+    }
+
+    let bestFeature = null;
+
+    for (const point of trailGeometry.points || []) {
+        const distanceSquared = getDistanceSquared(bot, point);
+
+        if (!bestFeature || distanceSquared < bestFeature.distanceSquared) {
+            bestFeature = createSelfTrailFeature(bot, point, distanceSquared, null);
+        }
+    }
+
+    for (const segment of trailGeometry.segments || []) {
+        const closestPoint = getClosestPointOnSegment(bot, segment.start, segment.end);
+        const distanceSquared = getDistanceSquared(bot, closestPoint);
+        const segmentAngle = Math.atan2(segment.end.y - segment.start.y, segment.end.x - segment.start.x);
+
+        if (!bestFeature || distanceSquared < bestFeature.distanceSquared) {
+            bestFeature = createSelfTrailFeature(bot, closestPoint, distanceSquared, segmentAngle);
+        }
+    }
+
+    return bestFeature;
+}
+
+function createSelfTrailFeature(bot, point, distanceSquared, segmentAngle) {
+    return {
+        awayAngle: Math.atan2(bot.y - point.y, bot.x - point.x),
+        distanceSquared,
+        point,
+        segmentAngle
+    };
+}
+
+function getClosestPointOnSegment(point, start, end) {
+    const segmentX = end.x - start.x;
+    const segmentY = end.y - start.y;
+    const lengthSquared = segmentX * segmentX + segmentY * segmentY;
+
+    if (lengthSquared <= geometryEpsilon) {
+        return start;
+    }
+
+    const t = clamp(
+        ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) / lengthSquared,
+        0,
+        1
+    );
+
+    return {
+        x: start.x + segmentX * t,
+        y: start.y + segmentY * t
+    };
+}
+
+function getDistanceSquared(first, second) {
+    const deltaX = first.x - second.x;
+    const deltaY = first.y - second.y;
+
+    return deltaX * deltaX + deltaY * deltaY;
+}
+
+function limitSelfTrailAvoidanceCandidates(candidates, options = {}) {
+    const maxCandidates = options.trapMode
+        ? getBotSelfTrailSafetyTrapMaxCandidates()
+        : getBotSelfTrailSafetyMaxCandidates();
 
     if (!Array.isArray(candidates) || candidates.length <= maxCandidates) {
         return candidates || [];
@@ -1517,7 +1785,7 @@ function chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, trailGeometry, ca
 
         const safety = getSelfTrailPathSafety(bot, angle, trailGeometry, localOptions, budget, diagnostics);
 
-        if (safety.crossesTrail || safety.budgetHit) {
+        if (isSelfTrailPathUnsafe(safety)) {
             continue;
         }
 
@@ -1773,6 +2041,10 @@ function getBotMovementConfig(bot) {
 }
 
 function getSelfTrailLookaheadDistance(options = {}) {
+    if (Number.isFinite(options.selfTrailLookaheadDistance) && options.selfTrailLookaheadDistance > 0) {
+        return Math.min(options.selfTrailLookaheadDistance, getBotSelfTrailTrapLookaheadMaxDistance());
+    }
+
     const decisionDistance = config.movement.speed * (config.bots.decisionIntervalMs / 1000) * 2.5;
     const targetDistance = Number.isFinite(options.targetDistance)
         ? Math.min(options.targetDistance, config.world.mapRadius)
@@ -1830,15 +2102,14 @@ function getSelfTrailSegmentsCached(context, player, options = {}) {
 
 function getTrailPoints(player, options = {}) {
     const points = [];
+    const skipRecent = Number.isFinite(options.skipRecent)
+        ? Math.max(0, Math.floor(options.skipRecent))
+        : 0;
 
-    appendTrailPoints(points, player.trailLeftSegments);
-    appendTrailPoints(points, player.trailRightSegments);
+    appendTrailPoints(points, player.trailLeftSegments, skipRecent);
+    appendTrailPoints(points, player.trailRightSegments, skipRecent);
 
-    if (!options.skipRecent || points.length <= options.skipRecent) {
-        return points;
-    }
-
-    return points.slice(0, points.length - options.skipRecent);
+    return points;
 }
 
 function getSelfTrailSegments(player, options = {}) {
@@ -1850,9 +2121,26 @@ function getSelfTrailSegments(player, options = {}) {
     return segments;
 }
 
-function appendTrailPoints(target, segments) {
-    for (const segment of segments || []) {
-        for (const point of segment || []) {
+function appendTrailPoints(target, segments, skipRecent = 0) {
+    if (!Array.isArray(segments)) {
+        return;
+    }
+
+    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
+        const segment = segments[segmentIndex];
+
+        if (!Array.isArray(segment)) {
+            continue;
+        }
+
+        const isLastSegment = segmentIndex === segments.length - 1;
+        const usablePointCount = isLastSegment
+            ? Math.max(0, segment.length - skipRecent)
+            : segment.length;
+
+        for (let pointIndex = 0; pointIndex < usablePointCount; pointIndex++) {
+            const point = segment[pointIndex];
+
             if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
                 target.push(point);
             }
@@ -1965,7 +2253,9 @@ function getBotAi(bot) {
         bot.botAi = {
             expansionPlan: null,
             orbitDirection: Math.random() < 0.5 ? -1 : 1,
-            orbitPhase: Math.random() * Math.PI * 2
+            orbitPhase: Math.random() * Math.PI * 2,
+            selfTrailEscapeAngle: null,
+            selfTrailEscapeUntilMs: 0
         };
     }
 
