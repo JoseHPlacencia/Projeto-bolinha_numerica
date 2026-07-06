@@ -15,6 +15,7 @@ const { getHighResolutionTime } = require("../utils/time");
 const {
     clearCatchEliminationMarksByMarker,
     clearCatchEliminationMarksForTarget,
+    confirmCatchEliminationTargets,
     handlePlayerLifeLoss
 } = require("./catchModeSystem");
 const { captureClosedTrail } = require("./dominationSystem");
@@ -233,6 +234,7 @@ function updatePlayerTrail(player, territories, players = new Map([[player.id, p
 
             if (capturedPolygon) {
                 addTrailDiagnosticCount(diagnostics, "captures", 1);
+                confirmCatchEliminationTargets(players, territories, player, context);
                 player.consumeCatchBalance(1);
             }
         }

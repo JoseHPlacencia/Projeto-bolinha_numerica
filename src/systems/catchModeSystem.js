@@ -26,11 +26,11 @@ function handleNumberCollected(players, territories, collection, context = {}) {
     player.recordCatchNumber(collection.belongsToTheme);
 
     if (collection.belongsToTheme) {
-        eliminatePendingTargets(players, territories, player, context);
+        confirmCatchEliminationTargets(players, territories, player, context);
     }
 }
 
-function eliminatePendingTargets(players, territories, attacker, context) {
+function confirmCatchEliminationTargets(players, territories, attacker, context = {}) {
     for (const targetId of attacker.consumeCatchEliminationTargets()) {
         const target = players.get(targetId);
 
@@ -371,6 +371,7 @@ function clearCatchEliminationMarksByMarker(marker) {
 module.exports = {
     clearCatchEliminationMarksByMarker,
     clearCatchEliminationMarksForTarget,
+    confirmCatchEliminationTargets,
     createCatchCombatFrame,
     endPlayerGame,
     handleNumberCollected,

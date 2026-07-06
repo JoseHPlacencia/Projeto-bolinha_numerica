@@ -408,7 +408,13 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
         return incomingMarkResponse;
     }
 
-    const pendingTarget = choosePendingEliminationTarget(bot, correctNumbers);
+    const pendingCaptureTarget = choosePendingCaptureConfirmationTarget(bot, territories);
+
+    if (pendingCaptureTarget) {
+        return pendingCaptureTarget;
+    }
+
+    const pendingTarget = choosePendingEliminationTarget(bot, players, territories, correctNumbers, context);
 
     if (pendingTarget) {
         return pendingTarget;
@@ -426,6 +432,14 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
         return getReturnTarget(bot, territories);
     }
 
+    const balanceCaptureTarget = measureBotPhase(diagnostics, "balanceCapture", () => (
+        chooseBalanceCaptureTrailTarget(bot, players, territories, threat, context)
+    ));
+
+    if (balanceCaptureTarget && Math.random() >= config.bots.mistakeChance) {
+        return balanceCaptureTarget;
+    }
+
     const huntTarget = measureBotPhase(diagnostics, "hunt", () => (
         chooseHuntTarget(bot, players, territories, correctNumbers, threat, context)
     ));
@@ -441,12 +455,80 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
     return getReturnTarget(bot, territories);
 }
 
-function choosePendingEliminationTarget(bot, correctNumbers) {
+function choosePendingEliminationTarget(bot, players, territories, correctNumbers, context = null) {
     if (!bot.pendingCatchEliminationTargets || bot.pendingCatchEliminationTargets.size === 0) {
         return null;
     }
 
-    return findNearestPoint(bot, correctNumbers);
+    const number = findNearestPoint(bot, correctNumbers);
+
+    if (!number) {
+        return getReturnTarget(bot, territories);
+    }
+
+    const confirmTime = estimateTravelTime(bot, number);
+
+    return canConfirmPendingEliminationsBeforeCounterattack(bot, players, territories, confirmTime, context)
+        ? number
+        : getReturnTarget(bot, territories);
+}
+
+function choosePendingCaptureConfirmationTarget(bot, territories) {
+    if (bot.catchBalance <= 0
+        || !bot.pendingCatchEliminationTargets
+        || bot.pendingCatchEliminationTargets.size === 0
+        || !hasAnyTrail(bot)) {
+        return null;
+    }
+
+    return getReturnTarget(bot, territories);
+}
+
+function canConfirmPendingEliminationsBeforeCounterattack(bot, players, territories, confirmTime, context = null) {
+    const requiredMargin = getMarkedCounterattackMarginSec();
+
+    for (const targetId of bot.pendingCatchEliminationTargets || []) {
+        const target = players.get(targetId);
+
+        if (!target) {
+            continue;
+        }
+
+        const targetReturnTime = estimateTravelTime(target, getReturnTarget(target, territories));
+
+        if (confirmTime + requiredMargin >= targetReturnTime) {
+            return false;
+        }
+
+        const counterattackTime = estimateOutgoingCounterattackTime(bot, target, targetReturnTime, context);
+
+        if (Number.isFinite(counterattackTime) && confirmTime + requiredMargin >= counterattackTime) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function estimateOutgoingCounterattackTime(marker, target, targetReturnTime, context = null) {
+    if (!marker
+        || !target
+        || typeof marker.getCatchEliminationMarkedAt !== "function") {
+        return Infinity;
+    }
+
+    const markedAt = marker.getCatchEliminationMarkedAt(target.id);
+
+    if (!Number.isFinite(markedAt)) {
+        return Infinity;
+    }
+
+    const nowMs = Number.isFinite(context && context.nowMs) ? context.nowMs : Date.now();
+    const remainingGraceSec = Math.max(0, getCounterattackGraceMs(marker) - (nowMs - markedAt)) / 1000;
+
+    return targetReturnTime >= remainingGraceSec
+        ? targetReturnTime
+        : Infinity;
 }
 
 function chooseIncomingMarkResponse(bot, players, territories, correctNumbers, context = null) {
@@ -690,6 +772,111 @@ function estimatePunishTime(enemy, trailPoints, correctNumbers) {
     return bestTime;
 }
 
+function chooseBalanceCaptureTrailTarget(bot, players, territories, threat = null, context = null) {
+    if (bot.catchBalance <= 0
+        || hasAnyTrail(bot)
+        || !isPlayerInsideOwnTerritory(territories, bot)) {
+        return null;
+    }
+
+    const returnTarget = getReturnTarget(bot, territories);
+    let bestTarget = null;
+
+    for (const enemy of players.values()) {
+        if (enemy.id === bot.id) {
+            continue;
+        }
+
+        const enemyTrailPoints = getTrailPointsCached(context, enemy);
+
+        if (enemyTrailPoints.length < 2) {
+            continue;
+        }
+
+        const trailPoint = findNearestPoint(bot, enemyTrailPoints);
+
+        if (!trailPoint || !isBalanceCaptureTrailPointInRange(bot, trailPoint)) {
+            continue;
+        }
+
+        const requiredMargin = getBalanceCaptureReturnMarginSec();
+        const botCaptureTime = estimateBalanceCaptureTime(bot, trailPoint, returnTarget);
+        const counterRisk = evaluateTrailMarkCounterattackRisk(bot, enemy, territories, trailPoint, botCaptureTime, requiredMargin);
+
+        if (!counterRisk.safe) {
+            continue;
+        }
+
+        const score = scoreBalanceCaptureTarget({
+            bot,
+            botCaptureTime,
+            enemy,
+            enemyReturnTime: counterRisk.enemyReturnTime,
+            threat,
+            trailPoint
+        });
+
+        if (!bestTarget || score > bestTarget.score) {
+            bestTarget = {
+                score,
+                target: trailPoint
+            };
+        }
+    }
+
+    return bestTarget && bestTarget.target;
+}
+
+function isBalanceCaptureTrailPointInRange(bot, trailPoint) {
+    const baseDistance = distanceBetween(bot.territoryX, bot.territoryY, trailPoint.x, trailPoint.y);
+    const botDistance = distanceBetween(bot.x, bot.y, trailPoint.x, trailPoint.y);
+
+    return baseDistance <= getBalanceCaptureBaseRadius()
+        && botDistance <= getBalanceCaptureTrailRadius();
+}
+
+function estimateBalanceCaptureTime(bot, trailPoint, returnTarget) {
+    return (
+        distanceBetween(bot.x, bot.y, trailPoint.x, trailPoint.y)
+        + distanceBetween(trailPoint.x, trailPoint.y, returnTarget.x, returnTarget.y)
+    ) / getPlayerMovementSpeed(bot);
+}
+
+function scoreBalanceCaptureTarget(options) {
+    const safetyScore = getThreatMarginSafetyScore(options.threat && options.threat.marginSec);
+    const enemyVulnerability = getEnemyVulnerabilityScore(options.enemy, options.enemyReturnTime);
+    const baseProximityScore = 1 - clamp(
+        distanceBetween(options.bot.territoryX, options.bot.territoryY, options.trailPoint.x, options.trailPoint.y)
+            / Math.max(getBalanceCaptureBaseRadius(), 1),
+        0,
+        1
+    );
+
+    return (options.enemyReturnTime - options.botCaptureTime) * 2.4
+        + enemyVulnerability * 1.2
+        + baseProximityScore
+        + safetyScore * 0.6
+        - options.botCaptureTime * 0.35;
+}
+
+function getBalanceCaptureBaseRadius() {
+    const radius = Number(config.bots.balanceCaptureBaseRadius);
+
+    return Number.isFinite(radius) && radius > 0 ? radius : config.bots.huntRadius;
+}
+
+function getBalanceCaptureTrailRadius() {
+    const radius = Number(config.bots.balanceCaptureTrailRadius);
+
+    return Number.isFinite(radius) && radius > 0 ? radius : config.bots.huntRadius;
+}
+
+function getBalanceCaptureReturnMarginSec() {
+    const margin = Number(config.bots.balanceCaptureReturnMarginSec);
+
+    return Number.isFinite(margin) ? Math.max(0, margin) : getMarkedCounterattackMarginSec();
+}
+
 function chooseHuntTarget(bot, players, territories, correctNumbers, threat = null, context = null) {
     if (correctNumbers.length === 0) {
         return null;
@@ -730,14 +917,22 @@ function chooseHuntTarget(bot, players, territories, correctNumbers, threat = nu
             ? estimateTravelTime(bot, number)
             : (distanceBetween(bot.x, bot.y, enemyTrailPoint.x, enemyTrailPoint.y)
                 + distanceBetween(enemyTrailPoint.x, enemyTrailPoint.y, number.x, number.y)) / getPlayerMovementSpeed(bot);
-        const enemyReturnTime = estimateTravelTime(enemy, getReturnTarget(enemy, territories));
-        const eliminationWindow = enemyReturnTime - botTime;
-        const requiredMargin = getHuntRequiredMargin(bot, enemy, threat, enemyReturnTime);
+        const markPoint = hasPendingTarget ? null : enemyTrailPoint;
+        const preliminaryEnemyReturnTime = estimateTravelTime(enemy, getReturnTarget(enemy, territories));
+        const requiredMargin = getHuntRequiredMargin(bot, enemy, threat, preliminaryEnemyReturnTime);
+        const counterRisk = markPoint
+            ? evaluateTrailMarkCounterattackRisk(bot, enemy, territories, markPoint, botTime, requiredMargin)
+            : {
+                enemyReturnTime: preliminaryEnemyReturnTime,
+                safe: botTime + requiredMargin < preliminaryEnemyReturnTime
+            };
 
-        if (eliminationWindow < requiredMargin) {
+        if (!counterRisk.safe) {
             continue;
         }
 
+        const enemyReturnTime = counterRisk.enemyReturnTime;
+        const eliminationWindow = enemyReturnTime - botTime;
         const huntScore = scoreHuntTarget({
             bot,
             botTime,
@@ -757,6 +952,35 @@ function chooseHuntTarget(bot, players, territories, correctNumbers, threat = nu
     }
 
     return bestHunt && bestHunt.target;
+}
+
+function evaluateTrailMarkCounterattackRisk(bot, enemy, territories, trailPoint, confirmTime, requiredMargin = 0) {
+    const enemyReturnTime = estimateTravelTime(enemy, getReturnTarget(enemy, territories));
+
+    if (confirmTime + requiredMargin >= enemyReturnTime) {
+        return {
+            enemyReturnTime,
+            safe: false
+        };
+    }
+
+    const markTime = estimateTravelTime(bot, trailPoint);
+    const counterattackTime = estimateProspectiveCounterattackTime(bot, markTime, enemyReturnTime);
+
+    return {
+        counterattackTime,
+        enemyReturnTime,
+        safe: !Number.isFinite(counterattackTime)
+            || confirmTime + requiredMargin < counterattackTime
+    };
+}
+
+function estimateProspectiveCounterattackTime(marker, markTime, targetReturnTime) {
+    const graceSec = getCounterattackGraceMs(marker) / 1000;
+
+    return targetReturnTime - markTime >= graceSec
+        ? targetReturnTime
+        : Infinity;
 }
 
 function getHuntRequiredMargin(bot, enemy, threat, enemyReturnTime) {
@@ -1167,6 +1391,12 @@ function getReturnTerritoryPolygon(player, territories) {
     const polygon = getPlayerTerritoryPolygon(territories, player.id);
 
     return Array.isArray(polygon) && polygon.length > 0 ? polygon : null;
+}
+
+function isPlayerInsideOwnTerritory(territories, player) {
+    const territoryPolygon = getReturnTerritoryPolygon(player, territories);
+
+    return Boolean(territoryPolygon && isPointInPolygon(territoryPolygon, player.x, player.y));
 }
 
 function getAngledTerritoryReturnTarget(player, territoryPolygon, angle) {
