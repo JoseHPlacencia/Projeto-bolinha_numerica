@@ -442,6 +442,10 @@ function cloneTrailDiagnostics(trailDiagnostics) {
         playersProcessed: trailDiagnostics.playersProcessed,
         selfCollisionTests: trailDiagnostics.selfCollisionTests,
         selfCollisions: trailDiagnostics.selfCollisions,
+        selfPathPrimitiveCacheHits: trailDiagnostics.selfPathPrimitiveCacheHits,
+        selfPathPrimitiveCacheMisses: trailDiagnostics.selfPathPrimitiveCacheMisses,
+        selfPathPrimitiveCount: trailDiagnostics.selfPathPrimitiveCount,
+        selfPathPrimitiveInputPointCount: trailDiagnostics.selfPathPrimitiveInputPointCount,
         selfTrailSegmentChecks: trailDiagnostics.selfTrailSegmentChecks,
         slowestPhase: trailDiagnostics.slowestPhase
             ? { ...trailDiagnostics.slowestPhase }
@@ -479,6 +483,10 @@ function normalizeTrailDiagnostics(trailDiagnostics) {
         playersProcessed: finiteOrNull(trailDiagnostics.playersProcessed),
         selfCollisionTests: finiteOrNull(trailDiagnostics.selfCollisionTests),
         selfCollisions: finiteOrNull(trailDiagnostics.selfCollisions),
+        selfPathPrimitiveCacheHits: finiteOrNull(trailDiagnostics.selfPathPrimitiveCacheHits),
+        selfPathPrimitiveCacheMisses: finiteOrNull(trailDiagnostics.selfPathPrimitiveCacheMisses),
+        selfPathPrimitiveCount: finiteOrNull(trailDiagnostics.selfPathPrimitiveCount),
+        selfPathPrimitiveInputPointCount: finiteOrNull(trailDiagnostics.selfPathPrimitiveInputPointCount),
         selfTrailSegmentChecks: finiteOrNull(trailDiagnostics.selfTrailSegmentChecks),
         slowestPhase: normalizeGameLoopSlowestPhase(trailDiagnostics.slowestPhase),
         trailOwnerChecks: finiteOrNull(trailDiagnostics.trailOwnerChecks),

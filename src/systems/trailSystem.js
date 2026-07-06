@@ -12,6 +12,7 @@ const {
 } = require("../utils/geometry");
 const { distanceBetween } = require("../utils/math");
 const {
+    createLinePrimitivesFromPoints,
     createPathPrimitivesFromPoints,
     doesLineCrossPathPrimitive
 } = require("../utils/pathSegments");
@@ -26,6 +27,7 @@ const { captureClosedTrail } = require("./dominationSystem");
 
 const geometryEpsilon = 1e-7;
 const pathPrimitiveCache = new WeakMap();
+const selfTrailLinePrimitiveCache = new WeakMap();
 
 const trailSides = Object.freeze({
     left: Object.freeze({
@@ -62,6 +64,10 @@ function createTrailUpdateDiagnostics() {
         pathPrimitiveCacheMisses: 0,
         pathPrimitiveCount: 0,
         pathPrimitiveInputPointCount: 0,
+        selfPathPrimitiveCacheHits: 0,
+        selfPathPrimitiveCacheMisses: 0,
+        selfPathPrimitiveCount: 0,
+        selfPathPrimitiveInputPointCount: 0,
         phases: {},
         playersProcessed: 0,
         selfCollisionTests: 0,
@@ -629,7 +635,7 @@ function doesLineCrossSideTrails(player, movingSide, storedSide, startPoint, end
             continue;
         }
 
-        const primitives = getTrailCollisionPrimitives(segment, maxPointCount, diagnostics);
+        const primitives = getSelfTrailCollisionPrimitives(segment, maxPointCount, diagnostics);
 
         for (const primitive of primitives) {
             checkedPrimitiveCount++;
@@ -714,6 +720,61 @@ function getTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics 
     return safePrimitives;
 }
 
+function getSelfTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics = null) {
+    if (!Array.isArray(segment)) {
+        return [];
+    }
+
+    const sourcePointCount = Number.isInteger(maxPointCount)
+        ? Math.min(segment.length, Math.max(0, maxPointCount))
+        : segment.length;
+
+    if (sourcePointCount < 2) {
+        return [];
+    }
+
+    const cached = selfTrailLinePrimitiveCache.get(segment);
+    const cacheKey = Number.isInteger(maxPointCount) ? sourcePointCount : "all";
+    const lastPoint = segment[sourcePointCount - 1];
+    const cacheEntry = cached && cached.get(cacheKey);
+
+    if (cacheEntry
+        && cacheEntry.sourcePointCount === sourcePointCount
+        && cacheEntry.lastX === lastPoint.x
+        && cacheEntry.lastY === lastPoint.y) {
+        addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCacheHits", 1);
+        addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCount", cacheEntry.primitives.length);
+        addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveInputPointCount", sourcePointCount);
+        return cacheEntry.primitives;
+    }
+
+    const points = sourcePointCount === segment.length
+        ? segment
+        : segment.slice(0, sourcePointCount);
+    const primitives = createLinePrimitivesFromPoints(points, {
+        angleThresholdRadians: getPathSegmentAngleThresholdRadians(),
+        maxDeviation: getSelfTrailLineSimplifyTolerance()
+    });
+    const safePrimitives = primitives.length > 0
+        ? primitives
+        : createFallbackLinePrimitives(points);
+    const nextCache = cached || new Map();
+
+    nextCache.set(cacheKey, {
+        lastX: lastPoint.x,
+        lastY: lastPoint.y,
+        primitives: safePrimitives,
+        sourcePointCount
+    });
+    selfTrailLinePrimitiveCache.set(segment, nextCache);
+
+    addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCacheMisses", 1);
+    addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCount", safePrimitives.length);
+    addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveInputPointCount", sourcePointCount);
+
+    return safePrimitives;
+}
+
 function createFallbackLinePrimitives(points) {
     const primitives = [];
 
@@ -748,6 +809,12 @@ function getPathSegmentArcMaxRadialDrift() {
     const value = Number(config.territory.pathSegmentArcMaxRadialDrift);
 
     return Number.isFinite(value) && value >= 0 ? value : 2;
+}
+
+function getSelfTrailLineSimplifyTolerance() {
+    const value = Number(config.territory.selfTrailLineSimplifyTolerance);
+
+    return Number.isFinite(value) && value >= 0 ? value : 1.5;
 }
 
 function degreesToRadians(value, fallbackDegrees) {

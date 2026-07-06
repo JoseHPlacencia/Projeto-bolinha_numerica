@@ -2,6 +2,7 @@ const geometryEpsilon = 1e-7;
 const defaultAngleThresholdRadians = Math.PI / 180;
 const defaultMaxArcSweepRadians = Math.PI * 0.75;
 const defaultMaxArcRadialDrift = 2;
+const defaultLineDeviationTolerance = 1.5;
 
 function createPathPrimitivesFromPoints(points, options = {}) {
     const validPoints = getValidPoints(points);
@@ -79,6 +80,72 @@ function doesLineCrossPathPrimitive(startPoint, endPoint, primitive) {
     }
 
     return false;
+}
+
+function createLinePrimitivesFromPoints(points, options = {}) {
+    const validPoints = getValidPoints(points);
+
+    if (validPoints.length < 2) {
+        return [];
+    }
+
+    const angleThresholdRadians = getPositiveNumberOption(
+        options.angleThresholdRadians,
+        defaultAngleThresholdRadians
+    );
+    const maxDeviation = getNonNegativeNumberOption(
+        options.maxDeviation,
+        defaultLineDeviationTolerance
+    );
+    const primitives = [];
+    let runStartIndex = 0;
+    let index = 2;
+
+    while (index < validPoints.length) {
+        if (canUseLinePrimitiveRun(validPoints, runStartIndex, index, {
+            angleThresholdRadians,
+            maxDeviation
+        })) {
+            index++;
+            continue;
+        }
+
+        pushLinePrimitive(primitives, validPoints, runStartIndex, index - 1);
+        runStartIndex = index - 1;
+        index = runStartIndex + 2;
+    }
+
+    pushLinePrimitive(primitives, validPoints, runStartIndex, validPoints.length - 1);
+
+    return primitives;
+}
+
+function canUseLinePrimitiveRun(points, startIndex, endIndex, options) {
+    const startPoint = points[startIndex];
+    const endPoint = points[endIndex];
+
+    if (!startPoint || !endPoint || endIndex <= startIndex + 1) {
+        return true;
+    }
+
+    const chordAngle = getSegmentAngle(startPoint, endPoint);
+    const maxDeviationSquared = options.maxDeviation * options.maxDeviation;
+
+    for (let index = startIndex; index < endIndex; index++) {
+        const segmentAngle = getSegmentAngle(points[index], points[index + 1]);
+
+        if (Math.abs(getAngleDelta(chordAngle, segmentAngle)) > options.angleThresholdRadians) {
+            return false;
+        }
+    }
+
+    for (let index = startIndex + 1; index < endIndex; index++) {
+        if (getPointLineSegmentDistanceSquared(points[index], startPoint, endPoint) > maxDeviationSquared) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 function pushLinePrimitive(primitives, points, startIndex, endIndex) {
@@ -401,6 +468,23 @@ function pointOnCircle(center, radius, angle) {
     };
 }
 
+function getPointLineSegmentDistanceSquared(point, segmentStart, segmentEnd) {
+    const direction = subtractPoints(segmentEnd, segmentStart);
+    const lengthSquared = dotProduct(direction, direction);
+
+    if (lengthSquared <= geometryEpsilon) {
+        return getDistanceSquared(point, segmentStart);
+    }
+
+    const t = clamp(dotProduct(subtractPoints(point, segmentStart), direction) / lengthSquared, 0, 1);
+    const projection = {
+        x: segmentStart.x + direction.x * t,
+        y: segmentStart.y + direction.y * t
+    };
+
+    return getDistanceSquared(point, projection);
+}
+
 function getSegmentAngle(startPoint, endPoint) {
     return Math.atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x);
 }
@@ -441,6 +525,17 @@ function distanceBetweenPoints(first, second) {
     return Math.hypot(first.x - second.x, first.y - second.y);
 }
 
+function getDistanceSquared(first, second) {
+    const deltaX = first.x - second.x;
+    const deltaY = first.y - second.y;
+
+    return deltaX * deltaX + deltaY * deltaY;
+}
+
+function clamp(value, min, max) {
+    return Math.min(Math.max(value, min), max);
+}
+
 function getPositiveNumberOption(value, fallback) {
     return Number.isFinite(value) && value > 0 ? value : fallback;
 }
@@ -450,6 +545,7 @@ function getNonNegativeNumberOption(value, fallback) {
 }
 
 module.exports = {
+    createLinePrimitivesFromPoints,
     createPathPrimitivesFromPoints,
     doesLineCrossPathPrimitive
 };
