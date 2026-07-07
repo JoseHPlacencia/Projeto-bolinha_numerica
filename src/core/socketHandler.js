@@ -52,10 +52,15 @@ function registerNetworkDiagnosticsEvents(socket) {
         if (!diagnosticsGuard.canHandleInput()) return;
 
         const enabled = !(rawOptions && rawOptions.enabled === false);
+        const captureOverlapAudit = enabled
+            && rawOptions
+            && rawOptions.captureOverlapAudit === true;
         socket.data.networkDiagnosticsEnabled = enabled;
+        socket.data.captureOverlapAuditEnabled = captureOverlapAudit;
 
         if (typeof acknowledge === "function") {
             acknowledge({
+                captureOverlapAudit,
                 enabled,
                 serverTime: Date.now(),
                 transport: getSocketTransportName(socket)
@@ -68,6 +73,7 @@ function registerNetworkDiagnosticsEvents(socket) {
 
         acknowledge({
             clientSentAt: rawPayload && rawPayload.clientSentAt,
+            captureOverlapAudit: Boolean(socket.data.captureOverlapAuditEnabled),
             diagnosticsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
             serverTime: Date.now(),
             transport: getSocketTransportName(socket)

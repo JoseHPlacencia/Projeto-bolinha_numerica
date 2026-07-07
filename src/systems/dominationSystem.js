@@ -134,7 +134,7 @@ function shouldAuditCaptureOverlaps(context) {
     }
 
     for (const socket of sockets.values()) {
-        if (!socket || !socket.data || socket.data.networkDiagnosticsEnabled !== true) {
+        if (!socket || !socket.data || socket.data.captureOverlapAuditEnabled !== true) {
             continue;
         }
 

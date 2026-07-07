@@ -37,9 +37,10 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
 
     return api;
 
-    function enable() {
+    function enable(options = {}) {
         enabled = true;
         return emitWithAck("networkDiagnostics", {
+            captureOverlapAudit: options.captureOverlapAudit === true,
             enabled: true
         }).then(response => {
             recordEvent("diagnostics-enabled", response);
@@ -65,7 +66,9 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         );
 
         enabled = true;
-        enable();
+        enable({
+            captureOverlapAudit: options.captureOverlapAudit === true
+        });
         stopTimer();
         timerId = setInterval(() => {
             ping().catch(() => null);
