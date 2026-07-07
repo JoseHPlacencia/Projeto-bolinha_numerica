@@ -48,6 +48,7 @@ function captureClosedTrail(player, territories, players, context = {}) {
     ));
     const changedPlayerIds = measureTrailPhase(diagnostics, "captureApplyTerritory", () => (
         applyCapturedPolygon(territories, player.id, newlyCapturedPolygon, {
+            captureOverlapAudit: shouldAuditCaptureOverlaps(context),
             diagnostics,
             ownerPolygon,
             players
@@ -115,6 +116,34 @@ function addTrailDiagnosticCount(diagnostics, name, value) {
     }
 
     diagnostics[name] = (diagnostics[name] || 0) + value;
+}
+
+function shouldAuditCaptureOverlaps(context) {
+    if (config.network.captureOverlapAuditEnabled === true) {
+        return true;
+    }
+
+    const roomCode = context && context.roomCode;
+    const sockets = context
+        && context.io
+        && context.io.sockets
+        && context.io.sockets.sockets;
+
+    if (!roomCode || !sockets || typeof sockets.values !== "function") {
+        return false;
+    }
+
+    for (const socket of sockets.values()) {
+        if (!socket || !socket.data || socket.data.networkDiagnosticsEnabled !== true) {
+            continue;
+        }
+
+        if (socket.data.roomCode === roomCode || socket.data.spectatorRoomCode === roomCode) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function getCaptureOwnerPolygon(capture) {

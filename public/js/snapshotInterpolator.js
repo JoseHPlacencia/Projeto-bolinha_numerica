@@ -592,6 +592,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             firstId: typeof value.firstId === "string" ? value.firstId : null,
             firstPointCount: finiteOrNull(value.firstPointCount),
             firstVersion: finiteOrNull(value.firstVersion),
+            overlapArea: finiteOrNull(value.overlapArea),
             secondId: typeof value.secondId === "string" ? value.secondId : null,
             secondPointCount: finiteOrNull(value.secondPointCount),
             secondVersion: finiteOrNull(value.secondVersion)

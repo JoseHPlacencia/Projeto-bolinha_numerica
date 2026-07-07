@@ -625,6 +625,7 @@ function normalizePostCaptureOverlap(detail) {
         firstId: typeof detail.firstId === "string" ? detail.firstId : null,
         firstPointCount: finiteOrNull(detail.firstPointCount),
         firstVersion: finiteOrNull(detail.firstVersion),
+        overlapArea: finiteOrNull(detail.overlapArea),
         secondId: typeof detail.secondId === "string" ? detail.secondId : null,
         secondPointCount: finiteOrNull(detail.secondPointCount),
         secondVersion: finiteOrNull(detail.secondVersion)

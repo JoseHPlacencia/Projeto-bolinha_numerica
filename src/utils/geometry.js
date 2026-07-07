@@ -92,6 +92,21 @@ function subtractPolygonComponents(subject, clipping) {
     }
 }
 
+function calculatePolygonIntersectionArea(first, second) {
+    if (!hasPolygon(first) || !hasPolygon(second)) {
+        return 0;
+    }
+
+    try {
+        return normalizeMultiPolygon(polygonClipping.intersection(
+            polygonToMultiPolygon(first),
+            polygonToMultiPolygon(second)
+        )).reduce((sum, polygon) => sum + calculatePolygonArea(polygon), 0);
+    } catch (_error) {
+        return doPolygonsOverlap(first, second) ? geometryEpsilon : 0;
+    }
+}
+
 function createOperationalPolygon(polygon, options = {}) {
     const rawInputPointCount = getPolygonPointCount(polygon);
     const rawArea = calculatePolygonArea(polygon);
@@ -909,6 +924,7 @@ function hasPolygons(multiPolygon) {
 }
 
 module.exports = {
+    calculatePolygonIntersectionArea,
     calculatePolygonArea,
     calculatePolygonCentroid,
     createCirclePolygon,

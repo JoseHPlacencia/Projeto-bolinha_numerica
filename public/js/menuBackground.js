@@ -16,11 +16,16 @@ export function createMenuBackground(gameConfig) {
         autoConnect: false,
         reconnection: false
     });
-    const renderer = createWorldRenderer(canvas, gameConfig, { worker: false });
+    const renderer = createWorldRenderer(canvas, gameConfig, {
+        onSnapshotCacheInvalid: invalidations => socket.emit("snapshotCacheInvalid", invalidations),
+        onSnapshotResync: () => socket.emit("snapshotResync")
+    });
     const snapshots = createSnapshotInterpolator(gameConfig.network, {
         onResyncNeeded: () => socket.emit("snapshotResync")
     });
-    const context = canvas.getContext("2d");
+    const context = renderer.getDebugState().mode === "worker"
+        ? null
+        : canvas.getContext("2d");
 
     let animationFrame = null;
     let followId = null;
@@ -107,6 +112,7 @@ export function createMenuBackground(gameConfig) {
         snapshots.reset();
         renderer.resetSnapshots();
         followId = null;
+        renderer.setPlayerId(null);
         cancelRenderFrame();
         clearCanvas();
     }
@@ -130,6 +136,7 @@ export function createMenuBackground(gameConfig) {
         }
 
         followId = renderFollowId;
+        renderer.setPlayerId(renderFollowId);
         renderer.renderWorld(state, renderFollowId);
     }
 

@@ -315,13 +315,12 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
 
         const version = territory.version || 0;
         const knownTerritory = clientState.territories.get(territoryId);
-        const forceFullTerritory = captureSync.forcedFullTerritoryIds.has(territoryId);
-        const forceCaptureOwnerSync = captureSync.ownerGroupIds.has(territoryId);
+        const forceFullTerritory = captureSync.forcedFullTerritoryIds.has(territoryId)
+            || captureSync.ownerGroupIds.has(territoryId);
         let includeTerritoryId = Boolean(knownTerritory);
 
         if (
             !forceFullTerritory
-            && !forceCaptureOwnerSync
             && !shouldSendVersionedState(knownTerritory, version, now, config.network.territoryFullSyncIntervalMs)
         ) {
             includedTerritoryIds.push(territoryId);
@@ -347,7 +346,7 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
         }
 
         if (!consumeSnapshotPayloadBudget(payloadBudget, "territories", estimateTerritoryPayloadBytes(territory), {
-            force: territoryId === viewerId || forceFullTerritory || forceCaptureOwnerSync
+            force: territoryId === viewerId || forceFullTerritory
         })) {
             if (includeTerritoryId) {
                 includedTerritoryIds.push(territoryId);

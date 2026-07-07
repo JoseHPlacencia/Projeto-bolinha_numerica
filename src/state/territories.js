@@ -1,5 +1,6 @@
 const config = require("../config/gameConfig");
 const {
+    calculatePolygonIntersectionArea,
     calculatePolygonArea,
     createCirclePolygon,
     createOperationalPolygon,
@@ -218,9 +219,11 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         }
     }
 
-    measureCaptureApplyPhase(diagnostics, "captureApplyPostOverlapAudit", () => {
-        auditChangedTerritoryOverlaps(territories, changedPlayerIds, captureApply);
-    });
+    if (options.captureOverlapAudit === true) {
+        measureCaptureApplyPhase(diagnostics, "captureApplyPostOverlapAudit", () => {
+            auditChangedTerritoryOverlaps(territories, changedPlayerIds, captureApply);
+        });
+    }
 
     return changedPlayerIds;
 }
@@ -436,12 +439,14 @@ function auditChangedTerritoryOverlaps(territories, changedPlayerIds, metrics) {
                 continue;
             }
 
-            if (!doPolygonsOverlap(changedTerritory.polygon, otherTerritory.polygon, changedBounds, otherBounds)) {
+            const overlapArea = calculatePolygonIntersectionArea(changedTerritory.polygon, otherTerritory.polygon);
+
+            if (overlapArea <= territoryChangeAreaEpsilon) {
                 continue;
             }
 
             addCaptureApplyCount(metrics, "postCaptureOverlapCount", 1);
-            recordFirstPostCaptureOverlap(metrics, changedPlayerId, otherPlayerId, changedTerritory, otherTerritory);
+            recordFirstPostCaptureOverlap(metrics, changedPlayerId, otherPlayerId, changedTerritory, otherTerritory, overlapArea);
         }
     }
 }
@@ -452,7 +457,7 @@ function createTerritoryPairKey(firstId, secondId) {
         : `${secondId}\0${firstId}`;
 }
 
-function recordFirstPostCaptureOverlap(metrics, firstId, secondId, firstTerritory, secondTerritory) {
+function recordFirstPostCaptureOverlap(metrics, firstId, secondId, firstTerritory, secondTerritory, overlapArea) {
     if (!metrics || metrics.postCaptureOverlapFirst) {
         return;
     }
@@ -461,6 +466,7 @@ function recordFirstPostCaptureOverlap(metrics, firstId, secondId, firstTerritor
         firstId,
         firstPointCount: getPolygonPointCount(firstTerritory.polygon),
         firstVersion: firstTerritory.version || 0,
+        overlapArea: roundToMilliseconds(overlapArea),
         secondId,
         secondPointCount: getPolygonPointCount(secondTerritory.polygon),
         secondVersion: secondTerritory.version || 0
