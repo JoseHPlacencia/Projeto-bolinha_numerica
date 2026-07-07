@@ -685,6 +685,9 @@ function cloneBotDiagnostics(botDiagnostics) {
         selfTrailSafety: botDiagnostics.selfTrailSafety
             ? { ...botDiagnostics.selfTrailSafety }
             : null,
+        targeting: botDiagnostics.targeting
+            ? { ...botDiagnostics.targeting }
+            : null,
         slowestPhase: botDiagnostics.slowestPhase
             ? { ...botDiagnostics.slowestPhase }
             : null
@@ -703,7 +706,32 @@ function normalizeBotDiagnostics(botDiagnostics) {
         pendingBefore: finiteOrNull(botDiagnostics.pendingBefore),
         phases: normalizeGameLoopPhases(botDiagnostics.phases),
         selfTrailSafety: normalizeSelfTrailSafetyDiagnostics(botDiagnostics.selfTrailSafety),
+        targeting: normalizeBotTargetingDiagnostics(botDiagnostics.targeting),
         slowestPhase: normalizeGameLoopSlowestPhase(botDiagnostics.slowestPhase)
+    };
+}
+
+function normalizeBotTargetingDiagnostics(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        balanceCandidateCount: finiteOrNull(diagnostics.balanceCandidateCount),
+        balanceEnemyEvaluations: finiteOrNull(diagnostics.balanceEnemyEvaluations),
+        coordinatedNumberCacheHitCount: finiteOrNull(diagnostics.coordinatedNumberCacheHitCount),
+        coordinatedNumberCacheMissCount: finiteOrNull(diagnostics.coordinatedNumberCacheMissCount),
+        huntCandidateCount: finiteOrNull(diagnostics.huntCandidateCount),
+        huntEnemyEvaluations: finiteOrNull(diagnostics.huntEnemyEvaluations),
+        returnTargetCacheHitCount: finiteOrNull(diagnostics.returnTargetCacheHitCount),
+        returnTargetCacheMissCount: finiteOrNull(diagnostics.returnTargetCacheMissCount),
+        trailBlockBoundsRejected: finiteOrNull(diagnostics.trailBlockBoundsRejected),
+        trailBlockChecks: finiteOrNull(diagnostics.trailBlockChecks),
+        trailIndexCacheHitCount: finiteOrNull(diagnostics.trailIndexCacheHitCount),
+        trailIndexCacheMissCount: finiteOrNull(diagnostics.trailIndexCacheMissCount),
+        trailPointChecks: finiteOrNull(diagnostics.trailPointChecks),
+        trailPointDistanceRejected: finiteOrNull(diagnostics.trailPointDistanceRejected),
+        trailPointTerritoryRejected: finiteOrNull(diagnostics.trailPointTerritoryRejected)
     };
 }
 

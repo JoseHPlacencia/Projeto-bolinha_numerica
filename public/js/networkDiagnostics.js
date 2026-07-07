@@ -150,6 +150,7 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
         const botDiagnostics = gameLoop && gameLoop.bot;
         const botPhases = botDiagnostics && botDiagnostics.phases || {};
         const botSelfTrail = botDiagnostics && botDiagnostics.selfTrailSafety || {};
+        const botTargeting = botDiagnostics && botDiagnostics.targeting || {};
         const breakdown = latestSnapshot && latestSnapshot.server && latestSnapshot.server.snapshotBreakdown || {};
         const payloadBudget = breakdown.payloadBudget || {};
         const payloadBudgetDeferred = payloadBudget.deferred || {};
@@ -245,6 +246,17 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
             botDecisions: botDiagnostics && botDiagnostics.decisionsProcessed,
             botPending: botDiagnostics && botDiagnostics.pendingAfter,
             botTargetingMs: round(botPhases.targeting),
+            botBalanceCandidates: botTargeting.balanceCandidateCount,
+            botBalanceEvaluations: botTargeting.balanceEnemyEvaluations,
+            botHuntCandidates: botTargeting.huntCandidateCount,
+            botHuntEvaluations: botTargeting.huntEnemyEvaluations,
+            botTrailTargetBlockChecks: botTargeting.trailBlockChecks,
+            botTrailTargetBlockRejected: botTargeting.trailBlockBoundsRejected,
+            botTrailTargetPointChecks: botTargeting.trailPointChecks,
+            botTrailTargetPointRejected: botTargeting.trailPointDistanceRejected,
+            botTrailTargetTerritoryRejected: botTargeting.trailPointTerritoryRejected,
+            botTrailTargetIndexHits: botTargeting.trailIndexCacheHitCount,
+            botTrailTargetIndexMisses: botTargeting.trailIndexCacheMissCount,
             botSelfTrailMs: round(botPhases.selfTrailSafety),
             botSelfTrailBudgetHits: botSelfTrail.budgetHitCount,
             botSelfTrailBudgetMs: round(botSelfTrail.maxBudgetElapsedMs),
@@ -394,6 +406,15 @@ export function createNetworkDiagnostics(socket, snapshots, networkConfig = {}) 
                 botPending: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.pendingAfter,
                 botSlowest: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.slowestPhase && event.server.gameLoop.bot.slowestPhase.name,
                 botTargetingMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && round(event.server.gameLoop.bot.phases.targeting),
+                botBalanceCandidates: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.balanceCandidateCount,
+                botBalanceEvaluations: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.balanceEnemyEvaluations,
+                botHuntCandidates: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.huntCandidateCount,
+                botHuntEvaluations: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.huntEnemyEvaluations,
+                botTrailTargetBlockChecks: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.trailBlockChecks,
+                botTrailTargetBlockRejected: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.trailBlockBoundsRejected,
+                botTrailTargetPointChecks: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.trailPointChecks,
+                botTrailTargetPointRejected: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.trailPointDistanceRejected,
+                botTrailTargetTerritoryRejected: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.targeting && event.server.gameLoop.bot.targeting.trailPointTerritoryRejected,
                 botSelfTrailMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.phases && round(event.server.gameLoop.bot.phases.selfTrailSafety),
                 botSelfTrailBudgetHits: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && event.server.gameLoop.bot.selfTrailSafety.budgetHitCount,
                 botSelfTrailBudgetMs: event.server && event.server.gameLoop && event.server.gameLoop.bot && event.server.gameLoop.bot.selfTrailSafety && round(event.server.gameLoop.bot.selfTrailSafety.maxBudgetElapsedMs),

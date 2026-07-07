@@ -650,7 +650,32 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             pendingBefore: finiteOrNull(value.pendingBefore),
             phases: normalizeGameLoopPhases(value.phases),
             selfTrailSafety: normalizeSelfTrailSafetyDiagnostics(value.selfTrailSafety),
+            targeting: normalizeBotTargetingDiagnostics(value.targeting),
             slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase)
+        };
+    }
+
+    function normalizeBotTargetingDiagnostics(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            balanceCandidateCount: finiteOrNull(value.balanceCandidateCount),
+            balanceEnemyEvaluations: finiteOrNull(value.balanceEnemyEvaluations),
+            coordinatedNumberCacheHitCount: finiteOrNull(value.coordinatedNumberCacheHitCount),
+            coordinatedNumberCacheMissCount: finiteOrNull(value.coordinatedNumberCacheMissCount),
+            huntCandidateCount: finiteOrNull(value.huntCandidateCount),
+            huntEnemyEvaluations: finiteOrNull(value.huntEnemyEvaluations),
+            returnTargetCacheHitCount: finiteOrNull(value.returnTargetCacheHitCount),
+            returnTargetCacheMissCount: finiteOrNull(value.returnTargetCacheMissCount),
+            trailBlockBoundsRejected: finiteOrNull(value.trailBlockBoundsRejected),
+            trailBlockChecks: finiteOrNull(value.trailBlockChecks),
+            trailIndexCacheHitCount: finiteOrNull(value.trailIndexCacheHitCount),
+            trailIndexCacheMissCount: finiteOrNull(value.trailIndexCacheMissCount),
+            trailPointChecks: finiteOrNull(value.trailPointChecks),
+            trailPointDistanceRejected: finiteOrNull(value.trailPointDistanceRejected),
+            trailPointTerritoryRejected: finiteOrNull(value.trailPointTerritoryRejected)
         };
     }
 

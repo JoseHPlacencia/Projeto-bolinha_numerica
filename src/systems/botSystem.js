@@ -115,6 +115,7 @@ function createEmptyBotDiagnostics() {
         pendingBefore: 0,
         phases: {},
         selfTrailSafety: createEmptySelfTrailSafetyDiagnostics(),
+        targeting: createEmptyBotTargetingDiagnostics(),
         slowestPhase: null
     };
 }
@@ -127,7 +128,28 @@ function createBotUpdateDiagnostics(state) {
         pendingBefore: 0,
         phases: {},
         selfTrailSafety: createEmptySelfTrailSafetyDiagnostics(),
+        targeting: createEmptyBotTargetingDiagnostics(),
         slowestPhase: null
+    };
+}
+
+function createEmptyBotTargetingDiagnostics() {
+    return {
+        balanceCandidateCount: 0,
+        balanceEnemyEvaluations: 0,
+        coordinatedNumberCacheHitCount: 0,
+        coordinatedNumberCacheMissCount: 0,
+        huntCandidateCount: 0,
+        huntEnemyEvaluations: 0,
+        returnTargetCacheHitCount: 0,
+        returnTargetCacheMissCount: 0,
+        trailBlockBoundsRejected: 0,
+        trailBlockChecks: 0,
+        trailIndexCacheHitCount: 0,
+        trailIndexCacheMissCount: 0,
+        trailPointChecks: 0,
+        trailPointDistanceRejected: 0,
+        trailPointTerritoryRejected: 0
     };
 }
 
@@ -174,13 +196,16 @@ function createBotDecisionContext(numberSystem) {
 
 function createBotDecisionTickContext(decisionContext, diagnostics, nowMs = Date.now()) {
     return {
+        coordinatedCorrectNumbersCache: new Map(),
         correctNumbers: decisionContext && Array.isArray(decisionContext.correctNumbers)
             ? decisionContext.correctNumbers
             : [],
         diagnostics,
         nowMs,
+        returnTargetCache: new Map(),
         selfTrailSegmentCache: new Map(),
-        trailPointCache: new Map()
+        trailPointCache: new Map(),
+        trailTargetIndexCache: new Map()
     };
 }
 
@@ -221,6 +246,34 @@ function getMaxBotDecisionsPerTick() {
     const value = Number(config.bots.maxDecisionsPerTick);
 
     return Number.isInteger(value) && value > 0 ? value : 2;
+}
+
+function getBotTargetingDiagnostics(context) {
+    const diagnostics = context && context.diagnostics;
+
+    if (!diagnostics) {
+        return null;
+    }
+
+    if (!diagnostics.targeting) {
+        diagnostics.targeting = createEmptyBotTargetingDiagnostics();
+    }
+
+    return diagnostics.targeting;
+}
+
+function addBotTargetingDiagnosticValue(context, name, value) {
+    if (!Number.isFinite(value) || value <= 0) {
+        return;
+    }
+
+    const diagnostics = getBotTargetingDiagnostics(context);
+
+    if (!diagnostics) {
+        return;
+    }
+
+    diagnostics[name] = (diagnostics[name] || 0) + value;
 }
 
 function getBotSelfTrailSafetyBudgetMs() {
@@ -449,7 +502,7 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
     const correctNumbers = context && Array.isArray(context.correctNumbers)
         ? context.correctNumbers
         : getCorrectNumbers(numberSystem);
-    const nearestCorrect = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers);
+    const nearestCorrect = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, bot, context);
     const incomingMarkResponse = chooseIncomingMarkResponse(bot, players, territories, correctNumbers, context);
 
     if (incomingMarkResponse) {
@@ -508,7 +561,7 @@ function choosePendingEliminationTarget(bot, players, territories, correctNumber
         return null;
     }
 
-    const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers);
+    const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, bot, context);
 
     if (!number) {
         return getReturnTarget(bot, territories);
@@ -542,7 +595,7 @@ function canConfirmPendingEliminationsBeforeCounterattack(bot, players, territor
             continue;
         }
 
-        const targetReturnTime = estimateTravelTime(target, getReturnTarget(target, territories));
+        const targetReturnTime = estimateTravelTime(target, getReturnTargetCached(context, target, territories));
 
         if (confirmTime + requiredMargin >= targetReturnTime) {
             return false;
@@ -619,7 +672,7 @@ function chooseMarkedCounterattackNumber(bot, players, incomingMarkers, correctN
         return null;
     }
 
-    const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers);
+    const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, bot, context);
 
     if (!number) {
         return null;
@@ -773,7 +826,7 @@ function evaluateThreat(bot, players, territories, correctNumbers, context = nul
         };
     }
 
-    const returnTime = estimateTravelTime(bot, getReturnTarget(bot, territories));
+    const returnTime = estimateTravelTime(bot, getReturnTargetCached(context, bot, territories));
     let bestEnemyTime = Infinity;
 
     for (const enemy of players.values()) {
@@ -822,34 +875,42 @@ function estimatePunishTime(enemy, trailPoints, correctNumbers) {
 
 function chooseBalanceCaptureTrailTarget(bot, players, territories, threat = null, context = null) {
     if (bot.catchBalance <= 0
-        || hasAnyTrail(bot)
+        || hasAnyTrailCached(context, bot)
         || !isPlayerInsideOwnTerritory(territories, bot)) {
         return null;
     }
 
-    const returnTarget = getReturnTarget(bot, territories);
+    const diagnostics = context && context.diagnostics;
+    const returnTarget = getReturnTargetCached(context, bot, territories);
+    const candidates = measureBotPhase(diagnostics, "balanceCapture.candidates", () => (
+        getEnemyTrailTargetCandidates(bot, players, territories, {
+            baseMaxDistance: getBalanceCaptureBaseRadius(),
+            basePoint: {
+                x: bot.territoryX,
+                y: bot.territoryY
+            },
+            maxDistance: getBalanceCaptureTrailRadius(),
+            maxEnemyCandidates: getBalanceCaptureMaxEnemyCandidates()
+        }, context)
+    ));
     let bestTarget = null;
 
-    for (const enemy of players.values()) {
-        if (enemy.id === bot.id) {
+    addBotTargetingDiagnosticValue(context, "balanceCandidateCount", candidates.length);
+
+    for (const candidate of candidates) {
+        const enemy = candidate.enemy;
+        const trailPoint = candidate.trailPoint;
+
+        if (!enemy || !trailPoint || !isBalanceCaptureTrailPointInRange(bot, trailPoint)) {
             continue;
         }
 
-        const enemyTrailPoints = getTrailPointsCached(context, enemy);
-
-        if (enemyTrailPoints.length < 2) {
-            continue;
-        }
-
-        const trailPoint = findNearestMarkableTrailPoint(bot, territories, enemyTrailPoints);
-
-        if (!trailPoint || !isBalanceCaptureTrailPointInRange(bot, trailPoint)) {
-            continue;
-        }
-
+        addBotTargetingDiagnosticValue(context, "balanceEnemyEvaluations", 1);
         const requiredMargin = getBalanceCaptureReturnMarginSec();
         const botCaptureTime = estimateBalanceCaptureTime(bot, trailPoint, returnTarget);
-        const counterRisk = evaluateTrailMarkCounterattackRisk(bot, enemy, territories, trailPoint, botCaptureTime, requiredMargin);
+        const counterRisk = measureBotPhase(diagnostics, "balanceCapture.risk", () => (
+            evaluateTrailMarkCounterattackRisk(bot, enemy, territories, trailPoint, botCaptureTime, requiredMargin, context)
+        ));
 
         if (!counterRisk.safe) {
             continue;
@@ -925,35 +986,56 @@ function getBalanceCaptureReturnMarginSec() {
     return Number.isFinite(margin) ? Math.max(0, margin) : getMarkedCounterattackMarginSec();
 }
 
+function getBalanceCaptureMaxEnemyCandidates() {
+    return getPositiveIntegerOption(config.bots.balanceCaptureMaxEnemyCandidates, 8);
+}
+
+function getHuntMaxEnemyCandidates() {
+    return getPositiveIntegerOption(config.bots.huntMaxEnemyCandidates, 8);
+}
+
+function getBotTrailTargetBlockSize() {
+    return getPositiveIntegerOption(config.bots.trailTargetBlockSize, 32);
+}
+
+function getPositiveIntegerOption(value, fallback) {
+    const number = Number(value);
+
+    return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function getPositiveNumberOption(value, fallback) {
+    const number = Number(value);
+
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
 function chooseHuntTarget(bot, players, territories, correctNumbers, threat = null, context = null) {
     if (correctNumbers.length === 0) {
         return null;
     }
 
+    const diagnostics = context && context.diagnostics;
+    const candidates = measureBotPhase(diagnostics, "hunt.candidates", () => (
+        getEnemyTrailTargetCandidates(bot, players, territories, {
+            maxDistance: config.bots.huntRadius,
+            maxEnemyCandidates: getHuntMaxEnemyCandidates()
+        }, context)
+    ));
     let bestHunt = null;
 
-    for (const enemy of players.values()) {
-        if (enemy.id === bot.id) {
+    addBotTargetingDiagnosticValue(context, "huntCandidateCount", candidates.length);
+
+    for (const candidate of candidates) {
+        const enemy = candidate.enemy;
+        const enemyTrailPoint = candidate.trailPoint;
+
+        if (!enemy || !enemyTrailPoint) {
             continue;
         }
 
-        const enemyTrailPoints = getTrailPointsCached(context, enemy);
-
-        if (enemyTrailPoints.length < 2) {
-            continue;
-        }
-
-        const enemyTrailPoint = findNearestMarkableTrailPoint(bot, territories, enemyTrailPoints);
-
-        if (!enemyTrailPoint) {
-            continue;
-        }
-
-        if (distanceBetween(bot.x, bot.y, enemyTrailPoint.x, enemyTrailPoint.y) > config.bots.huntRadius) {
-            continue;
-        }
-
-        const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, enemyTrailPoint);
+        addBotTargetingDiagnosticValue(context, "huntEnemyEvaluations", 1);
+        const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, enemyTrailPoint, context);
 
         if (!number) {
             continue;
@@ -966,10 +1048,12 @@ function chooseHuntTarget(bot, players, territories, correctNumbers, threat = nu
             : (distanceBetween(bot.x, bot.y, enemyTrailPoint.x, enemyTrailPoint.y)
                 + distanceBetween(enemyTrailPoint.x, enemyTrailPoint.y, number.x, number.y)) / getPlayerMovementSpeed(bot);
         const markPoint = hasPendingTarget ? null : enemyTrailPoint;
-        const preliminaryEnemyReturnTime = estimateTravelTime(enemy, getReturnTarget(enemy, territories));
+        const preliminaryEnemyReturnTime = estimateTravelTime(enemy, getReturnTargetCached(context, enemy, territories));
         const requiredMargin = getHuntRequiredMargin(bot, enemy, threat, preliminaryEnemyReturnTime);
         const counterRisk = markPoint
-            ? evaluateTrailMarkCounterattackRisk(bot, enemy, territories, markPoint, botTime, requiredMargin)
+            ? measureBotPhase(diagnostics, "hunt.risk", () => (
+                evaluateTrailMarkCounterattackRisk(bot, enemy, territories, markPoint, botTime, requiredMargin, context)
+            ))
             : {
                 enemyReturnTime: preliminaryEnemyReturnTime,
                 safe: botTime + requiredMargin < preliminaryEnemyReturnTime
@@ -1002,8 +1086,8 @@ function chooseHuntTarget(bot, players, territories, correctNumbers, threat = nu
     return bestHunt && bestHunt.target;
 }
 
-function evaluateTrailMarkCounterattackRisk(bot, enemy, territories, trailPoint, confirmTime, requiredMargin = 0) {
-    const enemyReturnTime = estimateTravelTime(enemy, getReturnTarget(enemy, territories));
+function evaluateTrailMarkCounterattackRisk(bot, enemy, territories, trailPoint, confirmTime, requiredMargin = 0, context = null) {
+    const enemyReturnTime = estimateTravelTime(enemy, getReturnTargetCached(context, enemy, territories));
 
     if (confirmTime + requiredMargin >= enemyReturnTime) {
         return {
@@ -1431,6 +1515,23 @@ function getReturnTarget(player, territories = null) {
     return boundaryTarget || createReturnTarget(getBaseReturnTarget(player));
 }
 
+function getReturnTargetCached(context, player, territories = null) {
+    if (!context || !context.returnTargetCache || !player) {
+        return getReturnTarget(player, territories);
+    }
+
+    if (context.returnTargetCache.has(player.id)) {
+        addBotTargetingDiagnosticValue(context, "returnTargetCacheHitCount", 1);
+        return context.returnTargetCache.get(player.id);
+    }
+
+    addBotTargetingDiagnosticValue(context, "returnTargetCacheMissCount", 1);
+    const target = getReturnTarget(player, territories);
+
+    context.returnTargetCache.set(player.id, target);
+    return target;
+}
+
 function getReturnTerritoryPolygon(player, territories) {
     if (!player || !territories) {
         return null;
@@ -1542,14 +1643,25 @@ function findNearestPoint(origin, points) {
     return nearest;
 }
 
-function findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, origin = bot) {
+function distanceSquaredBetween(first, second) {
+    if (!isFinitePoint(first) || !isFinitePoint(second)) {
+        return Infinity;
+    }
+
+    const deltaX = first.x - second.x;
+    const deltaY = first.y - second.y;
+
+    return deltaX * deltaX + deltaY * deltaY;
+}
+
+function findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, origin = bot, context = null) {
     return findNearestPoint(
         origin || bot,
-        getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers)
+        getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers, context)
     );
 }
 
-function getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers) {
+function getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers, context = null) {
     if (!Array.isArray(correctNumbers) || correctNumbers.length === 0) {
         return [];
     }
@@ -1558,6 +1670,25 @@ function getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers) {
         return correctNumbers;
     }
 
+    if (context && context.coordinatedCorrectNumbersCache) {
+        const cacheKey = bot.id;
+
+        if (context.coordinatedCorrectNumbersCache.has(cacheKey)) {
+            addBotTargetingDiagnosticValue(context, "coordinatedNumberCacheHitCount", 1);
+            return context.coordinatedCorrectNumbersCache.get(cacheKey);
+        }
+
+        addBotTargetingDiagnosticValue(context, "coordinatedNumberCacheMissCount", 1);
+        const coordinatedNumbers = getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers);
+
+        context.coordinatedCorrectNumbersCache.set(cacheKey, coordinatedNumbers);
+        return coordinatedNumbers;
+    }
+
+    return getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers);
+}
+
+function getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers) {
     return correctNumbers.filter(number => (
         !isNumberClearlyClaimedByCloserBot(bot, players, number)
     ));
@@ -1620,17 +1751,127 @@ function getNumberContestAdvantageRatio() {
     return Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : 0.75;
 }
 
-function findNearestMarkableTrailPoint(bot, territories, trailPoints) {
-    const territoryPolygon = getReturnTerritoryPolygon(bot, territories);
+function getEnemyTrailTargetCandidates(bot, players, territories, options = {}, context = null) {
+    const summaries = getEnemyTrailTargetSummaries(bot, players, options, context);
+    const candidates = [];
 
-    if (!territoryPolygon) {
-        return findNearestPoint(bot, trailPoints);
+    for (const summary of summaries) {
+        const trailPoint = findNearestMarkableTrailPoint(
+            bot,
+            territories,
+            summary.pointIndex,
+            options,
+            context
+        );
+
+        if (!trailPoint) {
+            continue;
+        }
+
+        candidates.push({
+            enemy: summary.enemy,
+            trailPoint
+        });
     }
 
-    return findNearestPoint(
-        bot,
-        (trailPoints || []).filter(point => isTrailPointMarkableByBot(territoryPolygon, point))
-    );
+    return candidates;
+}
+
+function getEnemyTrailTargetSummaries(bot, players, options = {}, context = null) {
+    const summaries = [];
+    const maxEnemyCandidates = getPositiveIntegerOption(options.maxEnemyCandidates, Infinity);
+
+    if (!players || typeof players.values !== "function") {
+        return summaries;
+    }
+
+    for (const enemy of players.values()) {
+        if (!enemy
+            || enemy.id === bot.id
+            || enemy.lives === 0) {
+            continue;
+        }
+
+        const pointIndex = getTrailTargetIndexCached(context, enemy);
+
+        if (!pointIndex || pointIndex.points.length < 2) {
+            continue;
+        }
+
+        const boundsDistanceSquared = getTargetQueryBoundsDistanceSquared(bot, pointIndex.bounds, options);
+
+        if (!Number.isFinite(boundsDistanceSquared)) {
+            addBotTargetingDiagnosticValue(context, "trailBlockBoundsRejected", 1);
+            continue;
+        }
+
+        summaries.push({
+            boundsDistanceSquared,
+            enemy,
+            pointIndex
+        });
+    }
+
+    summaries.sort((first, second) => first.boundsDistanceSquared - second.boundsDistanceSquared);
+
+    return Number.isFinite(maxEnemyCandidates)
+        ? summaries.slice(0, maxEnemyCandidates)
+        : summaries;
+}
+
+function getTargetQueryBoundsDistanceSquared(bot, bounds, options = {}) {
+    if (!isValidBounds(bounds)) {
+        return Infinity;
+    }
+
+    const maxDistance = getPositiveNumberOption(options.maxDistance, Infinity);
+    const maxDistanceSquared = maxDistance * maxDistance;
+    const originDistanceSquared = getPointBoundsDistanceSquared(bot, bounds);
+
+    if (originDistanceSquared > maxDistanceSquared + geometryEpsilon) {
+        return Infinity;
+    }
+
+    const basePoint = isFinitePoint(options.basePoint) ? options.basePoint : null;
+    const baseMaxDistance = getPositiveNumberOption(options.baseMaxDistance, Infinity);
+
+    if (basePoint) {
+        const baseDistanceSquared = getPointBoundsDistanceSquared(basePoint, bounds);
+
+        if (baseDistanceSquared > baseMaxDistance * baseMaxDistance + geometryEpsilon) {
+            return Infinity;
+        }
+
+        return Math.max(originDistanceSquared, baseDistanceSquared);
+    }
+
+    return originDistanceSquared;
+}
+
+function findNearestMarkableTrailPoint(bot, territories, trailPointsOrIndex, options = {}, context = null) {
+    const territoryPolygon = getReturnTerritoryPolygon(bot, territories);
+    let territoryRejectedCount = 0;
+
+    if (!territoryPolygon) {
+        return findNearestTrailPointByQuery(bot, trailPointsOrIndex, options, context);
+    }
+
+    const trailPoint = findNearestTrailPointByQuery(bot, trailPointsOrIndex, {
+        ...options,
+        predicate: point => {
+            const markable = isTrailPointMarkableByBot(territoryPolygon, point);
+
+            if (!markable) {
+                territoryRejectedCount++;
+            }
+
+            return markable;
+        }
+    }, context);
+
+    addBotTargetingDiagnosticValue(context, "trailPointTerritoryRejected", territoryRejectedCount);
+
+    return trailPoint;
 }
 
 function isTrailPointMarkableByBot(territoryPolygon, point) {
@@ -1700,6 +1941,123 @@ function getPointIndex(value) {
         && Array.isArray(value.blocks)
         ? value
         : null;
+}
+
+function findNearestTrailPointByQuery(origin, pointIndexOrPoints, options = {}, context = null) {
+    const pointIndex = getPointIndex(pointIndexOrPoints);
+    const sourcePoints = pointIndex
+        ? pointIndex.points
+        : pointIndexOrPoints || [];
+    const maxDistance = getPositiveNumberOption(options.maxDistance, Infinity);
+    const maxDistanceSquared = maxDistance * maxDistance;
+    const basePoint = isFinitePoint(options.basePoint) ? options.basePoint : null;
+    const baseMaxDistance = getPositiveNumberOption(options.baseMaxDistance, Infinity);
+    const baseMaxDistanceSquared = baseMaxDistance * baseMaxDistance;
+    const predicate = typeof options.predicate === "function"
+        ? options.predicate
+        : null;
+    let nearest = null;
+    let nearestDistanceSquared = Infinity;
+    let blockChecks = 0;
+    let blockBoundsRejected = 0;
+    let pointChecks = 0;
+    let pointDistanceRejected = 0;
+
+    if (pointIndex && pointIndex.blocks.length > 0) {
+        const orderedBlocks = [];
+
+        for (const block of pointIndex.blocks) {
+            blockChecks++;
+            const blockDistanceSquared = getPointBoundsDistanceSquared(origin, block.bounds);
+
+            if (blockDistanceSquared > maxDistanceSquared + geometryEpsilon) {
+                blockBoundsRejected++;
+                continue;
+            }
+
+            if (basePoint
+                && getPointBoundsDistanceSquared(basePoint, block.bounds) > baseMaxDistanceSquared + geometryEpsilon) {
+                blockBoundsRejected++;
+                continue;
+            }
+
+            orderedBlocks.push({
+                block,
+                distanceSquared: blockDistanceSquared
+            });
+        }
+
+        orderedBlocks.sort((first, second) => first.distanceSquared - second.distanceSquared);
+
+        for (const item of orderedBlocks) {
+            if (item.distanceSquared > nearestDistanceSquared + geometryEpsilon) {
+                blockBoundsRejected++;
+                continue;
+            }
+
+            for (const point of item.block.points) {
+                pointChecks++;
+
+                if (!isFinitePoint(point)) {
+                    continue;
+                }
+
+                const distanceSquared = distanceSquaredBetween(origin, point);
+
+                if (distanceSquared > maxDistanceSquared + geometryEpsilon
+                    || (basePoint && distanceSquaredBetween(basePoint, point) > baseMaxDistanceSquared + geometryEpsilon)) {
+                    pointDistanceRejected++;
+                    continue;
+                }
+
+                if (predicate && !predicate(point)) {
+                    continue;
+                }
+
+                if (distanceSquared < nearestDistanceSquared) {
+                    nearest = point;
+                    nearestDistanceSquared = distanceSquared;
+                }
+            }
+        }
+
+        addBotTargetingDiagnosticValue(context, "trailBlockChecks", blockChecks);
+        addBotTargetingDiagnosticValue(context, "trailBlockBoundsRejected", blockBoundsRejected);
+        addBotTargetingDiagnosticValue(context, "trailPointChecks", pointChecks);
+        addBotTargetingDiagnosticValue(context, "trailPointDistanceRejected", pointDistanceRejected);
+
+        return nearest;
+    }
+
+    for (const point of sourcePoints) {
+        pointChecks++;
+
+        if (!isFinitePoint(point)) {
+            continue;
+        }
+
+        const distanceSquared = distanceSquaredBetween(origin, point);
+
+        if (distanceSquared > maxDistanceSquared + geometryEpsilon
+            || (basePoint && distanceSquaredBetween(basePoint, point) > baseMaxDistanceSquared + geometryEpsilon)) {
+            pointDistanceRejected++;
+            continue;
+        }
+
+        if (predicate && !predicate(point)) {
+            continue;
+        }
+
+        if (distanceSquared < nearestDistanceSquared) {
+            nearest = point;
+            nearestDistanceSquared = distanceSquared;
+        }
+    }
+
+    addBotTargetingDiagnosticValue(context, "trailPointChecks", pointChecks);
+    addBotTargetingDiagnosticValue(context, "trailPointDistanceRejected", pointDistanceRejected);
+
+    return nearest;
 }
 
 function getAngleDelta(fromAngle, toAngle) {
@@ -2988,6 +3346,28 @@ function getTrailPointsCached(context, player, options = {}) {
     return context.trailPointCache.get(cacheKey);
 }
 
+function getTrailTargetIndexCached(context, player) {
+    if (!context || !context.trailTargetIndexCache || !player) {
+        return createPointBlockIndex(getTrailPoints(player), getBotTrailTargetBlockSize());
+    }
+
+    const cacheKey = player.id;
+
+    if (context.trailTargetIndexCache.has(cacheKey)) {
+        addBotTargetingDiagnosticValue(context, "trailIndexCacheHitCount", 1);
+        return context.trailTargetIndexCache.get(cacheKey);
+    }
+
+    addBotTargetingDiagnosticValue(context, "trailIndexCacheMissCount", 1);
+    const pointIndex = createPointBlockIndex(
+        getTrailPointsCached(context, player),
+        getBotTrailTargetBlockSize()
+    );
+
+    context.trailTargetIndexCache.set(cacheKey, pointIndex);
+    return pointIndex;
+}
+
 function getSelfTrailSegmentsCached(context, player, options = {}) {
     if (!context || !context.selfTrailSegmentCache || !player) {
         return getSelfTrailSegments(player, options);
@@ -3087,6 +3467,10 @@ function isFinitePoint(point) {
 
 function hasAnyTrail(player) {
     return getTrailPoints(player).length >= 2;
+}
+
+function hasAnyTrailCached(context, player) {
+    return getTrailPointsCached(context, player).length >= 2;
 }
 
 function segmentsCross(firstStart, firstEnd, secondStart, secondEnd) {

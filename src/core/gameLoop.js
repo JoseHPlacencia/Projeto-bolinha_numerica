@@ -340,7 +340,32 @@ function normalizeBotDiagnostics(diagnostics) {
         pendingBefore: finiteOrNull(diagnostics.pendingBefore),
         phases: normalizePhaseDurations(diagnostics.phases),
         selfTrailSafety: normalizeSelfTrailSafetyDiagnostics(diagnostics.selfTrailSafety),
+        targeting: normalizeBotTargetingDiagnostics(diagnostics.targeting),
         slowestPhase: normalizeSlowestPhase(diagnostics.slowestPhase)
+    };
+}
+
+function normalizeBotTargetingDiagnostics(diagnostics) {
+    if (!diagnostics || typeof diagnostics !== "object") {
+        return null;
+    }
+
+    return {
+        balanceCandidateCount: finiteOrNull(diagnostics.balanceCandidateCount),
+        balanceEnemyEvaluations: finiteOrNull(diagnostics.balanceEnemyEvaluations),
+        coordinatedNumberCacheHitCount: finiteOrNull(diagnostics.coordinatedNumberCacheHitCount),
+        coordinatedNumberCacheMissCount: finiteOrNull(diagnostics.coordinatedNumberCacheMissCount),
+        huntCandidateCount: finiteOrNull(diagnostics.huntCandidateCount),
+        huntEnemyEvaluations: finiteOrNull(diagnostics.huntEnemyEvaluations),
+        returnTargetCacheHitCount: finiteOrNull(diagnostics.returnTargetCacheHitCount),
+        returnTargetCacheMissCount: finiteOrNull(diagnostics.returnTargetCacheMissCount),
+        trailBlockBoundsRejected: finiteOrNull(diagnostics.trailBlockBoundsRejected),
+        trailBlockChecks: finiteOrNull(diagnostics.trailBlockChecks),
+        trailIndexCacheHitCount: finiteOrNull(diagnostics.trailIndexCacheHitCount),
+        trailIndexCacheMissCount: finiteOrNull(diagnostics.trailIndexCacheMissCount),
+        trailPointChecks: finiteOrNull(diagnostics.trailPointChecks),
+        trailPointDistanceRejected: finiteOrNull(diagnostics.trailPointDistanceRejected),
+        trailPointTerritoryRejected: finiteOrNull(diagnostics.trailPointTerritoryRejected)
     };
 }
 
