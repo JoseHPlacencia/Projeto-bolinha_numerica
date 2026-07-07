@@ -449,7 +449,7 @@ function chooseBotTarget(bot, players, territories, numberSystem, context = null
     const correctNumbers = context && Array.isArray(context.correctNumbers)
         ? context.correctNumbers
         : getCorrectNumbers(numberSystem);
-    const nearestCorrect = findNearestPoint(bot, correctNumbers);
+    const nearestCorrect = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers);
     const incomingMarkResponse = chooseIncomingMarkResponse(bot, players, territories, correctNumbers, context);
 
     if (incomingMarkResponse) {
@@ -508,7 +508,7 @@ function choosePendingEliminationTarget(bot, players, territories, correctNumber
         return null;
     }
 
-    const number = findNearestPoint(bot, correctNumbers);
+    const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers);
 
     if (!number) {
         return getReturnTarget(bot, territories);
@@ -586,7 +586,7 @@ function chooseIncomingMarkResponse(bot, players, territories, correctNumbers, c
         return null;
     }
 
-    return chooseMarkedCounterattackNumber(bot, incomingMarkers, correctNumbers, context)
+    return chooseMarkedCounterattackNumber(bot, players, incomingMarkers, correctNumbers, context)
         || getReturnTarget(bot, territories);
 }
 
@@ -610,7 +610,7 @@ function getIncomingCatchMarkers(bot, players) {
     return markers;
 }
 
-function chooseMarkedCounterattackNumber(bot, incomingMarkers, correctNumbers, context = null) {
+function chooseMarkedCounterattackNumber(bot, players, incomingMarkers, correctNumbers, context = null) {
     if (!bot.pendingCatchEliminationTargets
         || bot.pendingCatchEliminationTargets.size === 0
         || !Array.isArray(correctNumbers)
@@ -619,7 +619,7 @@ function chooseMarkedCounterattackNumber(bot, incomingMarkers, correctNumbers, c
         return null;
     }
 
-    const number = findNearestPoint(bot, correctNumbers);
+    const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers);
 
     if (!number) {
         return null;
@@ -841,7 +841,7 @@ function chooseBalanceCaptureTrailTarget(bot, players, territories, threat = nul
             continue;
         }
 
-        const trailPoint = findNearestPoint(bot, enemyTrailPoints);
+        const trailPoint = findNearestMarkableTrailPoint(bot, territories, enemyTrailPoints);
 
         if (!trailPoint || !isBalanceCaptureTrailPointInRange(bot, trailPoint)) {
             continue;
@@ -943,7 +943,7 @@ function chooseHuntTarget(bot, players, territories, correctNumbers, threat = nu
             continue;
         }
 
-        const enemyTrailPoint = findNearestPoint(bot, enemyTrailPoints);
+        const enemyTrailPoint = findNearestMarkableTrailPoint(bot, territories, enemyTrailPoints);
 
         if (!enemyTrailPoint) {
             continue;
@@ -953,7 +953,7 @@ function chooseHuntTarget(bot, players, territories, correctNumbers, threat = nu
             continue;
         }
 
-        const number = findNearestPoint(enemyTrailPoint, correctNumbers);
+        const number = findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, enemyTrailPoint);
 
         if (!number) {
             continue;
@@ -1540,6 +1540,102 @@ function findNearestPoint(origin, points) {
     }
 
     return nearest;
+}
+
+function findNearestCoordinatedCorrectNumber(bot, players, correctNumbers, origin = bot) {
+    return findNearestPoint(
+        origin || bot,
+        getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers)
+    );
+}
+
+function getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers) {
+    if (!Array.isArray(correctNumbers) || correctNumbers.length === 0) {
+        return [];
+    }
+
+    if (!bot || !players || typeof players.values !== "function") {
+        return correctNumbers;
+    }
+
+    return correctNumbers.filter(number => (
+        !isNumberClearlyClaimedByCloserBot(bot, players, number)
+    ));
+}
+
+function isNumberClearlyClaimedByCloserBot(bot, players, number) {
+    if (!isFinitePoint(bot) || !isFinitePoint(number)) {
+        return false;
+    }
+
+    const botDistance = distanceBetween(bot.x, bot.y, number.x, number.y);
+
+    for (const player of players.values()) {
+        if (!player
+            || player.id === bot.id
+            || !isNumberContestantBot(player)
+            || !isFinitePoint(player)) {
+            continue;
+        }
+
+        const otherDistance = distanceBetween(player.x, player.y, number.x, number.y);
+
+        if (isClearlyCloserToNumber(otherDistance, botDistance)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isNumberContestantBot(player) {
+    return isBotPlayer(player)
+        && player.lives !== 0
+        && (
+            player.catchBalance <= 0
+            || Boolean(player.pendingCatchEliminationTargets && player.pendingCatchEliminationTargets.size > 0)
+        );
+}
+
+function isClearlyCloserToNumber(otherDistance, botDistance) {
+    if (!Number.isFinite(otherDistance)
+        || !Number.isFinite(botDistance)
+        || otherDistance >= botDistance) {
+        return false;
+    }
+
+    return botDistance - otherDistance >= getNumberContestAdvantageDistance()
+        || otherDistance <= botDistance * getNumberContestAdvantageRatio();
+}
+
+function getNumberContestAdvantageDistance() {
+    const distance = Number(config.bots.numberContestAdvantageDistance);
+
+    return Number.isFinite(distance) && distance >= 0 ? distance : config.world.playerSize * 2;
+}
+
+function getNumberContestAdvantageRatio() {
+    const ratio = Number(config.bots.numberContestAdvantageRatio);
+
+    return Number.isFinite(ratio) && ratio > 0 && ratio < 1 ? ratio : 0.75;
+}
+
+function findNearestMarkableTrailPoint(bot, territories, trailPoints) {
+    const territoryPolygon = getReturnTerritoryPolygon(bot, territories);
+
+    if (!territoryPolygon) {
+        return findNearestPoint(bot, trailPoints);
+    }
+
+    return findNearestPoint(
+        bot,
+        (trailPoints || []).filter(point => isTrailPointMarkableByBot(territoryPolygon, point))
+    );
+}
+
+function isTrailPointMarkableByBot(territoryPolygon, point) {
+    return isFinitePoint(point)
+        && !isPointInPolygon(territoryPolygon, point.x, point.y);
 }
 
 function getNearestDistanceSquared(origin, pointIndexOrPoints, diagnostics = null) {

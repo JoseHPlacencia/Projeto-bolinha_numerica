@@ -153,6 +153,8 @@ const bots = Object.freeze({
     expansionPressureSampleCount: 24,
     expansionRiskReturnMarginSec: 0.95,
     markedCounterattackMarginSec: 0.25,
+    numberContestAdvantageDistance: world.playerSize * 2,
+    numberContestAdvantageRatio: 0.75,
     balanceCaptureBaseRadius: 1150,
     balanceCaptureReturnMarginSec: 0.45,
     balanceCaptureTrailRadius: 1500,
