@@ -13,6 +13,7 @@ const {
 const { distanceBetween } = require("../utils/math");
 const {
     createLinePrimitivesFromPoints,
+    createPathPrimitiveIndex,
     createPathPrimitivesFromPoints,
     doesLineCrossPathPrimitive
 } = require("../utils/pathSegments");
@@ -59,15 +60,27 @@ function createTrailUpdateDiagnostics() {
         closedTrailReturns: 0,
         fillPathCount: 0,
         fillPolygonCount: 0,
+        ownerTrailBlockBoundsRejected: 0,
+        ownerTrailBlockChecks: 0,
+        ownerTrailBoundsRejected: 0,
+        ownerTrailPrimitiveCandidates: 0,
+        ownerTrailPrimitiveTests: 0,
         ownerTrailSegmentChecks: 0,
+        pathPrimitiveBlockCount: 0,
         pathPrimitiveCacheHits: 0,
         pathPrimitiveCacheMisses: 0,
         pathPrimitiveCount: 0,
         pathPrimitiveInputPointCount: 0,
+        selfPathPrimitiveBlockCount: 0,
         selfPathPrimitiveCacheHits: 0,
         selfPathPrimitiveCacheMisses: 0,
         selfPathPrimitiveCount: 0,
         selfPathPrimitiveInputPointCount: 0,
+        selfTrailBlockBoundsRejected: 0,
+        selfTrailBlockChecks: 0,
+        selfTrailBoundsRejected: 0,
+        selfTrailPrimitiveCandidates: 0,
+        selfTrailPrimitiveTests: 0,
         phases: {},
         playersProcessed: 0,
         selfCollisionTests: 0,
@@ -591,18 +604,25 @@ function doesMovementLineCrossStoredSegments(startPoint, endPoint, segments, dia
         return false;
     }
 
+    const movementBounds = getLineBounds(startPoint, endPoint);
     let checkedPrimitiveCount = 0;
 
     for (const segment of segments) {
-        const primitives = getTrailCollisionPrimitives(segment, null, diagnostics);
+        const index = getTrailCollisionIndex(segment, null, diagnostics);
+        const result = doesLineCrossPathIndex(
+            startPoint,
+            endPoint,
+            movementBounds,
+            index,
+            diagnostics,
+            "owner"
+        );
 
-        for (const primitive of primitives) {
-            checkedPrimitiveCount++;
+        checkedPrimitiveCount += result.primitiveTests;
 
-            if (doesLineCrossPathPrimitive(startPoint, endPoint, primitive)) {
-                addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedPrimitiveCount);
-                return true;
-            }
+        if (result.crosses) {
+            addTrailDiagnosticCount(diagnostics, "ownerTrailSegmentChecks", checkedPrimitiveCount);
+            return true;
         }
     }
 
@@ -627,6 +647,7 @@ function doesLineCrossSideTrails(player, movingSide, storedSide, startPoint, end
     }
 
     let checkedPrimitiveCount = 0;
+    const movementBounds = getLineBounds(startPoint, endPoint);
 
     for (const segment of segments) {
         const maxPointCount = getSelfTrailCollisionPointLimit(player, movingSide, storedSide, segment);
@@ -635,15 +656,21 @@ function doesLineCrossSideTrails(player, movingSide, storedSide, startPoint, end
             continue;
         }
 
-        const primitives = getSelfTrailCollisionPrimitives(segment, maxPointCount, diagnostics);
+        const index = getSelfTrailCollisionIndex(segment, maxPointCount, diagnostics);
+        const result = doesLineCrossPathIndex(
+            startPoint,
+            endPoint,
+            movementBounds,
+            index,
+            diagnostics,
+            "self"
+        );
 
-        for (const primitive of primitives) {
-            checkedPrimitiveCount++;
+        checkedPrimitiveCount += result.primitiveTests;
 
-            if (doesLineCrossPathPrimitive(startPoint, endPoint, primitive)) {
-                addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedPrimitiveCount);
-                return true;
-            }
+        if (result.crosses) {
+            addTrailDiagnosticCount(diagnostics, "selfTrailSegmentChecks", checkedPrimitiveCount);
+            return true;
         }
     }
 
@@ -664,9 +691,67 @@ function getSelfTrailCollisionPointLimit(player, movingSide, storedSide, segment
     return Math.max(0, checkedSegmentEndIndex + 1);
 }
 
-function getTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics = null) {
+function doesLineCrossPathIndex(startPoint, endPoint, movementBounds, index, diagnostics = null, counterPrefix = "owner") {
+    if (!index || !Array.isArray(index.blocks) || index.blocks.length <= 0) {
+        return {
+            crosses: false,
+            primitiveTests: 0
+        };
+    }
+
+    if (!doBoundsOverlap(movementBounds, index.bounds)) {
+        addTrailDiagnosticCount(diagnostics, `${counterPrefix}TrailBoundsRejected`, 1);
+
+        return {
+            crosses: false,
+            primitiveTests: 0
+        };
+    }
+
+    let blockChecks = 0;
+    let blockBoundsRejected = 0;
+    let primitiveCandidates = 0;
+    let primitiveTests = 0;
+    let crosses = false;
+
+    for (const block of index.blocks) {
+        blockChecks++;
+
+        if (!doBoundsOverlap(movementBounds, block.bounds)) {
+            blockBoundsRejected++;
+            continue;
+        }
+
+        primitiveCandidates += block.primitives.length;
+
+        for (const primitive of block.primitives) {
+            primitiveTests++;
+
+            if (doesLineCrossPathPrimitive(startPoint, endPoint, primitive)) {
+                crosses = true;
+                break;
+            }
+        }
+
+        if (crosses) {
+            break;
+        }
+    }
+
+    addTrailDiagnosticCount(diagnostics, `${counterPrefix}TrailBlockChecks`, blockChecks);
+    addTrailDiagnosticCount(diagnostics, `${counterPrefix}TrailBlockBoundsRejected`, blockBoundsRejected);
+    addTrailDiagnosticCount(diagnostics, `${counterPrefix}TrailPrimitiveCandidates`, primitiveCandidates);
+    addTrailDiagnosticCount(diagnostics, `${counterPrefix}TrailPrimitiveTests`, primitiveTests);
+
+    return {
+        crosses,
+        primitiveTests
+    };
+}
+
+function getTrailCollisionIndex(segment, maxPointCount = null, diagnostics = null) {
     if (!Array.isArray(segment)) {
-        return [];
+        return createEmptyPathPrimitiveIndex();
     }
 
     const sourcePointCount = Number.isInteger(maxPointCount)
@@ -674,7 +759,7 @@ function getTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics 
         : segment.length;
 
     if (sourcePointCount < 2) {
-        return [];
+        return createEmptyPathPrimitiveIndex();
     }
 
     const cached = pathPrimitiveCache.get(segment);
@@ -687,9 +772,10 @@ function getTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics 
         && cacheEntry.lastX === lastPoint.x
         && cacheEntry.lastY === lastPoint.y) {
         addTrailDiagnosticCount(diagnostics, "pathPrimitiveCacheHits", 1);
+        addTrailDiagnosticCount(diagnostics, "pathPrimitiveBlockCount", cacheEntry.index.blocks.length);
         addTrailDiagnosticCount(diagnostics, "pathPrimitiveCount", cacheEntry.primitives.length);
         addTrailDiagnosticCount(diagnostics, "pathPrimitiveInputPointCount", sourcePointCount);
-        return cacheEntry.primitives;
+        return cacheEntry.index;
     }
 
     const points = sourcePointCount === segment.length
@@ -703,9 +789,13 @@ function getTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics 
     const safePrimitives = primitives.length > 0
         ? primitives
         : createFallbackLinePrimitives(points);
+    const index = createPathPrimitiveIndex(safePrimitives, {
+        blockSize: getTrailSpatialBlockPrimitiveCount()
+    });
     const nextCache = cached || new Map();
 
     nextCache.set(cacheKey, {
+        index,
         lastX: lastPoint.x,
         lastY: lastPoint.y,
         primitives: safePrimitives,
@@ -714,15 +804,16 @@ function getTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics 
     pathPrimitiveCache.set(segment, nextCache);
 
     addTrailDiagnosticCount(diagnostics, "pathPrimitiveCacheMisses", 1);
+    addTrailDiagnosticCount(diagnostics, "pathPrimitiveBlockCount", index.blocks.length);
     addTrailDiagnosticCount(diagnostics, "pathPrimitiveCount", safePrimitives.length);
     addTrailDiagnosticCount(diagnostics, "pathPrimitiveInputPointCount", sourcePointCount);
 
-    return safePrimitives;
+    return index;
 }
 
-function getSelfTrailCollisionPrimitives(segment, maxPointCount = null, diagnostics = null) {
+function getSelfTrailCollisionIndex(segment, maxPointCount = null, diagnostics = null) {
     if (!Array.isArray(segment)) {
-        return [];
+        return createEmptyPathPrimitiveIndex();
     }
 
     const sourcePointCount = Number.isInteger(maxPointCount)
@@ -730,7 +821,7 @@ function getSelfTrailCollisionPrimitives(segment, maxPointCount = null, diagnost
         : segment.length;
 
     if (sourcePointCount < 2) {
-        return [];
+        return createEmptyPathPrimitiveIndex();
     }
 
     const cached = selfTrailLinePrimitiveCache.get(segment);
@@ -743,9 +834,10 @@ function getSelfTrailCollisionPrimitives(segment, maxPointCount = null, diagnost
         && cacheEntry.lastX === lastPoint.x
         && cacheEntry.lastY === lastPoint.y) {
         addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCacheHits", 1);
+        addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveBlockCount", cacheEntry.index.blocks.length);
         addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCount", cacheEntry.primitives.length);
         addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveInputPointCount", sourcePointCount);
-        return cacheEntry.primitives;
+        return cacheEntry.index;
     }
 
     const points = sourcePointCount === segment.length
@@ -758,9 +850,13 @@ function getSelfTrailCollisionPrimitives(segment, maxPointCount = null, diagnost
     const safePrimitives = primitives.length > 0
         ? primitives
         : createFallbackLinePrimitives(points);
+    const index = createPathPrimitiveIndex(safePrimitives, {
+        blockSize: getTrailSpatialBlockPrimitiveCount()
+    });
     const nextCache = cached || new Map();
 
     nextCache.set(cacheKey, {
+        index,
         lastX: lastPoint.x,
         lastY: lastPoint.y,
         primitives: safePrimitives,
@@ -769,10 +865,19 @@ function getSelfTrailCollisionPrimitives(segment, maxPointCount = null, diagnost
     selfTrailLinePrimitiveCache.set(segment, nextCache);
 
     addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCacheMisses", 1);
+    addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveBlockCount", index.blocks.length);
     addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCount", safePrimitives.length);
     addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveInputPointCount", sourcePointCount);
 
-    return safePrimitives;
+    return index;
+}
+
+function createEmptyPathPrimitiveIndex() {
+    return {
+        blocks: [],
+        bounds: null,
+        primitives: []
+    };
 }
 
 function createFallbackLinePrimitives(points) {
@@ -815,6 +920,12 @@ function getSelfTrailLineSimplifyTolerance() {
     const value = Number(config.territory.selfTrailLineSimplifyTolerance);
 
     return Number.isFinite(value) && value >= 0 ? value : 1.5;
+}
+
+function getTrailSpatialBlockPrimitiveCount() {
+    const value = Number(config.territory.trailSpatialBlockPrimitiveCount);
+
+    return Number.isInteger(value) && value > 0 ? value : 48;
 }
 
 function degreesToRadians(value, fallbackDegrees) {
@@ -1132,6 +1243,26 @@ function coordinatesToPoint(coordinates) {
 function arePointsEqual(first, second) {
     return Math.abs(first.x - second.x) <= geometryEpsilon
         && Math.abs(first.y - second.y) <= geometryEpsilon;
+}
+
+function getLineBounds(startPoint, endPoint) {
+    return {
+        minX: Math.min(startPoint.x, endPoint.x),
+        minY: Math.min(startPoint.y, endPoint.y),
+        maxX: Math.max(startPoint.x, endPoint.x),
+        maxY: Math.max(startPoint.y, endPoint.y)
+    };
+}
+
+function doBoundsOverlap(first, second) {
+    if (!first || !second) {
+        return false;
+    }
+
+    return first.minX <= second.maxX + geometryEpsilon
+        && first.maxX + geometryEpsilon >= second.minX
+        && first.minY <= second.maxY + geometryEpsilon
+        && first.maxY + geometryEpsilon >= second.minY;
 }
 
 function areCoordinatesEqual(first, second) {

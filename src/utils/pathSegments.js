@@ -3,6 +3,7 @@ const defaultAngleThresholdRadians = Math.PI / 180;
 const defaultMaxArcSweepRadians = Math.PI * 0.75;
 const defaultMaxArcRadialDrift = 2;
 const defaultLineDeviationTolerance = 1.5;
+const defaultPrimitiveBlockSize = 48;
 
 function createPathPrimitivesFromPoints(points, options = {}) {
     const validPoints = getValidPoints(points);
@@ -118,6 +119,48 @@ function createLinePrimitivesFromPoints(points, options = {}) {
     pushLinePrimitive(primitives, validPoints, runStartIndex, validPoints.length - 1);
 
     return primitives;
+}
+
+function createPathPrimitiveIndex(primitives, options = {}) {
+    const validPrimitives = (primitives || []).filter(primitive => (
+        primitive && isValidBounds(primitive.bounds)
+    ));
+
+    if (validPrimitives.length <= 0) {
+        return {
+            blocks: [],
+            bounds: null,
+            primitives: []
+        };
+    }
+
+    const blockSize = getPositiveIntegerOption(
+        options.blockSize,
+        defaultPrimitiveBlockSize
+    );
+    const blocks = [];
+    let bounds = null;
+
+    for (let startIndex = 0; startIndex < validPrimitives.length; startIndex += blockSize) {
+        const blockPrimitives = validPrimitives.slice(startIndex, startIndex + blockSize);
+        const blockBounds = getBoundsUnion(blockPrimitives.map(primitive => primitive.bounds));
+
+        if (!blockBounds) {
+            continue;
+        }
+
+        blocks.push({
+            bounds: blockBounds,
+            primitives: blockPrimitives
+        });
+        bounds = mergeBounds(bounds, blockBounds);
+    }
+
+    return {
+        blocks,
+        bounds,
+        primitives: validPrimitives
+    };
 }
 
 function canUseLinePrimitiveRun(points, startIndex, endIndex, options) {
@@ -461,6 +504,46 @@ function getPointsBounds(points) {
     return bounds;
 }
 
+function getBoundsUnion(boundsList) {
+    let union = null;
+
+    for (const bounds of boundsList || []) {
+        union = mergeBounds(union, bounds);
+    }
+
+    return union;
+}
+
+function mergeBounds(first, second) {
+    if (!isValidBounds(second)) {
+        return first;
+    }
+
+    if (!first) {
+        return {
+            minX: second.minX,
+            minY: second.minY,
+            maxX: second.maxX,
+            maxY: second.maxY
+        };
+    }
+
+    return {
+        minX: Math.min(first.minX, second.minX),
+        minY: Math.min(first.minY, second.minY),
+        maxX: Math.max(first.maxX, second.maxX),
+        maxY: Math.max(first.maxY, second.maxY)
+    };
+}
+
+function isValidBounds(bounds) {
+    return bounds
+        && Number.isFinite(bounds.minX)
+        && Number.isFinite(bounds.minY)
+        && Number.isFinite(bounds.maxX)
+        && Number.isFinite(bounds.maxY);
+}
+
 function pointOnCircle(center, radius, angle) {
     return {
         x: center.x + Math.cos(angle) * radius,
@@ -544,8 +627,13 @@ function getNonNegativeNumberOption(value, fallback) {
     return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
+function getPositiveIntegerOption(value, fallback) {
+    return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 module.exports = {
     createLinePrimitivesFromPoints,
+    createPathPrimitiveIndex,
     createPathPrimitivesFromPoints,
     doesLineCrossPathPrimitive
 };

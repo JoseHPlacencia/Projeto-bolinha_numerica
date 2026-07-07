@@ -66,6 +66,7 @@ const territory = Object.freeze({
     pathSegmentArcMaxSweepDegrees: 135,
     pathSegmentArcMaxRadialDrift: 2,
     selfTrailLineSimplifyTolerance: 1.5,
+    trailSpatialBlockPrimitiveCount: 48,
     boundarySlideTrailPointSpacing: 5,
     trailPointSpacing: 15,
     victoryAreaRatio: 0.9995
