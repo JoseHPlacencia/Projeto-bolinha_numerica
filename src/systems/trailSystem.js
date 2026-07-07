@@ -1,7 +1,8 @@
 const config = require("../config/gameConfig");
 const {
     getPlayerTerritoryPolygon,
-    isPointOwnedByPlayer
+    isPointOwnedByPlayer,
+    processTerritoryOverlapRepairQueue
 } = require("../state/territories");
 const {
     calculatePolygonArea,
@@ -25,6 +26,7 @@ const {
     handlePlayerLifeLoss
 } = require("./catchModeSystem");
 const { captureClosedTrail } = require("./dominationSystem");
+const { relocatePlayersAfterTerritoryChange } = require("./territoryRespawnSystem");
 
 const geometryEpsilon = 1e-7;
 const pathPrimitiveCache = new WeakMap();
@@ -118,6 +120,11 @@ function createCaptureApplyDiagnostics() {
         operationSimplifyMaxAreaDriftRatio: 0,
         operationSimplifyOutputPointCount: 0,
         operationSimplifySubjectCount: 0,
+        overlapRepairQueueBudgetHitCount: 0,
+        overlapRepairQueueChangedCount: 0,
+        overlapRepairQueuePendingCount: 0,
+        overlapRepairQueueProcessedCount: 0,
+        overlapRepairQueueQueuedCount: 0,
         ownerChangedCount: 0,
         postCaptureOverlapBoundsRejectedCount: 0,
         postCaptureOverlapCheckCount: 0,
@@ -192,6 +199,19 @@ function updateTrails(players, territories, context = {}) {
         ...context,
         trailDiagnostics: diagnostics
     };
+    const repairedPlayerIds = measureTrailPhase(diagnostics, "overlapRepairQueue", () => (
+        processTerritoryOverlapRepairQueue(territories, players, {
+            diagnostics,
+            players
+        })
+    ));
+
+    if (repairedPlayerIds.size > 0) {
+        addTrailDiagnosticCount(diagnostics, "captureChangedPlayerCount", repairedPlayerIds.size);
+        measureTrailPhase(diagnostics, "overlapRepairQueueRelocatePlayers", () => {
+            relocatePlayersAfterTerritoryChange(players, territories, repairedPlayerIds);
+        });
+    }
 
     for (const player of players.values()) {
         updatePlayerTrail(player, territories, players, nextContext);
