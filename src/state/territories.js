@@ -75,6 +75,7 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
     const diagnostics = getCaptureApplyDiagnostics(options);
     const captureApply = getCaptureApplyMetrics(diagnostics);
     const territory = territories.get(ownerId);
+    const captureRepairCandidateIds = new Set();
 
     addCaptureApplyCount(captureApply, "calls", 1);
     recordCaptureApplyMax(captureApply, "maxTerritoryCount", territories.size);
@@ -132,6 +133,7 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
             continue;
         }
 
+        captureRepairCandidateIds.add(playerId);
         addCaptureApplyCount(captureApply, "boundsOverlapCount", 1);
 
         const overlap = measureCaptureApplyOperation(diagnostics, "captureApplyOverlapFilter", () => (
@@ -224,7 +226,10 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
             territories,
             ownerId,
             changedPlayerIds,
-            options,
+            {
+                ...options,
+                captureRepairCandidateIds
+            },
             captureApply
         );
     });
@@ -244,6 +249,12 @@ function repairChangedTerritoryOverlaps(territories, ownerId, changedPlayerIds, 
     }
 
     const pendingIds = [...changedPlayerIds];
+    const repairContext = {
+        candidateIds: options.captureRepairCandidateIds instanceof Set
+            ? options.captureRepairCandidateIds
+            : new Set(),
+        checkedPairs: new Set()
+    };
     const maxRepairPasses = Math.max(1, territories.size * territories.size);
     let repairPasses = 0;
 
@@ -263,6 +274,7 @@ function repairChangedTerritoryOverlaps(territories, ownerId, changedPlayerIds, 
             changedPlayerIds,
             pendingIds,
             options,
+            repairContext,
             metrics
         )) {
             pendingIds.push(changedPlayerId);
@@ -277,6 +289,7 @@ function repairTerritoryOverlaps(
     changedPlayerIds,
     pendingIds,
     options,
+    repairContext,
     metrics
 ) {
     const changedTerritory = territories.get(changedPlayerId);
@@ -286,11 +299,20 @@ function repairTerritoryOverlaps(
         return false;
     }
 
-    for (const [otherPlayerId, otherTerritory] of territories.entries()) {
-        if (otherPlayerId === changedPlayerId || !otherTerritory) {
+    for (const otherPlayerId of getOverlapRepairCandidateIds(territories, changedPlayerId, ownerId, repairContext)) {
+        const otherTerritory = territories.get(otherPlayerId);
+
+        if (!otherTerritory) {
             continue;
         }
 
+        const pairKey = createTerritoryPairKey(changedPlayerId, otherPlayerId);
+
+        if (repairContext.checkedPairs.has(pairKey)) {
+            continue;
+        }
+
+        repairContext.checkedPairs.add(pairKey);
         addCaptureApplyCount(metrics, "postCaptureOverlapCheckCount", 1);
         const otherBounds = getTerritoryBounds(otherTerritory);
 
@@ -345,10 +367,63 @@ function repairTerritoryOverlaps(
             pendingIds.push(loserId);
         }
 
-        return loserId === changedPlayerId;
+        return true;
     }
 
     return false;
+}
+
+function getOverlapRepairCandidateIds(territories, changedPlayerId, ownerId, repairContext) {
+    if (changedPlayerId !== ownerId) {
+        return [...territories.keys()].filter(playerId => playerId !== changedPlayerId);
+    }
+
+    const candidateIds = new Set();
+
+    for (const candidateId of repairContext.candidateIds || []) {
+        if (candidateId !== changedPlayerId && territories.has(candidateId)) {
+            candidateIds.add(candidateId);
+        }
+    }
+
+    appendIncrementalOverlapRepairCandidateIds(territories, ownerId, candidateIds);
+
+    return [...candidateIds];
+}
+
+function appendIncrementalOverlapRepairCandidateIds(territories, ownerId, candidateIds) {
+    const territory = territories.get(ownerId);
+
+    if (!territory) {
+        return;
+    }
+
+    const ids = [...territories.keys()].filter(playerId => playerId !== ownerId);
+
+    if (ids.length === 0) {
+        territory.overlapRepairCursor = 0;
+        return;
+    }
+
+    const maxCandidates = getIncrementalOverlapRepairCandidateCount();
+    let cursor = Number.isInteger(territory.overlapRepairCursor)
+        ? territory.overlapRepairCursor
+        : 0;
+
+    for (let scanned = 0; scanned < ids.length && candidateIds.size < maxCandidates; scanned++) {
+        const candidateId = ids[cursor % ids.length];
+
+        candidateIds.add(candidateId);
+        cursor++;
+    }
+
+    territory.overlapRepairCursor = cursor % ids.length;
+}
+
+function getIncrementalOverlapRepairCandidateCount() {
+    const value = config.territory.incrementalOverlapRepairCandidates;
+
+    return Number.isInteger(value) && value > 0 ? value : 2;
 }
 
 function trimTerritoryOverlap(loserTerritory, winnerTerritory, loserPlayer) {
