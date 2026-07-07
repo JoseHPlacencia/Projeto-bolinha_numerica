@@ -1019,6 +1019,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function expandCompactSnapshot(rawSnapshot, applyResult) {
+        const checkpoint = createSnapshotApplyCheckpoint();
         const removedTerritoryIds = normalizeEntityIds(rawSnapshot.removedTerritoryIds);
         const trailRemovals = normalizeTrailRemovals(
             rawSnapshot.trailRemovals,
@@ -1062,6 +1063,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             requestRecoveryForMissingCachedEntities(rawSnapshot.trailIds, availableTrails, "trails", applyResult);
         }
 
+        if (!applyResult.applied) {
+            restoreSnapshotApplyCheckpoint(checkpoint);
+        }
+
         debugState.visiblePlayers = Object.keys(players).length;
         debugState.visibleTerritories = Object.keys(territories).length;
         debugState.visibleTrails = Object.keys(trails).length;
@@ -1079,6 +1084,38 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             mode: rawSnapshot.mode || null,
             numbers: rawSnapshot.numbers || null
         };
+    }
+
+    function createSnapshotApplyCheckpoint() {
+        return {
+            entityCache: {
+                playerInfo: { ...entityCache.playerInfo },
+                territories: { ...entityCache.territories },
+                territoryPoints: { ...entityCache.territoryPoints },
+                trails: { ...entityCache.trails },
+                trailAssemblies: { ...entityCache.trailAssemblies },
+                trailTombstones: { ...entityCache.trailTombstones }
+            },
+            failedTerritoryOperationKeys: new Map(failedTerritoryOperationKeys),
+            pendingTerritoryOperations: new Map(pendingTerritoryOperations),
+            suppressedCaptureOperationResyncIds: new Set(suppressedCaptureOperationResyncIds)
+        };
+    }
+
+    function restoreSnapshotApplyCheckpoint(checkpoint) {
+        if (!checkpoint) {
+            return;
+        }
+
+        entityCache.playerInfo = checkpoint.entityCache.playerInfo;
+        entityCache.territories = checkpoint.entityCache.territories;
+        entityCache.territoryPoints = checkpoint.entityCache.territoryPoints;
+        entityCache.trails = checkpoint.entityCache.trails;
+        entityCache.trailAssemblies = checkpoint.entityCache.trailAssemblies;
+        entityCache.trailTombstones = checkpoint.entityCache.trailTombstones;
+        replaceMapEntries(pendingTerritoryOperations, checkpoint.pendingTerritoryOperations);
+        replaceMapEntries(failedTerritoryOperationKeys, checkpoint.failedTerritoryOperationKeys);
+        replaceSetEntries(suppressedCaptureOperationResyncIds, checkpoint.suppressedCaptureOperationResyncIds);
     }
 
     function expandLegacySnapshot(rawSnapshot) {
@@ -1312,6 +1349,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             return trail;
         }
 
+        if (trail.isPartial) {
+            return trail;
+        }
+
         const sample = createTrailPredictionSample(player);
         const shouldPredictLeft = !isPointInsideTerritory(sample.leftPoint, territory);
         const shouldPredictRight = !isPointInsideTerritory(sample.rightPoint, territory);
@@ -1335,8 +1376,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const fillChanged = leftFillPath !== trail.leftFillPath || rightFillPath !== trail.rightFillPath;
 
         return {
-            id: trail.id,
-            color: trail.color,
+            ...trail,
             leftSegments,
             rightSegments,
             leftFillPath,
@@ -2424,6 +2464,22 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
                 generation,
                 snapshotSequence
             };
+        }
+    }
+
+    function replaceMapEntries(target, source) {
+        target.clear();
+
+        for (const [key, value] of source || []) {
+            target.set(key, value);
+        }
+    }
+
+    function replaceSetEntries(target, source) {
+        target.clear();
+
+        for (const value of source || []) {
+            target.add(value);
         }
     }
 
