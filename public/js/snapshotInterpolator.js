@@ -314,6 +314,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxCaptureApplySimplifyInputPoints: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).operationSimplifyInputPointCount)),
             maxCaptureApplySimplifyOutputPoints: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).operationSimplifyOutputPointCount)),
             maxCaptureApplyChangedTerritories: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).changedTerritoryCount)),
+            maxCaptureApplyPostOverlapChecks: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).postCaptureOverlapCheckCount)),
+            maxCaptureApplyPostOverlaps: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).postCaptureOverlapCount)),
             maxCaptureApplyCapturedPoints: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).maxCapturedPointCount)),
             maxCaptureApplySubtractPoints: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).subtractPointCount)),
             maxCaptureApplyOperationSubtractPoints: maxFiniteValue(snapshotEvents.map(event => getEventCaptureApply(event) && getEventCaptureApply(event).subtractOperationPointCount)),
@@ -566,6 +568,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             operationSimplifyOutputPointCount: finiteOrNull(value.operationSimplifyOutputPointCount),
             operationSimplifySubjectCount: finiteOrNull(value.operationSimplifySubjectCount),
             ownerChangedCount: finiteOrNull(value.ownerChangedCount),
+            postCaptureOverlapBoundsRejectedCount: finiteOrNull(value.postCaptureOverlapBoundsRejectedCount),
+            postCaptureOverlapCheckCount: finiteOrNull(value.postCaptureOverlapCheckCount),
+            postCaptureOverlapCount: finiteOrNull(value.postCaptureOverlapCount),
+            postCaptureOverlapFirst: normalizePostCaptureOverlap(value.postCaptureOverlapFirst),
             slowestOverlap: normalizeCaptureApplyOverlap(value.slowestOverlap),
             slowestSubtract: normalizeCaptureApplySubtract(value.slowestSubtract),
             subtractChangedCount: finiteOrNull(value.subtractChangedCount),
@@ -574,6 +580,21 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             subtractOperationPointCount: finiteOrNull(value.subtractOperationPointCount),
             subtractPointCount: finiteOrNull(value.subtractPointCount),
             subtractResultPointCount: finiteOrNull(value.subtractResultPointCount)
+        };
+    }
+
+    function normalizePostCaptureOverlap(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            firstId: typeof value.firstId === "string" ? value.firstId : null,
+            firstPointCount: finiteOrNull(value.firstPointCount),
+            firstVersion: finiteOrNull(value.firstVersion),
+            secondId: typeof value.secondId === "string" ? value.secondId : null,
+            secondPointCount: finiteOrNull(value.secondPointCount),
+            secondVersion: finiteOrNull(value.secondVersion)
         };
     }
 

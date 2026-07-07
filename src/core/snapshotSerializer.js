@@ -304,6 +304,7 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
     const serializedTerritories = {};
     const serializedOperations = {};
     const includedTerritoryIds = [];
+    const captureSync = createCaptureTerritorySyncGroups(territories, territoryIds, clientState, now);
 
     for (const territoryId of territoryIds) {
         const territory = territories.get(territoryId);
@@ -314,15 +315,23 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
 
         const version = territory.version || 0;
         const knownTerritory = clientState.territories.get(territoryId);
+        const forceFullTerritory = captureSync.forcedFullTerritoryIds.has(territoryId);
+        const forceCaptureOwnerSync = captureSync.ownerGroupIds.has(territoryId);
         let includeTerritoryId = Boolean(knownTerritory);
 
-        if (!shouldSendVersionedState(knownTerritory, version, now, config.network.territoryFullSyncIntervalMs)) {
+        if (
+            !forceFullTerritory
+            && !forceCaptureOwnerSync
+            && !shouldSendVersionedState(knownTerritory, version, now, config.network.territoryFullSyncIntervalMs)
+        ) {
             includedTerritoryIds.push(territoryId);
             continue;
         }
 
         const knownTrail = clientState.trails.get(territoryId);
-        const operation = createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, territoryId, viewerId);
+        const operation = forceFullTerritory
+            ? null
+            : createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, territoryId, viewerId);
 
         if (operation) {
             consumeSnapshotPayloadBudget(payloadBudget, "territoryOps", estimateTerritoryOperationPayloadBytes(operation), {
@@ -338,7 +347,7 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
         }
 
         if (!consumeSnapshotPayloadBudget(payloadBudget, "territories", estimateTerritoryPayloadBytes(territory), {
-            force: territoryId === viewerId
+            force: territoryId === viewerId || forceFullTerritory || forceCaptureOwnerSync
         })) {
             if (includeTerritoryId) {
                 includedTerritoryIds.push(territoryId);
@@ -372,6 +381,75 @@ function serializeChangedTerritoryState(territories, territoryIds, viewerId, cli
         territories: serializedTerritories,
         operations: serializedOperations
     };
+}
+
+function createCaptureTerritorySyncGroups(territories, territoryIds, clientState, now) {
+    const visibleTerritoryIds = new Set(territoryIds);
+    const ownerGroupIds = new Set();
+    const forcedFullTerritoryIds = new Set();
+
+    for (const territoryId of territoryIds) {
+        const territory = territories.get(territoryId);
+        const affectedIds = getVisibleCaptureAffectedTerritoryIds(
+            territory,
+            territories,
+            visibleTerritoryIds
+        );
+
+        if (affectedIds.length <= 0) {
+            continue;
+        }
+
+        const ownerVersion = territory.version || 0;
+        const knownOwnerTerritory = clientState.territories.get(territoryId);
+
+        if (!shouldSendVersionedState(knownOwnerTerritory, ownerVersion, now, config.network.territoryFullSyncIntervalMs)) {
+            continue;
+        }
+
+        const staleAffectedIds = affectedIds.filter(affectedId => {
+            const affectedTerritory = territories.get(affectedId);
+            const affectedVersion = affectedTerritory ? affectedTerritory.version || 0 : 0;
+            const knownAffectedTerritory = clientState.territories.get(affectedId);
+
+            return affectedTerritory
+                && shouldSendVersionedState(
+                    knownAffectedTerritory,
+                    affectedVersion,
+                    now,
+                    config.network.territoryFullSyncIntervalMs
+                );
+        });
+
+        if (staleAffectedIds.length <= 0) {
+            continue;
+        }
+
+        ownerGroupIds.add(territoryId);
+
+        for (const affectedId of staleAffectedIds) {
+            forcedFullTerritoryIds.add(affectedId);
+        }
+    }
+
+    return {
+        forcedFullTerritoryIds,
+        ownerGroupIds
+    };
+}
+
+function getVisibleCaptureAffectedTerritoryIds(territory, territories, visibleTerritoryIds) {
+    if (!territory || !Array.isArray(territory.captureAffectedTerritoryIds)) {
+        return [];
+    }
+
+    return territory.captureAffectedTerritoryIds
+        .filter(territoryId => (
+            typeof territoryId === "string"
+            && territoryId !== territory.id
+            && visibleTerritoryIds.has(territoryId)
+            && territories.has(territoryId)
+        ));
 }
 
 function createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, territoryId, viewerId) {

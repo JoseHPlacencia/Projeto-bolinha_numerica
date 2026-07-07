@@ -608,13 +608,15 @@ function storeCaptureOperation(
     baseTerritoryPolygon,
     diagnostics
 ) {
-    if (!changedPlayerIds.has(playerId) || !capture.operation) {
-        return;
-    }
-
     const territory = territories.get(playerId);
 
     if (!territory) {
+        return;
+    }
+
+    storeCaptureAffectedTerritoryIds(territories, territory, playerId, changedPlayerIds);
+
+    if (!changedPlayerIds.has(playerId) || !capture.operation) {
         return;
     }
 
@@ -660,6 +662,23 @@ function storeCaptureOperation(
         endContact: capture.operation.endContact,
         keepAnchor: capture.operation.keepAnchor
     };
+}
+
+function storeCaptureAffectedTerritoryIds(territories, territory, playerId, changedPlayerIds) {
+    if (!changedPlayerIds || !changedPlayerIds.has(playerId)) {
+        delete territory.captureAffectedTerritoryIds;
+        return;
+    }
+
+    const affectedIds = [...changedPlayerIds]
+        .filter(affectedId => affectedId !== playerId && territories.has(affectedId));
+
+    if (affectedIds.length <= 0) {
+        delete territory.captureAffectedTerritoryIds;
+        return;
+    }
+
+    territory.captureAffectedTerritoryIds = affectedIds;
 }
 
 function validateCaptureOperationReplay(operation, basePolygon, finalPolygon) {

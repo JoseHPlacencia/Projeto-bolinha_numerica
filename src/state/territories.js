@@ -218,6 +218,10 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         }
     }
 
+    measureCaptureApplyPhase(diagnostics, "captureApplyPostOverlapAudit", () => {
+        auditChangedTerritoryOverlaps(territories, changedPlayerIds, captureApply);
+    });
+
     return changedPlayerIds;
 }
 
@@ -264,6 +268,10 @@ function createCaptureApplyMetrics() {
         operationSimplifyOutputPointCount: 0,
         operationSimplifySubjectCount: 0,
         ownerChangedCount: 0,
+        postCaptureOverlapBoundsRejectedCount: 0,
+        postCaptureOverlapCheckCount: 0,
+        postCaptureOverlapCount: 0,
+        postCaptureOverlapFirst: null,
         slowestOverlap: null,
         slowestSubtract: null,
         subtractChangedCount: 0,
@@ -384,6 +392,78 @@ function recordSlowestCaptureApplySubtract(metrics, detail) {
         subjectArea: roundToMilliseconds(detail.subjectArea),
         subjectPointCount: detail.subjectPointCount,
         usedSimplified: Boolean(detail.usedSimplified)
+    };
+}
+
+function auditChangedTerritoryOverlaps(territories, changedPlayerIds, metrics) {
+    if (!metrics || !changedPlayerIds || changedPlayerIds.size <= 0) {
+        return;
+    }
+
+    const checkedPairs = new Set();
+
+    for (const changedPlayerId of changedPlayerIds) {
+        const changedTerritory = territories.get(changedPlayerId);
+
+        if (!changedTerritory) {
+            continue;
+        }
+
+        const changedBounds = getTerritoryBounds(changedTerritory);
+
+        if (!changedBounds) {
+            continue;
+        }
+
+        for (const [otherPlayerId, otherTerritory] of territories.entries()) {
+            if (otherPlayerId === changedPlayerId || !otherTerritory) {
+                continue;
+            }
+
+            const pairKey = createTerritoryPairKey(changedPlayerId, otherPlayerId);
+
+            if (checkedPairs.has(pairKey)) {
+                continue;
+            }
+
+            checkedPairs.add(pairKey);
+            addCaptureApplyCount(metrics, "postCaptureOverlapCheckCount", 1);
+
+            const otherBounds = getTerritoryBounds(otherTerritory);
+
+            if (!doBoundsOverlap(changedBounds, otherBounds)) {
+                addCaptureApplyCount(metrics, "postCaptureOverlapBoundsRejectedCount", 1);
+                continue;
+            }
+
+            if (!doPolygonsOverlap(changedTerritory.polygon, otherTerritory.polygon, changedBounds, otherBounds)) {
+                continue;
+            }
+
+            addCaptureApplyCount(metrics, "postCaptureOverlapCount", 1);
+            recordFirstPostCaptureOverlap(metrics, changedPlayerId, otherPlayerId, changedTerritory, otherTerritory);
+        }
+    }
+}
+
+function createTerritoryPairKey(firstId, secondId) {
+    return firstId < secondId
+        ? `${firstId}\0${secondId}`
+        : `${secondId}\0${firstId}`;
+}
+
+function recordFirstPostCaptureOverlap(metrics, firstId, secondId, firstTerritory, secondTerritory) {
+    if (!metrics || metrics.postCaptureOverlapFirst) {
+        return;
+    }
+
+    metrics.postCaptureOverlapFirst = {
+        firstId,
+        firstPointCount: getPolygonPointCount(firstTerritory.polygon),
+        firstVersion: firstTerritory.version || 0,
+        secondId,
+        secondPointCount: getPolygonPointCount(secondTerritory.polygon),
+        secondVersion: secondTerritory.version || 0
     };
 }
 
@@ -586,6 +666,7 @@ function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     }
 
     delete territory.lastCaptureOperation;
+    delete territory.captureAffectedTerritoryIds;
 
     if (!options.preserveCaptureOperationLog) {
         territory.captureOperationLog = [];

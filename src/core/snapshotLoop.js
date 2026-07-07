@@ -549,6 +549,12 @@ function cloneCaptureApplyDiagnostics(diagnostics) {
         operationSimplifyOutputPointCount: diagnostics.operationSimplifyOutputPointCount,
         operationSimplifySubjectCount: diagnostics.operationSimplifySubjectCount,
         ownerChangedCount: diagnostics.ownerChangedCount,
+        postCaptureOverlapBoundsRejectedCount: diagnostics.postCaptureOverlapBoundsRejectedCount,
+        postCaptureOverlapCheckCount: diagnostics.postCaptureOverlapCheckCount,
+        postCaptureOverlapCount: diagnostics.postCaptureOverlapCount,
+        postCaptureOverlapFirst: diagnostics.postCaptureOverlapFirst
+            ? { ...diagnostics.postCaptureOverlapFirst }
+            : null,
         slowestOverlap: diagnostics.slowestOverlap
             ? { ...diagnostics.slowestOverlap }
             : null,
@@ -595,6 +601,10 @@ function normalizeCaptureApplyDiagnostics(diagnostics) {
         operationSimplifyOutputPointCount: finiteOrNull(diagnostics.operationSimplifyOutputPointCount),
         operationSimplifySubjectCount: finiteOrNull(diagnostics.operationSimplifySubjectCount),
         ownerChangedCount: finiteOrNull(diagnostics.ownerChangedCount),
+        postCaptureOverlapBoundsRejectedCount: finiteOrNull(diagnostics.postCaptureOverlapBoundsRejectedCount),
+        postCaptureOverlapCheckCount: finiteOrNull(diagnostics.postCaptureOverlapCheckCount),
+        postCaptureOverlapCount: finiteOrNull(diagnostics.postCaptureOverlapCount),
+        postCaptureOverlapFirst: normalizePostCaptureOverlap(diagnostics.postCaptureOverlapFirst),
         slowestOverlap: normalizeCaptureApplyOverlap(diagnostics.slowestOverlap),
         slowestSubtract: normalizeCaptureApplySubtract(diagnostics.slowestSubtract),
         subtractChangedCount: finiteOrNull(diagnostics.subtractChangedCount),
@@ -603,6 +613,21 @@ function normalizeCaptureApplyDiagnostics(diagnostics) {
         subtractOperationPointCount: finiteOrNull(diagnostics.subtractOperationPointCount),
         subtractPointCount: finiteOrNull(diagnostics.subtractPointCount),
         subtractResultPointCount: finiteOrNull(diagnostics.subtractResultPointCount)
+    };
+}
+
+function normalizePostCaptureOverlap(detail) {
+    if (!detail || typeof detail !== "object") {
+        return null;
+    }
+
+    return {
+        firstId: typeof detail.firstId === "string" ? detail.firstId : null,
+        firstPointCount: finiteOrNull(detail.firstPointCount),
+        firstVersion: finiteOrNull(detail.firstVersion),
+        secondId: typeof detail.secondId === "string" ? detail.secondId : null,
+        secondPointCount: finiteOrNull(detail.secondPointCount),
+        secondVersion: finiteOrNull(detail.secondVersion)
     };
 }
 
