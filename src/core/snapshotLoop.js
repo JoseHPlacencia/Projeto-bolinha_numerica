@@ -555,6 +555,8 @@ function cloneCaptureApplyDiagnostics(diagnostics) {
         postCaptureOverlapFirst: diagnostics.postCaptureOverlapFirst
             ? { ...diagnostics.postCaptureOverlapFirst }
             : null,
+        postCaptureOverlapRepairChangedCount: diagnostics.postCaptureOverlapRepairChangedCount,
+        postCaptureOverlapRepairCount: diagnostics.postCaptureOverlapRepairCount,
         slowestOverlap: diagnostics.slowestOverlap
             ? { ...diagnostics.slowestOverlap }
             : null,
@@ -605,6 +607,8 @@ function normalizeCaptureApplyDiagnostics(diagnostics) {
         postCaptureOverlapCheckCount: finiteOrNull(diagnostics.postCaptureOverlapCheckCount),
         postCaptureOverlapCount: finiteOrNull(diagnostics.postCaptureOverlapCount),
         postCaptureOverlapFirst: normalizePostCaptureOverlap(diagnostics.postCaptureOverlapFirst),
+        postCaptureOverlapRepairChangedCount: finiteOrNull(diagnostics.postCaptureOverlapRepairChangedCount),
+        postCaptureOverlapRepairCount: finiteOrNull(diagnostics.postCaptureOverlapRepairCount),
         slowestOverlap: normalizeCaptureApplyOverlap(diagnostics.slowestOverlap),
         slowestSubtract: normalizeCaptureApplySubtract(diagnostics.slowestSubtract),
         subtractChangedCount: finiteOrNull(diagnostics.subtractChangedCount),

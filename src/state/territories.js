@@ -219,6 +219,16 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         }
     }
 
+    measureCaptureApplyPhase(diagnostics, "captureApplyRepairChangedOverlaps", () => {
+        repairChangedTerritoryOverlaps(
+            territories,
+            ownerId,
+            changedPlayerIds,
+            options,
+            captureApply
+        );
+    });
+
     if (options.captureOverlapAudit === true) {
         measureCaptureApplyPhase(diagnostics, "captureApplyPostOverlapAudit", () => {
             auditChangedTerritoryOverlaps(territories, changedPlayerIds, captureApply);
@@ -226,6 +236,161 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
     }
 
     return changedPlayerIds;
+}
+
+function repairChangedTerritoryOverlaps(territories, ownerId, changedPlayerIds, options, metrics) {
+    if (!changedPlayerIds || changedPlayerIds.size <= 0) {
+        return;
+    }
+
+    const pendingIds = [...changedPlayerIds];
+    const maxRepairPasses = Math.max(1, territories.size * territories.size);
+    let repairPasses = 0;
+
+    while (pendingIds.length > 0 && repairPasses < maxRepairPasses) {
+        const changedPlayerId = pendingIds.shift();
+
+        if (!changedPlayerIds.has(changedPlayerId)) {
+            continue;
+        }
+
+        repairPasses++;
+
+        if (repairTerritoryOverlaps(
+            territories,
+            changedPlayerId,
+            ownerId,
+            changedPlayerIds,
+            pendingIds,
+            options,
+            metrics
+        )) {
+            pendingIds.push(changedPlayerId);
+        }
+    }
+}
+
+function repairTerritoryOverlaps(
+    territories,
+    changedPlayerId,
+    ownerId,
+    changedPlayerIds,
+    pendingIds,
+    options,
+    metrics
+) {
+    const changedTerritory = territories.get(changedPlayerId);
+    const changedBounds = getTerritoryBounds(changedTerritory);
+
+    if (!changedTerritory || !changedBounds) {
+        return false;
+    }
+
+    for (const [otherPlayerId, otherTerritory] of territories.entries()) {
+        if (otherPlayerId === changedPlayerId || !otherTerritory) {
+            continue;
+        }
+
+        addCaptureApplyCount(metrics, "postCaptureOverlapCheckCount", 1);
+        const otherBounds = getTerritoryBounds(otherTerritory);
+
+        if (!doBoundsOverlap(changedBounds, otherBounds)) {
+            addCaptureApplyCount(metrics, "postCaptureOverlapBoundsRejectedCount", 1);
+            continue;
+        }
+
+        if (!doPolygonsOverlap(changedTerritory.polygon, otherTerritory.polygon, changedBounds, otherBounds)) {
+            continue;
+        }
+
+        const overlapArea = calculatePolygonIntersectionArea(changedTerritory.polygon, otherTerritory.polygon);
+
+        if (overlapArea <= territoryChangeAreaEpsilon) {
+            continue;
+        }
+
+        addCaptureApplyCount(metrics, "postCaptureOverlapCount", 1);
+        addCaptureApplyCount(metrics, "postCaptureOverlapRepairCount", 1);
+        recordFirstPostCaptureOverlap(
+            metrics,
+            changedPlayerId,
+            otherPlayerId,
+            changedTerritory,
+            otherTerritory,
+            overlapArea
+        );
+
+        const winnerId = selectOverlapWinnerId(
+            changedPlayerId,
+            changedTerritory,
+            otherPlayerId,
+            otherTerritory,
+            ownerId,
+            changedPlayerIds
+        );
+        const loserId = winnerId === changedPlayerId ? otherPlayerId : changedPlayerId;
+        const winnerTerritory = territories.get(winnerId);
+        const loserTerritory = territories.get(loserId);
+        const changed = trimTerritoryOverlap(loserTerritory, winnerTerritory, options.players && options.players.get(loserId));
+
+        if (!changed) {
+            continue;
+        }
+
+        addCaptureApplyCount(metrics, "postCaptureOverlapRepairChangedCount", 1);
+
+        if (!changedPlayerIds.has(loserId)) {
+            addCaptureApplyCount(metrics, "changedTerritoryCount", 1);
+            changedPlayerIds.add(loserId);
+            pendingIds.push(loserId);
+        }
+
+        return loserId === changedPlayerId;
+    }
+
+    return false;
+}
+
+function trimTerritoryOverlap(loserTerritory, winnerTerritory, loserPlayer) {
+    if (!loserTerritory || !winnerTerritory) {
+        return false;
+    }
+
+    const retainedPolygon = selectRetainedTerritoryPolygon(
+        subtractPolygonComponents(loserTerritory.polygon, winnerTerritory.polygon),
+        loserPlayer
+    );
+
+    return updateTerritoryPolygon(loserTerritory, retainedPolygon);
+}
+
+function selectOverlapWinnerId(firstId, firstTerritory, secondId, secondTerritory, ownerId, changedPlayerIds) {
+    if (firstId === ownerId || secondId === ownerId) {
+        return firstId === ownerId ? firstId : secondId;
+    }
+
+    const firstVersion = firstTerritory && firstTerritory.version || 0;
+    const secondVersion = secondTerritory && secondTerritory.version || 0;
+
+    if (firstVersion !== secondVersion) {
+        return firstVersion > secondVersion ? firstId : secondId;
+    }
+
+    const firstChanged = changedPlayerIds.has(firstId);
+    const secondChanged = changedPlayerIds.has(secondId);
+
+    if (firstChanged !== secondChanged) {
+        return firstChanged ? firstId : secondId;
+    }
+
+    const firstArea = getTerritoryArea(firstTerritory);
+    const secondArea = getTerritoryArea(secondTerritory);
+
+    if (Math.abs(firstArea - secondArea) > territoryChangeAreaEpsilon) {
+        return firstArea > secondArea ? firstId : secondId;
+    }
+
+    return firstId < secondId ? firstId : secondId;
 }
 
 function getCaptureApplyDiagnostics(options) {
@@ -275,6 +440,8 @@ function createCaptureApplyMetrics() {
         postCaptureOverlapCheckCount: 0,
         postCaptureOverlapCount: 0,
         postCaptureOverlapFirst: null,
+        postCaptureOverlapRepairChangedCount: 0,
+        postCaptureOverlapRepairCount: 0,
         slowestOverlap: null,
         slowestSubtract: null,
         subtractChangedCount: 0,

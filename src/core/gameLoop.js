@@ -264,6 +264,8 @@ function normalizeCaptureApplyDiagnostics(diagnostics) {
         postCaptureOverlapCheckCount: finiteOrNull(diagnostics.postCaptureOverlapCheckCount),
         postCaptureOverlapCount: finiteOrNull(diagnostics.postCaptureOverlapCount),
         postCaptureOverlapFirst: normalizePostCaptureOverlap(diagnostics.postCaptureOverlapFirst),
+        postCaptureOverlapRepairChangedCount: finiteOrNull(diagnostics.postCaptureOverlapRepairChangedCount),
+        postCaptureOverlapRepairCount: finiteOrNull(diagnostics.postCaptureOverlapRepairCount),
         slowestOverlap: normalizeCaptureApplyOverlap(diagnostics.slowestOverlap),
         slowestSubtract: normalizeCaptureApplySubtract(diagnostics.slowestSubtract),
         subtractChangedCount: finiteOrNull(diagnostics.subtractChangedCount),

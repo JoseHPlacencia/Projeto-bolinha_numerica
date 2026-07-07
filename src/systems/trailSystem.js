@@ -123,6 +123,8 @@ function createCaptureApplyDiagnostics() {
         postCaptureOverlapCheckCount: 0,
         postCaptureOverlapCount: 0,
         postCaptureOverlapFirst: null,
+        postCaptureOverlapRepairChangedCount: 0,
+        postCaptureOverlapRepairCount: 0,
         slowestOverlap: null,
         slowestSubtract: null,
         subtractChangedCount: 0,
