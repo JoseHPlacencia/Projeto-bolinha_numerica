@@ -144,8 +144,15 @@ function createEmptySelfTrailSafetyDiagnostics() {
         localCandidateCount: 0,
         maxBudgetElapsedMs: 0,
         pathEvaluationCount: 0,
+        pointBlockBoundsRejected: 0,
+        pointBlockChecks: 0,
+        pointBlockCount: 0,
         pointDistanceCheckCount: 0,
         sampleCount: 0,
+        segmentBlockBoundsRejected: 0,
+        segmentBlockChecks: 0,
+        segmentBlockCount: 0,
+        segmentBoundsRejected: 0,
         segmentCrossCheckCount: 0,
         trailPointCount: 0,
         trailSegmentCount: 0,
@@ -232,6 +239,14 @@ function getBotSelfTrailSafetyMaxLocalCandidates() {
     const value = Number(config.bots.selfTrailSafetyMaxLocalCandidates);
 
     return Number.isInteger(value) && value > 0 ? value : 8;
+}
+
+function getBotSelfTrailSafetyBlockSize() {
+    const value = Number(config.bots.selfTrailSafetyBlockSize);
+
+    return Number.isInteger(value) && value > 0
+        ? value
+        : Math.max(8, Number(config.territory.trailSpatialBlockPrimitiveCount) || 48);
 }
 
 function getBotSelfTrailLookaheadMaxDistance() {
@@ -1494,9 +1509,46 @@ function findNearestPoint(origin, points) {
     return nearest;
 }
 
-function getNearestDistanceSquared(origin, points, diagnostics = null) {
-    const sourcePoints = points || [];
+function getNearestDistanceSquared(origin, pointIndexOrPoints, diagnostics = null) {
+    const pointIndex = getPointIndex(pointIndexOrPoints);
+    const sourcePoints = pointIndex
+        ? pointIndex.points
+        : pointIndexOrPoints || [];
     let nearestDistanceSquared = Infinity;
+
+    if (pointIndex && pointIndex.blocks.length > 0) {
+        const orderedBlocks = pointIndex.blocks.map(block => ({
+            block,
+            distanceSquared: getPointBoundsDistanceSquared(origin, block.bounds)
+        })).sort((first, second) => first.distanceSquared - second.distanceSquared);
+        let blockBoundsRejected = 0;
+        let checkedPointCount = 0;
+
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockChecks", orderedBlocks.length);
+
+        for (const item of orderedBlocks) {
+            if (item.distanceSquared > nearestDistanceSquared + geometryEpsilon) {
+                blockBoundsRejected++;
+                continue;
+            }
+
+            for (const point of item.block.points) {
+                checkedPointCount++;
+                const deltaX = origin.x - point.x;
+                const deltaY = origin.y - point.y;
+                const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+
+                if (distanceSquared < nearestDistanceSquared) {
+                    nearestDistanceSquared = distanceSquared;
+                }
+            }
+        }
+
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockBoundsRejected", blockBoundsRejected);
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointDistanceCheckCount", checkedPointCount);
+
+        return nearestDistanceSquared;
+    }
 
     addSelfTrailSafetyDiagnosticValue(diagnostics, "pointDistanceCheckCount", sourcePoints.length);
 
@@ -1511,6 +1563,14 @@ function getNearestDistanceSquared(origin, points, diagnostics = null) {
     }
 
     return nearestDistanceSquared;
+}
+
+function getPointIndex(value) {
+    return value
+        && Array.isArray(value.points)
+        && Array.isArray(value.blocks)
+        ? value
+        : null;
 }
 
 function getAngleDelta(fromAngle, toAngle) {
@@ -1611,7 +1671,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
     }
 
     const trailGeometry = createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, options, diagnostics);
-    const nearestSelfTrailDistanceSquared = getNearestDistanceSquared(bot, trailGeometry.points, diagnostics);
+    const nearestSelfTrailDistanceSquared = getNearestDistanceSquared(bot, trailGeometry.pointIndex, diagnostics);
     const bypassDistance = getSelfTrailLookaheadDistance(options) + config.bots.selfTrailAvoidDistance;
 
     if (
@@ -2059,27 +2119,37 @@ function createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, options 
     );
     const points = filterPointsByBounds(trailPoints, bounds);
     const segments = filterSegmentsByBounds(trailSegments, bounds);
+    const pointIndex = createPointBlockIndex(points, getBotSelfTrailSafetyBlockSize());
+    const segmentIndex = createSegmentBlockIndex(segments, getBotSelfTrailSafetyBlockSize());
 
     addSelfTrailSafetyDiagnosticValue(diagnostics, "trailPointCount", trailPoints.length);
     addSelfTrailSafetyDiagnosticValue(diagnostics, "trailSegmentCount", trailSegments.length);
     addSelfTrailSafetyDiagnosticValue(diagnostics, "filteredTrailPointCount", points.length);
     addSelfTrailSafetyDiagnosticValue(diagnostics, "filteredTrailSegmentCount", segments.length);
+    addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockCount", pointIndex.blocks.length);
+    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockCount", segmentIndex.blocks.length);
 
     return {
         bounds,
         lookaheadDistance,
+        pointIndex,
         points,
+        segmentIndex,
         segments
     };
 }
 
 function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, budget = null, diagnostics = null) {
-    const trailPoints = trailGeometry && Array.isArray(trailGeometry.points)
-        ? trailGeometry.points
-        : [];
-    const trailSegments = trailGeometry && Array.isArray(trailGeometry.segments)
-        ? trailGeometry.segments
-        : [];
+    const trailPoints = trailGeometry && trailGeometry.pointIndex
+        ? trailGeometry.pointIndex
+        : trailGeometry && Array.isArray(trailGeometry.points)
+            ? trailGeometry.points
+            : [];
+    const trailSegments = trailGeometry && trailGeometry.segmentIndex
+        ? trailGeometry.segmentIndex
+        : trailGeometry && Array.isArray(trailGeometry.segments)
+            ? trailGeometry.segments
+            : [];
     let position = {
         x: bot.x,
         y: bot.y
@@ -2134,13 +2204,19 @@ function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, b
     };
 }
 
-function doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegments, diagnostics = null) {
-    if (!Array.isArray(trailSegments) || trailSegments.length === 0) {
+function doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegmentsOrIndex, diagnostics = null) {
+    const segmentIndex = getSegmentIndex(trailSegmentsOrIndex);
+    const trailSegments = segmentIndex
+        ? segmentIndex.segments
+        : trailSegmentsOrIndex;
+
+    if ((!segmentIndex || segmentIndex.blocks.length === 0)
+        && (!Array.isArray(trailSegments) || trailSegments.length === 0)) {
         return false;
     }
 
     for (let index = 0; index < previousSamples.length; index++) {
-        if (doesSegmentCrossSelfTrail(previousSamples[index], currentSamples[index], trailSegments, diagnostics)) {
+        if (doesSegmentCrossSelfTrail(previousSamples[index], currentSamples[index], segmentIndex || trailSegments, diagnostics)) {
             return true;
         }
     }
@@ -2148,11 +2224,18 @@ function doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegm
     return false;
 }
 
-function doesSegmentCrossSelfTrail(startPoint, endPoint, trailSegments, diagnostics = null) {
+function doesSegmentCrossSelfTrail(startPoint, endPoint, trailSegmentsOrIndex, diagnostics = null) {
     if (arePointsEqual(startPoint, endPoint)) {
         return false;
     }
 
+    const segmentIndex = getSegmentIndex(trailSegmentsOrIndex);
+
+    if (segmentIndex) {
+        return doesSegmentCrossSelfTrailIndex(startPoint, endPoint, segmentIndex, diagnostics);
+    }
+
+    const trailSegments = trailSegmentsOrIndex || [];
     let checkedSegmentCount = 0;
 
     for (const trailSegment of trailSegments) {
@@ -2165,6 +2248,56 @@ function doesSegmentCrossSelfTrail(startPoint, endPoint, trailSegments, diagnost
 
     addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentCrossCheckCount", checkedSegmentCount);
     return false;
+}
+
+function doesSegmentCrossSelfTrailIndex(startPoint, endPoint, segmentIndex, diagnostics = null) {
+    if (!segmentIndex || !Array.isArray(segmentIndex.blocks) || segmentIndex.blocks.length === 0) {
+        return false;
+    }
+
+    const movementBounds = getSegmentBounds(startPoint, endPoint);
+
+    if (!doBoundsOverlap(movementBounds, segmentIndex.bounds)) {
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBoundsRejected", 1);
+        return false;
+    }
+
+    let blockChecks = 0;
+    let blockBoundsRejected = 0;
+    let checkedSegmentCount = 0;
+
+    for (const block of segmentIndex.blocks) {
+        blockChecks++;
+
+        if (!doBoundsOverlap(movementBounds, block.bounds)) {
+            blockBoundsRejected++;
+            continue;
+        }
+
+        for (const trailSegment of block.segments) {
+            checkedSegmentCount++;
+
+            if (segmentsCross(startPoint, endPoint, trailSegment.start, trailSegment.end)) {
+                addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockChecks", blockChecks);
+                addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockBoundsRejected", blockBoundsRejected);
+                addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentCrossCheckCount", checkedSegmentCount);
+                return true;
+            }
+        }
+    }
+
+    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockChecks", blockChecks);
+    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockBoundsRejected", blockBoundsRejected);
+    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentCrossCheckCount", checkedSegmentCount);
+    return false;
+}
+
+function getSegmentIndex(value) {
+    return value
+        && Array.isArray(value.segments)
+        && Array.isArray(value.blocks)
+        ? value
+        : null;
 }
 
 function createBoundsAroundPoint(point, radius) {
@@ -2193,12 +2326,138 @@ function filterSegmentsByBounds(segments, bounds) {
         return [];
     }
 
-    return segments.filter(segment => (
+    const filtered = [];
+
+    for (const segment of segments) {
+        if (!segment || !isFinitePoint(segment.start) || !isFinitePoint(segment.end)) {
+            continue;
+        }
+
+        const segmentBounds = getSegmentBounds(segment.start, segment.end);
+
+        if (doBoundsOverlap(segmentBounds, bounds)) {
+            filtered.push({
+                ...segment,
+                bounds: segmentBounds
+            });
+        }
+    }
+
+    return filtered;
+}
+
+function createPointBlockIndex(points, blockSize) {
+    const validPoints = (points || []).filter(isFinitePoint);
+    const blocks = [];
+    let bounds = null;
+
+    for (let index = 0; index < validPoints.length; index += blockSize) {
+        const blockPoints = validPoints.slice(index, index + blockSize);
+        const blockBounds = getPointsBounds(blockPoints);
+
+        if (!blockBounds) {
+            continue;
+        }
+
+        blocks.push({
+            bounds: blockBounds,
+            points: blockPoints
+        });
+        bounds = mergeBounds(bounds, blockBounds);
+    }
+
+    return {
+        blocks,
+        bounds,
+        points: validPoints
+    };
+}
+
+function createSegmentBlockIndex(segments, blockSize) {
+    const validSegments = (segments || []).filter(segment => (
         segment
         && isFinitePoint(segment.start)
         && isFinitePoint(segment.end)
-        && doBoundsOverlap(getSegmentBounds(segment.start, segment.end), bounds)
-    ));
+    )).map(segment => ({
+        ...segment,
+        bounds: isValidBounds(segment.bounds)
+            ? segment.bounds
+            : getSegmentBounds(segment.start, segment.end)
+    }));
+    const blocks = [];
+    let bounds = null;
+
+    for (let index = 0; index < validSegments.length; index += blockSize) {
+        const blockSegments = validSegments.slice(index, index + blockSize);
+        const blockBounds = getBoundsUnion(blockSegments.map(segment => segment.bounds));
+
+        if (!blockBounds) {
+            continue;
+        }
+
+        blocks.push({
+            bounds: blockBounds,
+            segments: blockSegments
+        });
+        bounds = mergeBounds(bounds, blockBounds);
+    }
+
+    return {
+        blocks,
+        bounds,
+        segments: validSegments
+    };
+}
+
+function getPointsBounds(points) {
+    let bounds = null;
+
+    for (const point of points || []) {
+        if (!isFinitePoint(point)) {
+            continue;
+        }
+
+        bounds = mergeBounds(bounds, {
+            maxX: point.x,
+            maxY: point.y,
+            minX: point.x,
+            minY: point.y
+        });
+    }
+
+    return bounds;
+}
+
+function getBoundsUnion(boundsList) {
+    let bounds = null;
+
+    for (const item of boundsList || []) {
+        bounds = mergeBounds(bounds, item);
+    }
+
+    return bounds;
+}
+
+function mergeBounds(first, second) {
+    if (!isValidBounds(second)) {
+        return first;
+    }
+
+    if (!isValidBounds(first)) {
+        return {
+            maxX: second.maxX,
+            maxY: second.maxY,
+            minX: second.minX,
+            minY: second.minY
+        };
+    }
+
+    return {
+        maxX: Math.max(first.maxX, second.maxX),
+        maxY: Math.max(first.maxY, second.maxY),
+        minX: Math.min(first.minX, second.minX),
+        minY: Math.min(first.minY, second.minY)
+    };
 }
 
 function isPointInBounds(point, bounds) {
@@ -2219,10 +2478,41 @@ function getSegmentBounds(start, end) {
 }
 
 function doBoundsOverlap(firstBounds, secondBounds) {
+    if (!isValidBounds(firstBounds) || !isValidBounds(secondBounds)) {
+        return false;
+    }
+
     return firstBounds.minX <= secondBounds.maxX + geometryEpsilon
         && firstBounds.maxX + geometryEpsilon >= secondBounds.minX
         && firstBounds.minY <= secondBounds.maxY + geometryEpsilon
         && firstBounds.maxY + geometryEpsilon >= secondBounds.minY;
+}
+
+function isValidBounds(bounds) {
+    return bounds
+        && Number.isFinite(bounds.minX)
+        && Number.isFinite(bounds.minY)
+        && Number.isFinite(bounds.maxX)
+        && Number.isFinite(bounds.maxY);
+}
+
+function getPointBoundsDistanceSquared(point, bounds) {
+    if (!isFinitePoint(point) || !isValidBounds(bounds)) {
+        return Infinity;
+    }
+
+    const deltaX = point.x < bounds.minX
+        ? bounds.minX - point.x
+        : point.x > bounds.maxX
+            ? point.x - bounds.maxX
+            : 0;
+    const deltaY = point.y < bounds.minY
+        ? bounds.minY - point.y
+        : point.y > bounds.maxY
+            ? point.y - bounds.maxY
+            : 0;
+
+    return deltaX * deltaX + deltaY * deltaY;
 }
 
 function createSelfTrailAvoidanceSamplePoints(position, angle) {

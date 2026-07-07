@@ -134,6 +134,7 @@ const bots = Object.freeze({
     selfTrailTrapLookaheadMaxDistance: world.playerSize * 22,
     selfTrailEscapeMemoryMs: 650,
     selfTrailSafetyBudgetMs: 4,
+    selfTrailSafetyBlockSize: 48,
     selfTrailSafetyMaxCandidates: 24,
     selfTrailSafetyTrapMaxCandidates: 48,
     selfTrailSafetyMaxLocalCandidates: 8,
