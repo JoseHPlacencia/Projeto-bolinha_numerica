@@ -136,9 +136,12 @@ function createEmptySelfTrailSafetyDiagnostics() {
         budgetHitCount: 0,
         bypassCount: 0,
         candidateCount: 0,
+        coarseEvaluationCount: 0,
+        earlyExitCount: 0,
         decisionCount: 0,
         evaluatedCandidateCount: 0,
         evaluatedLocalCandidateCount: 0,
+        fullEvaluationCount: 0,
         filteredTrailPointCount: 0,
         filteredTrailSegmentCount: 0,
         localCandidateCount: 0,
@@ -149,6 +152,9 @@ function createEmptySelfTrailSafetyDiagnostics() {
         pointBlockCount: 0,
         pointDistanceCheckCount: 0,
         sampleCount: 0,
+        safetyCacheHitCount: 0,
+        safetyCacheMissCount: 0,
+        selectedRefineCandidateCount: 0,
         segmentBlockBoundsRejected: 0,
         segmentBlockChecks: 0,
         segmentBlockCount: 0,
@@ -239,6 +245,33 @@ function getBotSelfTrailSafetyMaxLocalCandidates() {
     const value = Number(config.bots.selfTrailSafetyMaxLocalCandidates);
 
     return Number.isInteger(value) && value > 0 ? value : 8;
+}
+
+function getBotSelfTrailSafetyRefineCandidates(trapMode = false) {
+    const value = Number(
+        trapMode
+            ? config.bots.selfTrailSafetyTrapRefineCandidates
+            : config.bots.selfTrailSafetyRefineCandidates
+    );
+
+    return Number.isInteger(value) && value > 0
+        ? value
+        : trapMode
+            ? 8
+            : 6;
+}
+
+function getBotSelfTrailSafetyCoarseLookaheadRatio() {
+    const value = Number(config.bots.selfTrailSafetyCoarseLookaheadRatio);
+
+    return Number.isFinite(value) && value > 0 && value <= 1 ? value : 0.6;
+}
+
+function getBotSelfTrailSafetyCriticalClearance() {
+    const value = Number(config.bots.selfTrailSafetyCriticalClearanceRatio);
+    const ratio = Number.isFinite(value) && value > 0 ? value : 0.72;
+
+    return config.bots.selfTrailAvoidDistance * ratio;
 }
 
 function getBotSelfTrailSafetyBlockSize() {
@@ -1656,6 +1689,8 @@ function applyDecisionNoise(angle, options = {}) {
 
 function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null) {
     const diagnostics = getSelfTrailSafetyDiagnostics(context);
+    const safetyCache = createSelfTrailSafetyCache();
+
     addSelfTrailSafetyDiagnosticValue(diagnostics, "decisionCount", 1);
 
     const trailPoints = getTrailPointsCached(context, bot, { skipRecent: getSelfTrailClearanceRecentPointSkip() });
@@ -1699,7 +1734,15 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
     }
 
     const budget = createSelfTrailSafetyBudget(diagnostics);
-    const targetSafety = getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options, budget, diagnostics);
+    const targetSafety = getCachedSelfTrailPathSafety(
+        bot,
+        targetAngle,
+        trailGeometry,
+        options,
+        budget,
+        diagnostics,
+        safetyCache
+    );
 
     if (!isSelfTrailPathUnsafe(targetSafety)) {
         clearSelfTrailEscapeMemory(bot);
@@ -1717,7 +1760,15 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
         ? createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, riskOptions, diagnostics)
         : trailGeometry;
     const activeTargetSafety = riskOptions.trapMode
-        ? getSelfTrailPathSafety(bot, targetAngle, activeTrailGeometry, riskOptions, budget, diagnostics)
+        ? getCachedSelfTrailPathSafety(
+            bot,
+            targetAngle,
+            activeTrailGeometry,
+            riskOptions,
+            budget,
+            diagnostics,
+            safetyCache
+        )
         : targetSafety;
     const rememberedCandidate = chooseRememberedSelfTrailEscapeCandidate(
         bot,
@@ -1726,7 +1777,8 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
         riskOptions,
         context,
         budget,
-        diagnostics
+        diagnostics,
+        safetyCache
     );
 
     if (rememberedCandidate) {
@@ -1744,6 +1796,21 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
     );
     addSelfTrailSafetyDiagnosticValue(diagnostics, "candidateCount", candidates.length);
 
+    const candidateEvaluationOptions = createCoarseSelfTrailSafetyOptions(riskOptions);
+    const coarseCandidateEvaluations = evaluateCoarseSelfTrailCandidates(
+        bot,
+        targetAngle,
+        activeTrailGeometry,
+        candidates,
+        candidateEvaluationOptions,
+        budget,
+        diagnostics,
+        safetyCache
+    );
+    const refinementCandidates = selectSelfTrailRefinementCandidates(coarseCandidateEvaluations, riskOptions);
+
+    addSelfTrailSafetyDiagnosticValue(diagnostics, "selectedRefineCandidateCount", refinementCandidates.length);
+
     let bestAnyCandidate = {
         angle: targetAngle,
         safety: activeTargetSafety,
@@ -1756,23 +1823,32 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
         ? null
         : bestAnyCandidate;
 
-    for (const angle of candidates) {
+    for (const coarseCandidate of refinementCandidates) {
         if (!hasSelfTrailSafetyBudgetRemaining(budget)) {
             break;
         }
 
-        if (Math.abs(getAngleDelta(angle, targetAngle)) <= 0.001) {
+        if (Math.abs(getAngleDelta(coarseCandidate.angle, targetAngle)) <= 0.001) {
             continue;
         }
 
         addSelfTrailSafetyDiagnosticValue(diagnostics, "evaluatedCandidateCount", 1);
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "fullEvaluationCount", 1);
 
-        const safety = getSelfTrailPathSafety(bot, angle, activeTrailGeometry, riskOptions, budget, diagnostics);
-        const score = scoreSelfTrailCandidate(angle, targetAngle, safety, riskOptions);
+        const safety = getCachedSelfTrailPathSafety(
+            bot,
+            coarseCandidate.angle,
+            activeTrailGeometry,
+            riskOptions,
+            budget,
+            diagnostics,
+            safetyCache
+        );
+        const score = scoreSelfTrailCandidate(coarseCandidate.angle, targetAngle, safety, riskOptions);
 
         if (score > bestAnyCandidate.score) {
             bestAnyCandidate = {
-                angle,
+                angle: coarseCandidate.angle,
                 safety,
                 score
             };
@@ -1780,7 +1856,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
 
         if (!isSelfTrailPathUnsafe(safety) && (!bestSafeCandidate || score > bestSafeCandidate.score)) {
             bestSafeCandidate = {
-                angle,
+                angle: coarseCandidate.angle,
                 safety,
                 score
             };
@@ -1788,7 +1864,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
 
         if (!safety.crossesTrail && !safety.budgetHit && (!bestNonCrossingCandidate || score > bestNonCrossingCandidate.score)) {
             bestNonCrossingCandidate = {
-                angle,
+                angle: coarseCandidate.angle,
                 safety,
                 score
             };
@@ -1797,7 +1873,16 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
 
     const bestCandidate = bestSafeCandidate
         || (hasSelfTrailSafetyBudgetRemaining(budget)
-            ? chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, activeTrailGeometry, candidates, riskOptions, budget, diagnostics)
+            ? chooseLocalSelfTrailEscapeCandidate(
+                bot,
+                targetAngle,
+                activeTrailGeometry,
+                candidates,
+                riskOptions,
+                budget,
+                diagnostics,
+                safetyCache
+            )
             : null)
         || bestNonCrossingCandidate
         || bestAnyCandidate;
@@ -1833,7 +1918,16 @@ function createSelfTrailRiskOptions(options = {}, targetSafety = {}, nearestSelf
     };
 }
 
-function chooseRememberedSelfTrailEscapeCandidate(bot, targetAngle, trailGeometry, options = {}, context = null, budget = null, diagnostics = null) {
+function chooseRememberedSelfTrailEscapeCandidate(
+    bot,
+    targetAngle,
+    trailGeometry,
+    options = {},
+    context = null,
+    budget = null,
+    diagnostics = null,
+    safetyCache = null
+) {
     const ai = getBotAi(bot);
     const nowMs = getSelfTrailDecisionNowMs(context);
 
@@ -1843,7 +1937,15 @@ function chooseRememberedSelfTrailEscapeCandidate(bot, targetAngle, trailGeometr
         return null;
     }
 
-    const safety = getSelfTrailPathSafety(bot, ai.selfTrailEscapeAngle, trailGeometry, options, budget, diagnostics);
+    const safety = getCachedSelfTrailPathSafety(
+        bot,
+        ai.selfTrailEscapeAngle,
+        trailGeometry,
+        options,
+        budget,
+        diagnostics,
+        safetyCache
+    );
 
     if (isSelfTrailPathUnsafe(safety)) {
         clearSelfTrailEscapeMemory(bot);
@@ -1855,6 +1957,137 @@ function chooseRememberedSelfTrailEscapeCandidate(bot, targetAngle, trailGeometr
         safety,
         score: scoreSelfTrailCandidate(ai.selfTrailEscapeAngle, targetAngle, safety, options)
     };
+}
+
+function createSelfTrailSafetyCache() {
+    return new Map();
+}
+
+function getCachedSelfTrailPathSafety(
+    bot,
+    targetAngle,
+    trailGeometry,
+    options = {},
+    budget = null,
+    diagnostics = null,
+    safetyCache = null
+) {
+    const cacheKey = safetyCache && createSelfTrailSafetyCacheKey(targetAngle, trailGeometry, options);
+
+    if (cacheKey && safetyCache.has(cacheKey)) {
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "safetyCacheHitCount", 1);
+        return safetyCache.get(cacheKey);
+    }
+
+    if (cacheKey) {
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "safetyCacheMissCount", 1);
+    }
+
+    const safety = getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options, budget, diagnostics);
+
+    if (cacheKey) {
+        safetyCache.set(cacheKey, safety);
+    }
+
+    return safety;
+}
+
+function createSelfTrailSafetyCacheKey(targetAngle, trailGeometry, options = {}) {
+    return [
+        Math.round(normalizeAngle(targetAngle) * 1000),
+        options.selfTrailSafetyMode || "full",
+        options.centerOnly ? "center" : "wide",
+        options.stopOnUnsafe ? "stop" : "scan",
+        Math.round(getSelfTrailLookaheadDistance(options)),
+        Math.round((trailGeometry && trailGeometry.lookaheadDistance || 0) * 10),
+        options.trapMode ? 1 : 0
+    ].join(":");
+}
+
+function createCoarseSelfTrailSafetyOptions(options = {}) {
+    const lookaheadDistance = getSelfTrailLookaheadDistance(options);
+
+    return {
+        ...options,
+        centerOnly: true,
+        selfTrailLookaheadDistance: Math.max(
+            config.world.playerSize * 3,
+            lookaheadDistance * getBotSelfTrailSafetyCoarseLookaheadRatio()
+        ),
+        selfTrailSafetyMode: "coarse",
+        stopOnUnsafe: true
+    };
+}
+
+function evaluateCoarseSelfTrailCandidates(
+    bot,
+    targetAngle,
+    trailGeometry,
+    candidates,
+    options = {},
+    budget = null,
+    diagnostics = null,
+    safetyCache = null
+) {
+    const evaluations = [];
+
+    for (const angle of candidates || []) {
+        if (!hasSelfTrailSafetyBudgetRemaining(budget)) {
+            break;
+        }
+
+        if (Math.abs(getAngleDelta(angle, targetAngle)) <= 0.001) {
+            continue;
+        }
+
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "coarseEvaluationCount", 1);
+
+        const safety = getCachedSelfTrailPathSafety(
+            bot,
+            angle,
+            trailGeometry,
+            options,
+            budget,
+            diagnostics,
+            safetyCache
+        );
+
+        evaluations.push({
+            angle,
+            safety,
+            score: scoreSelfTrailCandidate(angle, targetAngle, safety, options)
+        });
+    }
+
+    return evaluations;
+}
+
+function selectSelfTrailRefinementCandidates(evaluations, options = {}) {
+    const maxCount = getBotSelfTrailSafetyRefineCandidates(Boolean(options.trapMode));
+    const sorted = [...(evaluations || [])].sort((first, second) => second.score - first.score);
+    const selected = [];
+    const seen = new Set();
+
+    for (const evaluation of sorted) {
+        if (selected.length >= maxCount) {
+            break;
+        }
+
+        if (!evaluation || !Number.isFinite(evaluation.angle)) {
+            continue;
+        }
+
+        const key = Math.round(evaluation.angle * 1000);
+
+        if (seen.has(key)) {
+            continue;
+        }
+
+        seen.add(key);
+        selected.push(evaluation);
+    }
+
+    return selected;
 }
 
 function rememberSelfTrailEscapeCandidate(bot, candidate, targetSafety = {}, options = {}, context = null) {
@@ -2056,7 +2289,16 @@ function limitSelfTrailAvoidanceCandidates(candidates, options = {}) {
     return candidates.slice(0, maxCandidates);
 }
 
-function chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, trailGeometry, candidates, options = {}, budget = null, diagnostics = null) {
+function chooseLocalSelfTrailEscapeCandidate(
+    bot,
+    targetAngle,
+    trailGeometry,
+    candidates,
+    options = {},
+    budget = null,
+    diagnostics = null,
+    safetyCache = null
+) {
     const localOptions = {
         ...options,
         targetDistance: Math.max(config.world.playerSize * 4, config.bots.selfTrailAvoidDistance)
@@ -2072,8 +2314,17 @@ function chooseLocalSelfTrailEscapeCandidate(bot, targetAngle, trailGeometry, ca
         }
 
         addSelfTrailSafetyDiagnosticValue(diagnostics, "evaluatedLocalCandidateCount", 1);
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "fullEvaluationCount", 1);
 
-        const safety = getSelfTrailPathSafety(bot, angle, trailGeometry, localOptions, budget, diagnostics);
+        const safety = getCachedSelfTrailPathSafety(
+            bot,
+            angle,
+            trailGeometry,
+            localOptions,
+            budget,
+            diagnostics,
+            safetyCache
+        );
 
         if (isSelfTrailPathUnsafe(safety)) {
             continue;
@@ -2164,7 +2415,9 @@ function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, b
     const sampleCount = getSelfTrailLookaheadSampleCount(lookaheadDistance);
     const stepDistance = lookaheadDistance / sampleCount;
     const stepDeltaTime = stepDistance / getBotMovementSpeed(bot);
-    let previousSamples = createSelfTrailAvoidanceSamplePoints(position, angle);
+    const criticalClearance = getSelfTrailPathEarlyExitClearance(options);
+    const criticalClearanceSquared = criticalClearance * criticalClearance;
+    let previousSamples = createSelfTrailPathSamplePoints(position, angle, options);
 
     addSelfTrailSafetyDiagnosticValue(diagnostics, "pathEvaluationCount", 1);
     addSelfTrailSafetyDiagnosticValue(diagnostics, "sampleCount", sampleCount);
@@ -2181,10 +2434,15 @@ function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, b
             y: position.y + Math.sin(angle) * stepDistance
         });
 
-        const currentSamples = createSelfTrailAvoidanceSamplePoints(position, angle);
+        const currentSamples = createSelfTrailPathSamplePoints(position, angle, options);
 
         if (!crossesTrail && doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegments, diagnostics)) {
             crossesTrail = true;
+        }
+
+        if (crossesTrail) {
+            addSelfTrailSafetyDiagnosticValue(diagnostics, "earlyExitCount", 1);
+            break;
         }
 
         for (const samplePoint of currentSamples) {
@@ -2192,6 +2450,11 @@ function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, b
                 nearestDistanceSquared,
                 getNearestDistanceSquared(samplePoint, trailPoints, diagnostics)
             );
+        }
+
+        if (shouldStopSelfTrailPathEvaluation(crossesTrail, nearestDistanceSquared, criticalClearanceSquared, options)) {
+            addSelfTrailSafetyDiagnosticValue(diagnostics, "earlyExitCount", 1);
+            break;
         }
 
         previousSamples = currentSamples;
@@ -2202,6 +2465,30 @@ function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, b
         clearance: Math.sqrt(nearestDistanceSquared),
         crossesTrail
     };
+}
+
+function createSelfTrailPathSamplePoints(position, angle, options = {}) {
+    return options.centerOnly
+        ? [position]
+        : createSelfTrailAvoidanceSamplePoints(position, angle);
+}
+
+function getSelfTrailPathEarlyExitClearance(options = {}) {
+    if (Number.isFinite(options.earlyExitClearance) && options.earlyExitClearance > 0) {
+        return options.earlyExitClearance;
+    }
+
+    if (options.stopOnUnsafe) {
+        return config.bots.selfTrailAvoidDistance;
+    }
+
+    return getBotSelfTrailSafetyCriticalClearance();
+}
+
+function shouldStopSelfTrailPathEvaluation(crossesTrail, nearestDistanceSquared, criticalClearanceSquared, options = {}) {
+    return crossesTrail
+        || Boolean(options.stopOnUnsafe && nearestDistanceSquared <= criticalClearanceSquared)
+        || (!options.selfTrailSafetyMode && nearestDistanceSquared <= criticalClearanceSquared);
 }
 
 function doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegmentsOrIndex, diagnostics = null) {
