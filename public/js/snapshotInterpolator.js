@@ -331,6 +331,11 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             maxTrailOwnerPrimitiveCandidates: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.ownerTrailPrimitiveCandidates)),
             maxTrailOwnerPrimitiveTests: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.ownerTrailPrimitiveTests)),
             maxTrailOwnerSegmentChecks: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.ownerTrailSegmentChecks)),
+            maxTrailOwnerCacheHits: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.trailOwnerCacheHits)),
+            maxTrailOwnerCacheMisses: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.trailOwnerCacheMisses)),
+            maxTrailOwnerCandidates: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.trailOwnerCandidates)),
+            maxTrailOwnerMovementBoundsRejected: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.trailOwnerMovementBoundsRejected)),
+            maxTrailOwnerSideBoundsRejected: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.trailOwnerSideBoundsRejected)),
             maxTrailSelfBlockChecks: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.selfTrailBlockChecks)),
             maxTrailSelfBlockBoundsRejected: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.selfTrailBlockBoundsRejected)),
             maxTrailSelfBoundsRejected: maxFiniteValue(snapshotEvents.map(event => event.server && event.server.gameLoop && event.server.gameLoop.trails && event.server.gameLoop.trails.selfTrailBoundsRejected)),
@@ -534,8 +539,15 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             selfTrailPrimitiveTests: finiteOrNull(value.selfTrailPrimitiveTests),
             selfTrailSegmentChecks: finiteOrNull(value.selfTrailSegmentChecks),
             slowestPhase: normalizeGameLoopSlowestPhase(value.slowestPhase),
+            trailOwnerCacheHits: finiteOrNull(value.trailOwnerCacheHits),
+            trailOwnerCacheMisses: finiteOrNull(value.trailOwnerCacheMisses),
+            trailOwnerCandidates: finiteOrNull(value.trailOwnerCandidates),
             trailOwnerChecks: finiteOrNull(value.trailOwnerChecks),
-            trailOwnerHits: finiteOrNull(value.trailOwnerHits)
+            trailOwnerHits: finiteOrNull(value.trailOwnerHits),
+            trailOwnerInsideRejected: finiteOrNull(value.trailOwnerInsideRejected),
+            trailOwnerMovementBoundsRejected: finiteOrNull(value.trailOwnerMovementBoundsRejected),
+            trailOwnerNoTrailRejected: finiteOrNull(value.trailOwnerNoTrailRejected),
+            trailOwnerSideBoundsRejected: finiteOrNull(value.trailOwnerSideBoundsRejected)
         };
     }
 

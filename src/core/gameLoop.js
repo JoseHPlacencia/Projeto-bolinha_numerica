@@ -224,8 +224,15 @@ function normalizeTrailDiagnostics(diagnostics) {
         selfTrailPrimitiveTests: finiteOrNull(diagnostics.selfTrailPrimitiveTests),
         selfTrailSegmentChecks: finiteOrNull(diagnostics.selfTrailSegmentChecks),
         slowestPhase: normalizeSlowestPhase(diagnostics.slowestPhase),
+        trailOwnerCacheHits: finiteOrNull(diagnostics.trailOwnerCacheHits),
+        trailOwnerCacheMisses: finiteOrNull(diagnostics.trailOwnerCacheMisses),
+        trailOwnerCandidates: finiteOrNull(diagnostics.trailOwnerCandidates),
         trailOwnerChecks: finiteOrNull(diagnostics.trailOwnerChecks),
-        trailOwnerHits: finiteOrNull(diagnostics.trailOwnerHits)
+        trailOwnerHits: finiteOrNull(diagnostics.trailOwnerHits),
+        trailOwnerInsideRejected: finiteOrNull(diagnostics.trailOwnerInsideRejected),
+        trailOwnerMovementBoundsRejected: finiteOrNull(diagnostics.trailOwnerMovementBoundsRejected),
+        trailOwnerNoTrailRejected: finiteOrNull(diagnostics.trailOwnerNoTrailRejected),
+        trailOwnerSideBoundsRejected: finiteOrNull(diagnostics.trailOwnerSideBoundsRejected)
     };
 }
 

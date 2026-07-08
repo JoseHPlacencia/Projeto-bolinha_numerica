@@ -462,8 +462,15 @@ function cloneTrailDiagnostics(trailDiagnostics) {
         slowestPhase: trailDiagnostics.slowestPhase
             ? { ...trailDiagnostics.slowestPhase }
             : null,
+        trailOwnerCacheHits: trailDiagnostics.trailOwnerCacheHits,
+        trailOwnerCacheMisses: trailDiagnostics.trailOwnerCacheMisses,
+        trailOwnerCandidates: trailDiagnostics.trailOwnerCandidates,
         trailOwnerChecks: trailDiagnostics.trailOwnerChecks,
-        trailOwnerHits: trailDiagnostics.trailOwnerHits
+        trailOwnerHits: trailDiagnostics.trailOwnerHits,
+        trailOwnerInsideRejected: trailDiagnostics.trailOwnerInsideRejected,
+        trailOwnerMovementBoundsRejected: trailDiagnostics.trailOwnerMovementBoundsRejected,
+        trailOwnerNoTrailRejected: trailDiagnostics.trailOwnerNoTrailRejected,
+        trailOwnerSideBoundsRejected: trailDiagnostics.trailOwnerSideBoundsRejected
     };
 }
 
@@ -513,8 +520,15 @@ function normalizeTrailDiagnostics(trailDiagnostics) {
         selfTrailPrimitiveTests: finiteOrNull(trailDiagnostics.selfTrailPrimitiveTests),
         selfTrailSegmentChecks: finiteOrNull(trailDiagnostics.selfTrailSegmentChecks),
         slowestPhase: normalizeGameLoopSlowestPhase(trailDiagnostics.slowestPhase),
+        trailOwnerCacheHits: finiteOrNull(trailDiagnostics.trailOwnerCacheHits),
+        trailOwnerCacheMisses: finiteOrNull(trailDiagnostics.trailOwnerCacheMisses),
+        trailOwnerCandidates: finiteOrNull(trailDiagnostics.trailOwnerCandidates),
         trailOwnerChecks: finiteOrNull(trailDiagnostics.trailOwnerChecks),
-        trailOwnerHits: finiteOrNull(trailDiagnostics.trailOwnerHits)
+        trailOwnerHits: finiteOrNull(trailDiagnostics.trailOwnerHits),
+        trailOwnerInsideRejected: finiteOrNull(trailDiagnostics.trailOwnerInsideRejected),
+        trailOwnerMovementBoundsRejected: finiteOrNull(trailDiagnostics.trailOwnerMovementBoundsRejected),
+        trailOwnerNoTrailRejected: finiteOrNull(trailDiagnostics.trailOwnerNoTrailRejected),
+        trailOwnerSideBoundsRejected: finiteOrNull(trailDiagnostics.trailOwnerSideBoundsRejected)
     };
 }
 

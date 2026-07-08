@@ -2270,12 +2270,16 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
         safety: activeTargetSafety,
         score: scoreSelfTrailCandidate(targetAngle, targetAngle, activeTargetSafety, riskOptions)
     };
-    let bestSafeCandidate = isSelfTrailPathUnsafe(activeTargetSafety)
-        ? null
-        : bestAnyCandidate;
-    let bestNonCrossingCandidate = activeTargetSafety.crossesTrail || activeTargetSafety.budgetHit
-        ? null
-        : bestAnyCandidate;
+    const canKeepTargetCandidate = !isSelfTrailPathUnsafe(targetSafety)
+        && !isSelfTrailPathUnsafe(activeTargetSafety);
+    let bestSafeCandidate = canKeepTargetCandidate
+        ? bestAnyCandidate
+        : null;
+    let bestNonCrossingCandidate = canKeepTargetCandidate
+        && !activeTargetSafety.crossesTrail
+        && !activeTargetSafety.budgetHit
+        ? bestAnyCandidate
+        : null;
 
     for (const coarseCandidate of refinementCandidates) {
         if (!hasSelfTrailSafetyBudgetRemaining(budget)) {
@@ -2339,6 +2343,7 @@ function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null
             )
             : null)
         || bestNonCrossingCandidate
+        || chooseCoarseSelfTrailFallbackCandidate(coarseCandidateEvaluations, targetAngle)
         || bestAnyCandidate;
 
     rememberSelfTrailEscapeCandidate(bot, bestCandidate, activeTargetSafety, riskOptions, context);
@@ -2542,6 +2547,18 @@ function selectSelfTrailRefinementCandidates(evaluations, options = {}) {
     }
 
     return selected;
+}
+
+function chooseCoarseSelfTrailFallbackCandidate(evaluations, targetAngle) {
+    const candidates = (evaluations || [])
+        .filter(evaluation => (
+            evaluation
+            && Number.isFinite(evaluation.angle)
+            && Math.abs(getAngleDelta(evaluation.angle, targetAngle)) > 0.001
+        ))
+        .sort((first, second) => second.score - first.score);
+
+    return candidates[0] || null;
 }
 
 function rememberSelfTrailEscapeCandidate(bot, candidate, targetSafety = {}, options = {}, context = null) {
