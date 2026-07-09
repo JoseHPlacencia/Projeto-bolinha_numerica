@@ -128,13 +128,6 @@ class Player {
         this.clearTrailState();
     }
 
-    returnToSpawn(options = {}) {
-        this.respawnAt({
-            x: this.territoryX,
-            y: this.territoryY
-        }, options);
-    }
-
     respawnAt(point, options = {}) {
         const spawn = normalizeSpawnPoint(point);
 
@@ -294,11 +287,6 @@ class Player {
         return this.lives;
     }
 
-    resetLives() {
-        this.lives = this.maxLives;
-        this.markInfoChanged();
-    }
-
     pressAction(action) {
         if (!this.pressedActions.has(action)) {
             this.pressedActions.add(action);
@@ -368,28 +356,6 @@ class Player {
         this.infoVersion++;
     }
 
-    serialize() {
-        const serializedPlayer = {
-            id: this.id,
-            x: this.x,
-            y: this.y,
-            angle: this.angle,
-            color: this.color,
-            name: this.name,
-            eliminations: this.eliminations,
-            lives: this.lives,
-            maxLives: this.maxLives,
-            catchBalance: this.catchBalance,
-            territoryX: this.territoryX,
-            territoryY: this.territoryY
-        };
-
-        if (this.debugState) {
-            serializedPlayer.debug = this.debugState;
-        }
-
-        return serializedPlayer;
-    }
 }
 
 function createPlayer(players, id, territories = null, options = {}) {
@@ -419,34 +385,7 @@ function getAngleDelta(fromAngle, toAngle) {
     );
 }
 
-function reconnectPlayerAsNew(players, player, territories = null) {
-    const spawn = createSpawn(getOtherPlayers(players, player.id), territories, player.runtimeConfig);
-
-    if (!spawn) {
-        return null;
-    }
-
-    player.reconnect(spawn);
-
-    return player;
-}
-
-function returnPlayerToSpawn(player) {
-    player.returnToSpawn();
-    return player;
-}
-
-function getOtherPlayers(players, excludedPlayerId) {
-    const otherPlayers = new Map(players);
-
-    otherPlayers.delete(excludedPlayerId);
-
-    return otherPlayers;
-}
-
 module.exports = {
     Player,
-    createPlayer,
-    reconnectPlayerAsNew,
-    returnPlayerToSpawn
+    createPlayer
 };

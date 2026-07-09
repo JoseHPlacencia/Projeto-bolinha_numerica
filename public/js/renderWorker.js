@@ -7,6 +7,7 @@ let snapshots = null;
 let currentPlayerId = null;
 let currentGameConfig = null;
 let running = false;
+let scheduledFrame = null;
 let frameCount = 0;
 let renderedFrameCount = 0;
 let renderTimeTotal = 0;
@@ -45,10 +46,15 @@ self.addEventListener("message", event => {
 
     if (message.type === "playerId") {
         currentPlayerId = message.playerId;
+        return;
+    }
+
+    if (message.type === "active") {
+        setActive(message.active);
     }
 });
 
-function initializeRenderer({ canvas, gameConfig, layout }) {
+function initializeRenderer({ canvas, gameConfig, layout, active = true }) {
     currentGameConfig = gameConfig;
     renderer = createCanvasRenderer(canvas, gameConfig);
     renderer.resizeCanvas(layout);
@@ -60,10 +66,7 @@ function initializeRenderer({ canvas, gameConfig, layout }) {
         }
     });
 
-    if (!running) {
-        running = true;
-        scheduleFrame(renderLoop);
-    }
+    setActive(active);
 }
 
 function applyGameConfig(nextConfig) {
@@ -109,8 +112,38 @@ function resetSnapshots() {
     }
 }
 
+function setActive(active) {
+    if (active) {
+        startRenderLoop();
+        return;
+    }
+
+    running = false;
+    cancelScheduledFrame();
+}
+
+function startRenderLoop() {
+    if (running) {
+        return;
+    }
+
+    running = true;
+    frameCount = 0;
+    renderedFrameCount = 0;
+    renderTimeTotal = 0;
+    lastRenderedAt = Number.NEGATIVE_INFINITY;
+    debugMeasuredAt = performance.now();
+    scheduledFrame = scheduleFrame(renderLoop);
+}
+
 function renderLoop(timestamp = performance.now()) {
-    scheduleFrame(renderLoop);
+    scheduledFrame = null;
+
+    if (!running) {
+        return;
+    }
+
+    scheduledFrame = scheduleFrame(renderLoop);
 
     if (!renderer || !snapshots || !currentPlayerId) {
         publishDebugState(0, false);
@@ -147,11 +180,30 @@ function shouldRenderFrame(now) {
 
 function scheduleFrame(callback) {
     if (typeof requestAnimationFrame === "function") {
-        requestAnimationFrame(callback);
+        return {
+            id: requestAnimationFrame(callback),
+            type: "animation"
+        };
+    }
+
+    return {
+        id: setTimeout(() => callback(performance.now()), 1000 / 60),
+        type: "timeout"
+    };
+}
+
+function cancelScheduledFrame() {
+    if (!scheduledFrame) {
         return;
     }
 
-    setTimeout(() => callback(performance.now()), 1000 / 60);
+    if (scheduledFrame.type === "animation" && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(scheduledFrame.id);
+    } else {
+        clearTimeout(scheduledFrame.id);
+    }
+
+    scheduledFrame = null;
 }
 
 function publishDebugState(renderMs, rendered) {

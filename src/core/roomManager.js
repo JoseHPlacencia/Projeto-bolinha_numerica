@@ -377,11 +377,6 @@ function destroyRoom(roomCode) {
     return true;
 }
 
-function getRoomBySocketId(socketId) {
-    const roomCode = socketIdToRoomCode.get(socketId);
-    return roomCode ? rooms.get(roomCode) || null : null;
-}
-
 function listRooms() {
     return Array.from(rooms.values())
         .filter(room => !room.hiddenFromList && !room.isSystemRoom)
@@ -431,7 +426,6 @@ module.exports = {
     joinRoom,
     leaveRoom,
     listRooms,
-    getRoomBySocketId,
     destroyRoom,
     rooms
 };

@@ -20,6 +20,7 @@ function createMainWorldRenderer(canvas, gameConfig) {
         renderWorld: renderer.renderWorld,
         resetSnapshots,
         resizeCanvas: renderer.resizeCanvas,
+        setActive,
         setPlayerId,
         updateConfig
     };
@@ -36,6 +37,9 @@ function createMainWorldRenderer(canvas, gameConfig) {
     }
 
     function resetSnapshots() {
+    }
+
+    function setActive() {
     }
 
     function setPlayerId() {
@@ -70,13 +74,15 @@ function tryCreateWorkerWorldRenderer(canvas, gameConfig, options) {
     let layout = createCurrentLayout(canvas, gameConfig);
     let workerDebugState = {};
     let currentPlayerId = null;
+    let active = options.active !== false;
 
     applyCanvasStyle(canvas, layout);
     worker.postMessage({
         type: "init",
         canvas: offscreenCanvas,
         gameConfig,
-        layout
+        layout,
+        active
     }, [offscreenCanvas]);
 
     worker.addEventListener("message", event => {
@@ -112,6 +118,7 @@ function tryCreateWorkerWorldRenderer(canvas, gameConfig, options) {
         renderWorld,
         resetSnapshots,
         resizeCanvas,
+        setActive,
         setPlayerId,
         updateConfig
     };
@@ -148,7 +155,25 @@ function tryCreateWorkerWorldRenderer(canvas, gameConfig, options) {
         });
     }
 
+    function setActive(nextActive) {
+        const normalizedActive = Boolean(nextActive);
+
+        if (active === normalizedActive) {
+            return;
+        }
+
+        active = normalizedActive;
+        worker.postMessage({
+            type: "active",
+            active
+        });
+    }
+
     function setPlayerId(playerId) {
+        if (currentPlayerId === playerId) {
+            return;
+        }
+
         currentPlayerId = playerId;
         worker.postMessage({
             type: "playerId",

@@ -203,7 +203,7 @@ export function createHud({ debugLevel }) {
     }
 }
 
-export function createCatchAlert() {
+function createCatchAlert() {
     const element = document.createElement("section");
     const edge = document.createElement("div");
     const statuses = document.createElement("div");

@@ -18,6 +18,7 @@ export function startClient(gameConfig, options = {}) {
     const canvas = document.getElementById("gameCanvas");
     const minimapCanvas = document.getElementById("minimapCanvas");
     const renderer = createWorldRenderer(canvas, gameConfig, {
+        active: options.renderingActive !== false,
         onSnapshotCacheInvalid: invalidations => socket.emit("snapshotCacheInvalid", invalidations),
         onSnapshotResync: () => socket.emit("snapshotResync")
     });
@@ -40,6 +41,8 @@ export function startClient(gameConfig, options = {}) {
     let lastViewportSentAt = 0;
     let lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
     let spectatorFollowId = null;
+    let renderingActive = options.renderingActive !== false;
+    let animationFrame = null;
 
     createInputControls(socket, gameConfig.inputBindings, gameConfig.inputActionAngles, {
         isEnabled: typeof options.isInputEnabled === "function"
@@ -98,12 +101,15 @@ export function startClient(gameConfig, options = {}) {
     });
 
     resizeCanvases();
-    render();
+    if (renderingActive) {
+        animationFrame = requestAnimationFrame(render);
+    }
 
     return {
         leaveCurrentRoom,
         networkDiagnostics,
         roomUi,
+        setRenderingActive,
         setRenderingSettings,
         setVisualTheme,
         socket
@@ -131,7 +137,13 @@ export function startClient(gameConfig, options = {}) {
     }
 
     function render(now = performance.now()) {
-        requestAnimationFrame(render);
+        animationFrame = null;
+
+        if (!renderingActive) {
+            return;
+        }
+
+        animationFrame = requestAnimationFrame(render);
 
         if (!shouldRenderClientFrame(now)) {
             return;
@@ -175,6 +187,29 @@ export function startClient(gameConfig, options = {}) {
         }
 
         minimap.render(state, cameraPlayerId);
+    }
+
+    function setRenderingActive(active) {
+        const nextActive = Boolean(active);
+
+        if (renderingActive === nextActive) {
+            return;
+        }
+
+        renderingActive = nextActive;
+        renderer.setActive(nextActive);
+
+        if (!nextActive) {
+            if (animationFrame !== null) {
+                cancelAnimationFrame(animationFrame);
+                animationFrame = null;
+            }
+            return;
+        }
+
+        lastClientFrameAt = Number.NEGATIVE_INFINITY;
+        lastWorkerMainUpdateAt = Number.NEGATIVE_INFINITY;
+        animationFrame = requestAnimationFrame(render);
     }
 
     function shouldRenderClientFrame(now) {

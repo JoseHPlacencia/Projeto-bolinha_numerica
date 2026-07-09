@@ -240,8 +240,6 @@ const network = Object.freeze({
     captureOperationSyncEnabled: true,
     captureOperationFallbackTrailPointsEnabled: true,
     captureOperationNeededTrailPointsEnabled: true,
-    captureOperationBatchTrailPointsEnabled: true,
-    captureOperationHistoryLimit: 128,
     optimisticOwnerCaptureOperationSyncEnabled: false,
     captureOverlapAuditEnabled: false,
     captureOperationResyncEnabled: true,

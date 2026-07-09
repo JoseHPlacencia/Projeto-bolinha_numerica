@@ -83,6 +83,7 @@ async function initializeClient() {
             onJoinFailure: handleJoinFailure,
             onJoinStart: handleRoomJoinStart,
             onJoinSuccess: handleJoinSuccess,
+            renderingActive: false,
             requestFullscreen: requestMobileFullscreen,
             requestGameplayReady
         });
@@ -641,6 +642,7 @@ function ensureSocketConnection() {
 
 function showGame() {
     menuBackground?.stop();
+    gameClient?.setRenderingActive?.(true);
     hideGameOver();
     closeAllOverlays();
     document.body.classList.remove("is-game-ended", "is-menu-active", "is-spectating");
@@ -661,6 +663,7 @@ function showMenu() {
     gameLayer.setAttribute("aria-hidden", "true");
     statusMessage.hide();
     setMenuBusy(false);
+    gameClient?.setRenderingActive?.(false);
     menuBackground?.start();
     announcementsController?.refresh();
 }

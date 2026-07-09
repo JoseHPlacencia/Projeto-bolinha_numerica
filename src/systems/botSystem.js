@@ -3619,7 +3619,6 @@ function getBotPlayerCount(players) {
 }
 
 module.exports = {
-    BOT_ID_PREFIX,
     createBotManager,
     getBotPlayerCount,
     getTargetBotCount,

@@ -17,13 +17,15 @@ export function createMenuBackground(gameConfig) {
         reconnection: false
     });
     const renderer = createWorldRenderer(canvas, gameConfig, {
+        active: false,
         onSnapshotCacheInvalid: invalidations => socket.emit("snapshotCacheInvalid", invalidations),
         onSnapshotResync: () => socket.emit("snapshotResync")
     });
     const snapshots = createSnapshotInterpolator(gameConfig.network, {
         onResyncNeeded: () => socket.emit("snapshotResync")
     });
-    const context = renderer.getDebugState().mode === "worker"
+    const isWorkerRenderer = renderer.getDebugState().mode === "worker";
+    const context = isWorkerRenderer
         ? null
         : canvas.getContext("2d");
 
@@ -42,7 +44,7 @@ export function createMenuBackground(gameConfig) {
     });
 
     socket.on("disconnect", () => {
-        followId = null;
+        setFollowId(null);
         snapshots.reset();
         renderer.resetSnapshots();
 
@@ -58,9 +60,8 @@ export function createMenuBackground(gameConfig) {
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
-        if (snapshot && snapshot.spectator && snapshot.spectator.followId) {
-            followId = snapshot.spectator.followId;
-        }
+        const snapshotFollowId = getSnapshotFollowId(snapshot);
+        if (snapshotFollowId) setFollowId(snapshotFollowId);
 
         renderer.processSnapshot(snapshot);
         const applyResult = snapshots.processSnapshot(snapshot);
@@ -87,12 +88,13 @@ export function createMenuBackground(gameConfig) {
         }
 
         running = true;
-        followId = null;
+        renderer.setActive(true);
+        setFollowId(null);
         lastRenderedAt = Number.NEGATIVE_INFINITY;
         resizeCanvas();
         window.addEventListener("resize", resizeCanvas);
         socket.connect();
-        render();
+        if (!isWorkerRenderer) render();
     }
 
     function stop() {
@@ -101,6 +103,7 @@ export function createMenuBackground(gameConfig) {
         }
 
         running = false;
+        renderer.setActive(false);
         clearReconnectTimer();
         window.removeEventListener("resize", resizeCanvas);
 
@@ -111,8 +114,7 @@ export function createMenuBackground(gameConfig) {
         socket.disconnect();
         snapshots.reset();
         renderer.resetSnapshots();
-        followId = null;
-        renderer.setPlayerId(null);
+        setFollowId(null);
         cancelRenderFrame();
         clearCanvas();
     }
@@ -135,8 +137,7 @@ export function createMenuBackground(gameConfig) {
             return;
         }
 
-        followId = renderFollowId;
-        renderer.setPlayerId(renderFollowId);
+        setFollowId(renderFollowId);
         renderer.renderWorld(state, renderFollowId);
     }
 
@@ -170,6 +171,33 @@ export function createMenuBackground(gameConfig) {
         }
 
         return Object.keys(state.players)[0] || null;
+    }
+
+    function getSnapshotFollowId(snapshot) {
+        const spectatorFollowId = snapshot
+            && snapshot.spectator
+            && snapshot.spectator.followId;
+
+        if (spectatorFollowId) {
+            return spectatorFollowId;
+        }
+
+        if (!followId && snapshot && snapshot.players) {
+            return Object.keys(snapshot.players)[0] || null;
+        }
+
+        return followId;
+    }
+
+    function setFollowId(nextFollowId) {
+        const normalizedFollowId = nextFollowId || null;
+
+        if (followId === normalizedFollowId) {
+            return;
+        }
+
+        followId = normalizedFollowId;
+        renderer.setPlayerId(followId);
     }
 
     function resizeCanvas() {

@@ -21,7 +21,7 @@ export function createInputControls(socket, inputBindings, inputActionAngles, op
     registerGamepadDirectionInput(inputActionAngles, inputState, inputOwnership, inputOptions);
 }
 
-export function createInputSocket(socket, isEnabled) {
+function createInputSocket(socket, isEnabled) {
     return {
         emit(eventName, ...args) {
             if (typeof isEnabled === "function" && !isEnabled()) {

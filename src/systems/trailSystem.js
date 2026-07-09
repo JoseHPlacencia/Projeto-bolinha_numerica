@@ -1402,41 +1402,6 @@ function getRuntimeConfig(player = null) {
         : config;
 }
 
-function serializeTrails(players, territories) {
-    const serializedTrails = {};
-
-    for (const player of players.values()) {
-        const leftSegments = serializeSegments(player.trailLeftSegments);
-        const rightSegments = serializeSegments(player.trailRightSegments);
-
-        if (leftSegments.length === 0 && rightSegments.length === 0) {
-            continue;
-        }
-
-        serializedTrails[player.id] = {
-            id: player.id,
-            color: player.color,
-            leftSegments,
-            rightSegments,
-            fillPolygon: serializeTrailFillPolygon(player)
-        };
-    }
-
-    return serializedTrails;
-}
-
-function serializeSegments(segments) {
-    return segments
-        .map(segment => segment.map(clonePoint))
-        .filter(segment => segment.length >= 2);
-}
-
-function serializeTrailFillPolygon(player) {
-    const fillPolygon = createRawTrailFillPolygon(player.trailLeftFillPath, player.trailRightFillPath);
-
-    return calculatePolygonArea(fillPolygon) > geometryEpsilon ? serializeRawPolygon(fillPolygon) : null;
-}
-
 function clonePoint(point) {
     return {
         x: point.x,
@@ -1469,32 +1434,6 @@ function createTrailFillPolygon(leftPath, rightPath) {
     ));
 
     return calculatePolygonArea(polygon) > geometryEpsilon ? polygon : [];
-}
-
-function createRawTrailFillPolygon(leftPath, rightPath) {
-    if (!Array.isArray(leftPath) || !Array.isArray(rightPath)) {
-        return [];
-    }
-
-    const points = removeConsecutiveDuplicatePoints(leftPath.concat([...rightPath].reverse()));
-
-    if (points.length < 3) {
-        return [];
-    }
-
-    const ring = points.map(point => [point.x, point.y]);
-
-    if (!areCoordinatesEqual(ring[0], ring[ring.length - 1])) {
-        ring.push([ring[0][0], ring[0][1]]);
-    }
-
-    return [ring];
-}
-
-function serializeRawPolygon(polygon) {
-    return {
-        rings: polygon.map(ring => ring.map(([x, y]) => ({ x, y })))
-    };
 }
 
 function createFillSideStepPath(territoryPolygon, previousPoint, currentPoint, currentInside, visiblePath = []) {
@@ -1677,9 +1616,6 @@ function areCoordinatesEqual(first, second) {
 }
 
 module.exports = {
-    clearTrail,
-    createTrailSample,
-    serializeTrails,
     updatePlayerTrail,
     updateTrails
 };

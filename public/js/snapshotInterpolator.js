@@ -961,10 +961,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         };
     }
 
-    function countItems(value) {
-        return Array.isArray(value) ? value.length : 0;
-    }
-
     function hasAnyInvalidationCounts(invalidations) {
         const counts = normalizeInvalidationCounts(invalidations);
 
@@ -2043,10 +2039,6 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
 
         return getPointPathDistanceSquared(anchor, path) <= indexedBoundaryMaxDistanceSquared;
-    }
-
-    function getCaptureTrailSegment(id, operation) {
-        return getCaptureTrailSegmentState(id, operation).points;
     }
 
     function getCaptureTrailSegmentState(id, operation) {

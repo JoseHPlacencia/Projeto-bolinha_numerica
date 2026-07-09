@@ -140,11 +140,7 @@ const T_INTEIRO    = makeTheme("inteiro",  "Inteiros",   "🔢", "Colete qualque
 const T_NEGATIVO   = makeTheme("negativo", "Negativos",  "➖", "Colete números menores que zero",           n => n.sets.has("negativo"));
 const T_FRACAO     = makeTheme("fracao",   "Frações",    "⅓", "Colete Racionais não-inteiros",              n => n.sets.has("fracao"));
 const T_RACIONAL   = makeTheme("racional", "Racionais",  "ℚ",  "Colete números Racionais (inteiros e frac.)",n => n.sets.has("racional"));
-const T_RAIZ_PERF  = makeTheme("raiz_perf","Raízes exatas","√", "Colete raízes de quadrados perfeitos (naturais!)", n => n.sets.has("raiz") && n.sets.has("natural"));
-
 const T_IRRACIONAL = makeTheme("irracional","Irracionais","∞", "Colete números Irracionais",               n => n.sets.has("irracional"));
-const T_RAIZ_IRR   = makeTheme("raiz_irr", "√ Irracionais","√","Colete raízes irracionais",                n => n.sets.has("raiz") && n.sets.has("irracional"));
-const T_MENOR_ZERO = makeTheme("menor_zero","Negativos estritos","📉","Colete números estritamente negativos",n => n.value < 0);
 
 // ── Temas de UNIÃO (∪) — fácil e médio ────────────────────────────────────────
 
@@ -183,20 +179,6 @@ const T_U_PRIMO_MULT3 = makeTheme(
     "union", ["primo", "mult3"]
 );
 
-const T_U_NATURAL_PRIMO = makeTheme(
-    "u_natural_primo", "Naturais ∪ Primos", "🔗",
-    "Colete Naturais OU Primos",
-    n => n.sets.has("natural") || n.sets.has("primo"),
-    "union", ["natural", "primo"]
-);
-
-const T_U_INTEIRO_FRACAO = makeTheme(
-    "u_inteiro_fracao", "Inteiros ∪ Frações", "🔗",
-    "Colete Inteiros OU Frações",
-    n => n.sets.has("inteiro") || n.sets.has("fracao"),
-    "union", ["inteiro", "fracao"]
-);
-
 const T_U_NEGATIVO_PRIMO = makeTheme(
     "u_negativo_primo", "Negativos ∪ Primos", "🔗",
     "Colete Negativos OU Primos naturais",
@@ -232,13 +214,6 @@ const T_U_PAR_MULT5 = makeTheme(
     "union", ["par", "mult5"]
 );
 
-const T_U_RACIONAL_NEGATIVO = makeTheme(
-    "u_racional_neg", "Racionais ∪ Negativos", "🔗",
-    "Colete Racionais OU Negativos",
-    n => n.sets.has("racional") || n.sets.has("negativo"),
-    "union", ["racional", "negativo"]
-);
-
 const T_U_FRACAO_NEGATIVO = makeTheme(
     "u_fracao_neg", "Frações ∪ Negativos", "🔗",
     "Colete Frações OU Negativos",
@@ -261,13 +236,6 @@ const T_U_NEGATIVO_RAIZ_IRR = makeTheme(
 );
 
 // ── Temas de INTERSEÇÃO (∩) — difícil ─────────────────────────────────────────
-
-const T_I_PAR_PRIMO = makeTheme(
-    "i_par_primo", "Pares ∩ Primos", "⊗",
-    "Colete números que são Pares E Primos (só o 2!)",
-    n => n.sets.has("par") && n.sets.has("primo"),
-    "intersection", ["par", "primo"]
-);
 
 const T_I_NATURAL_IMPAR = makeTheme(
     "i_nat_impar", "Naturais ∩ Ímpares", "⊗",
@@ -297,34 +265,6 @@ const T_I_NATURAL_PAR_MULT5 = makeTheme(
     "intersection", ["natural", "par_ou_mult5"]
 );
 
-const T_I_RACIONAL_NEGATIVO = makeTheme(
-    "i_rac_neg", "Racionais ∩ Negativos", "⊗",
-    "Colete números Racionais E Negativos",
-    n => n.sets.has("racional") && n.sets.has("negativo"),
-    "intersection", ["racional", "negativo"]
-);
-
-const T_I_INTEIRO_NEGATIVO = makeTheme(
-    "i_int_neg", "Inteiros ∩ Negativos", "⊗",
-    "Colete números que são Inteiros E Negativos",
-    n => n.sets.has("inteiro") && n.sets.has("negativo"),
-    "intersection", ["inteiro", "negativo"]
-);
-
-const T_I_MULT3_MULT5 = makeTheme(
-    "i_mult3_mult5", "Mult.3 ∩ Mult.5", "⊗",
-    "Colete múltiplos de 3 E de 5 (mult. de 15!)",
-    n => n.sets.has("mult3") && n.sets.has("mult5"),
-    "intersection", ["mult3", "mult5"]
-);
-
-const T_I_NATURAL_PRIMO = makeTheme(
-    "i_nat_primo", "Naturais ∩ Primos", "⊗",
-    "Colete Naturais que também são Primos",
-    n => n.sets.has("natural") && n.sets.has("primo"),
-    "intersection", ["natural", "primo"]
-);
-
 const T_I_IRRACIONAL_RAIZ = makeTheme(
     "i_irr_raiz", "Irracionais ∩ Raízes", "⊗",
     "Colete Irracionais que são raízes (√ de não-quadrados)",
@@ -332,14 +272,6 @@ const T_I_IRRACIONAL_RAIZ = makeTheme(
     "intersection", ["irracional", "raiz"]
 );
 
-const T_I_FRACAO_POSITIVO = makeTheme(
-    "i_frac_pos", "Frações ∩ Positivos", "⊗",
-    "Colete Frações que são maiores que zero",
-    n => n.sets.has("fracao") && n.value > 0,
-    "intersection", ["fracao", "maior_zero"]
-);
-
-// Fix: hard.themes não pode ter propriedades nomeadas — só array
 const HARD_THEMES = Object.freeze([
     T_NATURAL, T_INTEIRO, T_RACIONAL,
     T_IRRACIONAL, T_PAR, T_IMPAR,
@@ -348,7 +280,6 @@ const HARD_THEMES = Object.freeze([
     T_U_IRRACIONAL_FRACAO, T_U_NEGATIVO_RAIZ_IRR
 ]);
 
-// Rebuild profiles cleanly to avoid keyed-array issues
 const PROFILES = Object.freeze({
     easy: Object.freeze({
         themeIntervalSec: 28,
@@ -632,7 +563,5 @@ function clamp(value, min, max) {
 }
 
 module.exports = {
-    NUMBER_CONFIG,
-    PROFILES,
     createNumberSystem
 };

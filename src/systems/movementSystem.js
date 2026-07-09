@@ -96,10 +96,6 @@ function rotatePlayerToTargetInput(player, targetInput, deltaTime) {
     );
 }
 
-function getPlayerTargetAngle(player) {
-    return getPlayerTargetInput(player).angle;
-}
-
 function getPlayerTargetInput(player) {
     if (Number.isFinite(player.pendingDirectionAngle)) {
         return {
@@ -848,8 +844,6 @@ function toDegrees(angle) {
 }
 
 module.exports = {
-    getPlayerMovementVector,
-    getPlayerTargetAngle,
     updatePlayer,
     updatePlayers
 };

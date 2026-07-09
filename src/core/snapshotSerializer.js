@@ -1403,12 +1403,6 @@ function ensureTerritoryPointCache(clientState) {
 
 }
 
-function packSegments(segments) {
-    return (segments || [])
-        .map(packPoints)
-        .filter(segment => segment.length >= 2);
-}
-
 function packPoints(points) {
     return (points || [])
         .map(packPoint)

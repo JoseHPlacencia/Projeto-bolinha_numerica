@@ -191,7 +191,6 @@ function clamp(value, min, max) {
 module.exports = {
     createRoomRuntimeConfig,
     normalizeRoomCustomOptions,
-    scaleRotationStrength,
     serializeRoomSettings,
     validateRoomCustomOptions
 };
