@@ -345,6 +345,181 @@ function doPolygonsOverlap(first, second, firstBounds = null, secondBounds = nul
     return doPolygonBoundariesIntersect(firstRing, secondRing);
 }
 
+function doPolygonsHavePositiveAreaOverlap(first, second, firstBounds = null, secondBounds = null) {
+    if (!hasPolygon(first) || !hasPolygon(second)) {
+        return false;
+    }
+
+    const resolvedFirstBounds = firstBounds || getPolygonBounds(first);
+    const resolvedSecondBounds = secondBounds || getPolygonBounds(second);
+
+    if (!doBoundsHavePositiveAreaOverlap(resolvedFirstBounds, resolvedSecondBounds)) {
+        return false;
+    }
+
+    const firstRing = getOpenRing(first[0]);
+    const secondRing = getOpenRing(second[0]);
+
+    if (firstRing.length < 3 || secondRing.length < 3) {
+        return false;
+    }
+
+    if (doPolygonBoundariesCreateAreaOverlap(firstRing, secondRing)) {
+        return true;
+    }
+
+    return doesRingHaveStrictInteriorPoint(firstRing, second, resolvedSecondBounds, secondRing)
+        || doesRingHaveStrictInteriorPoint(secondRing, first, resolvedFirstBounds, firstRing);
+}
+
+function doBoundsHavePositiveAreaOverlap(first, second) {
+    return Boolean(
+        first
+        && second
+        && Math.min(first.maxX, second.maxX) - Math.max(first.minX, second.minX) > geometryEpsilon
+        && Math.min(first.maxY, second.maxY) - Math.max(first.minY, second.minY) > geometryEpsilon
+    );
+}
+
+function doPolygonBoundariesCreateAreaOverlap(firstRing, secondRing) {
+    const firstBlocks = createBoundarySegmentBlocks(firstRing);
+    const secondBlocks = createBoundarySegmentBlocks(secondRing);
+    const firstOrientation = Math.sign(calculateOpenRingArea(firstRing)) || 1;
+    const secondOrientation = Math.sign(calculateOpenRingArea(secondRing)) || 1;
+
+    for (const firstBlock of firstBlocks) {
+        for (const secondBlock of secondBlocks) {
+            if (!doCoordinateBoundsOverlap(firstBlock.bounds, secondBlock.bounds)) {
+                continue;
+            }
+
+            for (const firstSegment of firstBlock.segments) {
+                for (const secondSegment of secondBlock.segments) {
+                    if (!doCoordinateBoundsOverlap(firstSegment.bounds, secondSegment.bounds)) {
+                        continue;
+                    }
+
+                    if (segmentsProperlyIntersect(
+                        firstSegment.start,
+                        firstSegment.end,
+                        secondSegment.start,
+                        secondSegment.end
+                    ) || doCollinearSegmentsShareInteriorSide(
+                        firstSegment.start,
+                        firstSegment.end,
+                        firstOrientation,
+                        secondSegment.start,
+                        secondSegment.end,
+                        secondOrientation
+                    )) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+function calculateOpenRingArea(ring) {
+    let area = 0;
+
+    for (let index = 0; index < ring.length; index++) {
+        const current = ring[index];
+        const next = ring[(index + 1) % ring.length];
+
+        area += current[0] * next[1] - next[0] * current[1];
+    }
+
+    return area / 2;
+}
+
+function segmentsProperlyIntersect(firstStart, firstEnd, secondStart, secondEnd) {
+    const firstToSecondStart = crossCoordinates(firstStart, firstEnd, secondStart);
+    const firstToSecondEnd = crossCoordinates(firstStart, firstEnd, secondEnd);
+    const secondToFirstStart = crossCoordinates(secondStart, secondEnd, firstStart);
+    const secondToFirstEnd = crossCoordinates(secondStart, secondEnd, firstEnd);
+
+    return haveOppositeNonZeroSigns(firstToSecondStart, firstToSecondEnd)
+        && haveOppositeNonZeroSigns(secondToFirstStart, secondToFirstEnd);
+}
+
+function haveOppositeNonZeroSigns(first, second) {
+    return (first > geometryEpsilon && second < -geometryEpsilon)
+        || (first < -geometryEpsilon && second > geometryEpsilon);
+}
+
+function doCollinearSegmentsShareInteriorSide(
+    firstStart,
+    firstEnd,
+    firstOrientation,
+    secondStart,
+    secondEnd,
+    secondOrientation
+) {
+    if (!areSegmentsCollinear(firstStart, firstEnd, secondStart, secondEnd)
+        || getCollinearSegmentOverlapLength(firstStart, firstEnd, secondStart, secondEnd) <= geometryEpsilon) {
+        return false;
+    }
+
+    const firstDirectionX = firstEnd[0] - firstStart[0];
+    const firstDirectionY = firstEnd[1] - firstStart[1];
+    const secondDirectionX = secondEnd[0] - secondStart[0];
+    const secondDirectionY = secondEnd[1] - secondStart[1];
+    const interiorNormalDot = firstOrientation * secondOrientation * (
+        firstDirectionX * secondDirectionX + firstDirectionY * secondDirectionY
+    );
+
+    return interiorNormalDot > geometryEpsilon;
+}
+
+function areSegmentsCollinear(firstStart, firstEnd, secondStart, secondEnd) {
+    return isZero(crossCoordinates(firstStart, firstEnd, secondStart))
+        && isZero(crossCoordinates(firstStart, firstEnd, secondEnd));
+}
+
+function getCollinearSegmentOverlapLength(firstStart, firstEnd, secondStart, secondEnd) {
+    const useXAxis = Math.abs(firstEnd[0] - firstStart[0]) >= Math.abs(firstEnd[1] - firstStart[1]);
+    const axis = useXAxis ? 0 : 1;
+    const overlapStart = Math.max(
+        Math.min(firstStart[axis], firstEnd[axis]),
+        Math.min(secondStart[axis], secondEnd[axis])
+    );
+    const overlapEnd = Math.min(
+        Math.max(firstStart[axis], firstEnd[axis]),
+        Math.max(secondStart[axis], secondEnd[axis])
+    );
+
+    return Math.max(0, overlapEnd - overlapStart);
+}
+
+function doesRingHaveStrictInteriorPoint(sourceRing, targetPolygon, targetBounds, targetRing) {
+    for (const point of sourceRing) {
+        if (doBoundsContainPoint(targetBounds, point[0], point[1])
+            && isPointInPolygon(targetPolygon, point[0], point[1])
+            && !isCoordinateOnRingBoundary(point, targetRing)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function isCoordinateOnRingBoundary(point, ring) {
+    for (let index = 0; index < ring.length; index++) {
+        const start = ring[index];
+        const end = ring[(index + 1) % ring.length];
+
+        if (Math.abs(crossCoordinates(start, end, point)) <= geometryEpsilon
+            && isPointOnSegment(point, start, end)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function isPolygonInsidePolygon(inner, outer, innerBounds = null, outerBounds = null) {
     if (!hasPolygon(inner) || !hasPolygon(outer)) {
         return false;
@@ -1015,6 +1190,7 @@ module.exports = {
     doBoundsContainBounds,
     doBoundsContainPoint,
     doBoundsOverlap,
+    doPolygonsHavePositiveAreaOverlap,
     doPolygonsOverlap,
     findClosestPolygonBoundaryContact,
     findSegmentPolygonBoundaryContact,

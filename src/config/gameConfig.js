@@ -67,6 +67,8 @@ const territory = Object.freeze({
     overlapRepairQueueCheckedPairCacheSize: 512,
     overlapRepairQueueMaxItems: 128,
     overlapRepairQueueMaxPairsPerTick: 10,
+    overlapRepairWorkerEnabled: true,
+    overlapRepairWorkerMaxInFlight: 2,
     pathSegmentAngleThresholdDegrees: 1,
     pathSegmentArcMaxSweepDegrees: 135,
     pathSegmentArcMaxRadialDrift: 2,

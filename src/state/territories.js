@@ -6,6 +6,7 @@ const {
     createOperationalPolygon,
     doBoundsContainBounds,
     doBoundsOverlap,
+    doPolygonsHavePositiveAreaOverlap,
     doPolygonsOverlap,
     getPolygonBounds,
     getPolygonPointCount,
@@ -16,11 +17,16 @@ const {
     unionPolygons
 } = require("../utils/geometry");
 const { selectRetainedTerritoryPolygon } = require("./territoryRetention");
+const {
+    getTerritoryRepairWorkerPendingCount,
+    submitTerritoryRepairJob
+} = require("./territoryRepairWorkerPool");
 const { getHighResolutionTime } = require("../utils/time");
 
 const territoryChangeAreaEpsilon = 1;
 const operationSimplifyMaxAreaDrift = config.world.playerSize * config.world.playerSize;
 const overlapRepairQueueStates = new WeakMap();
+const territoryOperationPolygonCaches = new WeakMap();
 
 function createTerritories() {
     return new Map();
@@ -178,18 +184,32 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         addCaptureApplyCount(captureApply, "subtractCount", 1);
         addCaptureApplyCount(captureApply, "subtractPointCount", subjectPointCount);
         const previousArea = getTerritoryArea(otherTerritory);
-        const subjectOperation = getTerritoryOperationPolygon(otherTerritory, captureApply, diagnostics);
-        capturedOperation = capturedOperation || getCapturedOperationPolygon(capturedPolygon, captureApply, diagnostics);
-        const operationSubjectArea = calculatePolygonArea(subjectOperation.polygon);
-        const subtract = measureCaptureApplyOperation(diagnostics, "captureApplySubtract", () => (
-            subtractPolygonComponents(subjectOperation.polygon, capturedOperation.polygon)
-        ));
-        const retainedPolygon = selectRetainedTerritoryPolygon(
-            subtract.value,
-            options.players && options.players.get(playerId)
+        const subjectOperation = getTerritoryOperationPolygon(
+            otherTerritory,
+            captureApply,
+            diagnostics,
+            "subject",
+            "captureApplySimplifySubject"
         );
+        capturedOperation = capturedOperation || getCapturedOperationPolygon(capturedPolygon, captureApply, diagnostics);
+        const subtract = measureCaptureApplyOperation(diagnostics, "captureApplySubtractTotal", () => (
+            subtractTerritoryPolygon(
+                otherTerritory,
+                capturedPolygon,
+                capturedOperation,
+                options.players && options.players.get(playerId),
+                {
+                    diagnostics,
+                    metrics: captureApply,
+                    phasePrefix: "captureApply",
+                    subjectOperation
+                }
+            )
+        ));
+        const retainedPolygon = subtract.value.retainedPolygon;
         const resultPointCount = getPolygonPointCount(retainedPolygon);
-        const operationResultArea = calculatePolygonArea(retainedPolygon);
+        const operationSubjectArea = subtract.value.operationSubjectArea;
+        const operationResultArea = subtract.value.operationResultArea;
         const operationAreaDelta = Math.abs(operationSubjectArea - operationResultArea);
         addCaptureApplyCount(captureApply, "subtractOperationPointCount", subjectOperation.outputPointCount);
         addCaptureApplyCount(captureApply, "subtractOperationClippingPointCount", capturedOperation.outputPointCount);
@@ -212,7 +232,8 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
             resultPointCount,
             subjectArea: previousArea,
             subjectPointCount,
-            usedSimplified: subjectOperation.simplified || capturedOperation.simplified
+            usedFallback: subtract.value.usedFallback,
+            usedSimplified: subtract.value.usedSimplified
         });
 
         if (changed) {
@@ -311,15 +332,21 @@ function repairTerritoryOverlaps(
         }
 
         repairContext.checkedPairs.add(pairKey);
-        const repair = repairTerritoryOverlapPair(
-            territories,
-            changedPlayerId,
-            otherPlayerId,
-            ownerId,
-            changedPlayerIds,
-            options.players,
-            metrics
-        );
+        const repair = measureCaptureApplyPhase(options.diagnostics, "captureApplyRepairPair", () => (
+            repairTerritoryOverlapPair(
+                territories,
+                changedPlayerId,
+                otherPlayerId,
+                ownerId,
+                changedPlayerIds,
+                options.players,
+                metrics,
+                {
+                    diagnostics: options.diagnostics,
+                    phasePrefix: "captureApplyRepairPair"
+                }
+            )
+        ));
 
         if (!repair.changed) {
             continue;
@@ -403,8 +430,10 @@ function repairTerritoryOverlapPair(
     ownerId,
     changedPlayerIds,
     players,
-    metrics
+    metrics,
+    options = {}
 ) {
+    const phasePrefix = options.phasePrefix || "overlapRepairPair";
     const firstTerritory = territories.get(firstPlayerId);
     const secondTerritory = territories.get(secondPlayerId);
     const firstBounds = getTerritoryBounds(firstTerritory);
@@ -416,32 +445,40 @@ function repairTerritoryOverlapPair(
 
     addCaptureApplyCount(metrics, "postCaptureOverlapCheckCount", 1);
 
-    if (!doBoundsOverlap(firstBounds, secondBounds)) {
+    if (!measureCaptureApplyPhase(options.diagnostics, `${phasePrefix}Bounds`, () => (
+        doBoundsOverlap(firstBounds, secondBounds)
+    ))) {
         addCaptureApplyCount(metrics, "postCaptureOverlapBoundsRejectedCount", 1);
         return createOverlapRepairResult(false);
     }
 
-    if (!doPolygonsOverlap(firstTerritory.polygon, secondTerritory.polygon, firstBounds, secondBounds)) {
+    if (!measureCaptureApplyPhase(options.diagnostics, `${phasePrefix}Overlap`, () => (
+        doPolygonsHavePositiveAreaOverlap(
+            firstTerritory.polygon,
+            secondTerritory.polygon,
+            firstBounds,
+            secondBounds
+        )
+    ))) {
         return createOverlapRepairResult(false);
     }
 
-    const overlapArea = calculatePolygonIntersectionArea(firstTerritory.polygon, secondTerritory.polygon);
+    const confirmedOverlapArea = measureCaptureApplyPhase(
+        options.diagnostics,
+        `${phasePrefix}AreaConfirmation`,
+        () => calculatePolygonIntersectionArea(firstTerritory.polygon, secondTerritory.polygon)
+    );
 
-    if (overlapArea <= territoryChangeAreaEpsilon) {
+    if (confirmedOverlapArea <= territoryChangeAreaEpsilon) {
         return createOverlapRepairResult(false);
     }
 
-    addCaptureApplyCount(metrics, "postCaptureOverlapCount", 1);
-    addCaptureApplyCount(metrics, "postCaptureOverlapRepairCount", 1);
-    recordFirstPostCaptureOverlap(
-        metrics,
+    const overlapDetail = createPostCaptureOverlapDetail(
         firstPlayerId,
         secondPlayerId,
         firstTerritory,
-        secondTerritory,
-        overlapArea
+        secondTerritory
     );
-
     const winnerId = selectOverlapWinnerId(
         firstPlayerId,
         firstTerritory,
@@ -453,13 +490,27 @@ function repairTerritoryOverlapPair(
     const loserId = winnerId === firstPlayerId ? secondPlayerId : firstPlayerId;
     const winnerTerritory = territories.get(winnerId);
     const loserTerritory = territories.get(loserId);
-    const changed = trimTerritoryOverlap(loserTerritory, winnerTerritory, players && players.get(loserId));
+    const trim = measureCaptureApplyPhase(options.diagnostics, `${phasePrefix}Trim`, () => (
+        trimTerritoryOverlap(
+            loserTerritory,
+            winnerTerritory,
+            players && players.get(loserId),
+            {
+                diagnostics: options.diagnostics,
+                metrics,
+                phasePrefix
+            }
+        )
+    ));
 
-    if (!changed) {
+    if (!trim.changed) {
         return createOverlapRepairResult(false);
     }
 
+    addCaptureApplyCount(metrics, "postCaptureOverlapCount", 1);
+    addCaptureApplyCount(metrics, "postCaptureOverlapRepairCount", 1);
     addCaptureApplyCount(metrics, "postCaptureOverlapRepairChangedCount", 1);
+    recordFirstPostCaptureOverlap(metrics, overlapDetail, confirmedOverlapArea);
 
     return createOverlapRepairResult(true, loserId);
 }
@@ -485,17 +536,36 @@ function processTerritoryOverlapRepairQueue(territories, players = new Map(), op
     const state = getTerritoryOverlapRepairQueueState(territories, false);
     const changedPlayerIds = new Set();
 
-    if (!state || state.pending.length <= 0) {
+    if (!state) {
         return changedPlayerIds;
     }
 
     const diagnostics = getCaptureApplyDiagnostics(options);
     const metrics = getCaptureApplyMetrics(diagnostics);
+    measureCaptureApplyPhase(diagnostics, "overlapRepairWorkerApply", () => {
+        applyCompletedTerritoryRepairJobs(
+            territories,
+            state,
+            metrics,
+            changedPlayerIds
+        );
+    });
+    recordCaptureApplyMax(
+        metrics,
+        "overlapRepairWorkerInFlightCount",
+        state.inFlightPairKeys.size
+    );
+
+    if (state.pending.length <= 0) {
+        return changedPlayerIds;
+    }
+
     const startedAt = getHighResolutionTime();
     const maxPairs = getOverlapRepairQueueMaxPairsPerTick();
     const budgetMs = getOverlapRepairQueueBudgetMs();
     let processedPairs = 0;
     let budgetHit = false;
+    let workerBackpressure = false;
 
     while (state.pending.length > 0 && processedPairs < maxPairs) {
         if (!hasOverlapRepairQueueBudget(startedAt, budgetMs)) {
@@ -521,20 +591,73 @@ function processTerritoryOverlapRepairQueue(territories, players = new Map(), op
                 break;
             }
 
-            const otherPlayerId = item.candidateIds[item.cursor++];
+            const otherPlayerId = item.candidateIds[item.cursor];
 
             if (otherPlayerId === item.changedPlayerId || !territories.has(otherPlayerId)) {
+                item.cursor++;
                 continue;
             }
 
             const pairVersionKey = createTerritoryPairVersionKey(territories, item.changedPlayerId, otherPlayerId);
 
-            if (rememberCheckedOverlapRepairPair(state, pairVersionKey)) {
+            if (!pairVersionKey || state.checkedPairs.has(pairVersionKey)) {
+                item.cursor++;
                 continue;
             }
 
-            processedPairs++;
-            addCaptureApplyCount(metrics, "overlapRepairQueueProcessedCount", 1);
+            const candidate = measureCaptureApplyPhase(diagnostics, "overlapRepairQueuePair", () => (
+                createTerritoryRepairWorkerCandidate(
+                    territories,
+                    item.changedPlayerId,
+                    otherPlayerId,
+                    item.ownerId,
+                    metrics,
+                    {
+                        diagnostics,
+                        phasePrefix: "overlapRepairQueuePair"
+                    }
+                )
+            ));
+
+            if (!candidate) {
+                rememberCheckedOverlapRepairPair(state, pairVersionKey);
+                item.cursor++;
+                processedPairs++;
+                addCaptureApplyCount(metrics, "overlapRepairQueueProcessedCount", 1);
+                continue;
+            }
+
+            if (isTerritoryRepairWorkerEnabled()) {
+                const dispatched = measureCaptureApplyPhase(
+                    diagnostics,
+                    "overlapRepairWorkerDispatch",
+                    () => dispatchTerritoryRepairWorkerCandidate(
+                        state,
+                        candidate,
+                        players,
+                        pairVersionKey
+                    )
+                );
+
+                if (!dispatched) {
+                    addCaptureApplyCount(metrics, "overlapRepairWorkerBackpressureCount", 1);
+                    itemCompleted = false;
+                    workerBackpressure = true;
+                    break;
+                }
+
+                rememberCheckedOverlapRepairPair(state, pairVersionKey);
+                item.cursor++;
+                processedPairs++;
+                addCaptureApplyCount(metrics, "overlapRepairQueueProcessedCount", 1);
+                addCaptureApplyCount(metrics, "overlapRepairWorkerDispatchedCount", 1);
+                recordCaptureApplyMax(
+                    metrics,
+                    "overlapRepairWorkerInFlightCount",
+                    state.inFlightPairKeys.size
+                );
+                continue;
+            }
 
             const repair = repairTerritoryOverlapPair(
                 territories,
@@ -543,27 +666,39 @@ function processTerritoryOverlapRepairQueue(territories, players = new Map(), op
                 item.ownerId,
                 new Set([item.changedPlayerId]),
                 players,
-                metrics
+                metrics,
+                {
+                    diagnostics,
+                    phasePrefix: "overlapRepairQueuePair"
+                }
             );
 
-            if (!repair.changed) {
-                continue;
-            }
+            rememberCheckedOverlapRepairPair(state, pairVersionKey);
+            item.cursor++;
+            processedPairs++;
+            addCaptureApplyCount(metrics, "overlapRepairQueueProcessedCount", 1);
 
-            addCaptureApplyCount(metrics, "overlapRepairQueueChangedCount", 1);
-            addCaptureApplyCount(metrics, "changedTerritoryCount", 1);
-            changedPlayerIds.add(repair.changedPlayerId);
-            enqueueTerritoryOverlapRepair(territories, repair.changedPlayerId, {
-                metrics,
-                ownerId: item.ownerId,
-                priorityCandidateIds: [item.changedPlayerId, otherPlayerId]
-            });
+            if (repair.changed) {
+                registerChangedTerritoryRepair(
+                    territories,
+                    metrics,
+                    changedPlayerIds,
+                    repair.changedPlayerId,
+                    item.ownerId,
+                    item.changedPlayerId,
+                    otherPlayerId
+                );
+            }
         }
 
         if (itemCompleted && item.cursor >= item.candidateIds.length) {
             state.pendingIds.delete(item.changedPlayerId);
         } else {
             state.pending.push(item);
+        }
+
+        if (workerBackpressure) {
+            break;
         }
     }
 
@@ -572,8 +707,300 @@ function processTerritoryOverlapRepairQueue(territories, players = new Map(), op
     }
 
     recordCaptureApplyMax(metrics, "overlapRepairQueuePendingCount", state.pending.length);
+    recordCaptureApplyMax(
+        metrics,
+        "overlapRepairWorkerInFlightCount",
+        state.inFlightPairKeys.size
+    );
 
     return changedPlayerIds;
+}
+
+function createTerritoryRepairWorkerCandidate(
+    territories,
+    firstPlayerId,
+    secondPlayerId,
+    ownerId,
+    metrics,
+    options = {}
+) {
+    const phasePrefix = options.phasePrefix || "overlapRepairQueuePair";
+    const firstTerritory = territories.get(firstPlayerId);
+    const secondTerritory = territories.get(secondPlayerId);
+    const firstBounds = getTerritoryBounds(firstTerritory);
+    const secondBounds = getTerritoryBounds(secondTerritory);
+
+    if (!firstTerritory || !secondTerritory || !firstBounds || !secondBounds) {
+        return null;
+    }
+
+    addCaptureApplyCount(metrics, "postCaptureOverlapCheckCount", 1);
+
+    if (!measureCaptureApplyPhase(options.diagnostics, `${phasePrefix}Bounds`, () => (
+        doBoundsOverlap(firstBounds, secondBounds)
+    ))) {
+        addCaptureApplyCount(metrics, "postCaptureOverlapBoundsRejectedCount", 1);
+        return null;
+    }
+
+    if (!measureCaptureApplyPhase(options.diagnostics, `${phasePrefix}Overlap`, () => (
+        doPolygonsHavePositiveAreaOverlap(
+            firstTerritory.polygon,
+            secondTerritory.polygon,
+            firstBounds,
+            secondBounds
+        )
+    ))) {
+        return null;
+    }
+
+    const changedPlayerIds = new Set([firstPlayerId]);
+    const winnerId = selectOverlapWinnerId(
+        firstPlayerId,
+        firstTerritory,
+        secondPlayerId,
+        secondTerritory,
+        ownerId,
+        changedPlayerIds
+    );
+    const loserId = winnerId === firstPlayerId ? secondPlayerId : firstPlayerId;
+
+    return {
+        changedPlayerId: firstPlayerId,
+        first: createTerritoryWorkerSnapshot(firstPlayerId, firstTerritory),
+        loserId,
+        otherPlayerId: secondPlayerId,
+        overlapDetail: createPostCaptureOverlapDetail(
+            firstPlayerId,
+            secondPlayerId,
+            firstTerritory,
+            secondTerritory
+        ),
+        ownerId,
+        second: createTerritoryWorkerSnapshot(secondPlayerId, secondTerritory),
+        winnerId
+    };
+}
+
+function createTerritoryWorkerSnapshot(id, territory) {
+    return {
+        id,
+        polygon: territory.polygon,
+        version: territory.version || 0
+    };
+}
+
+function dispatchTerritoryRepairWorkerCandidate(
+    state,
+    candidate,
+    players,
+    pairVersionKey
+) {
+    const maxInFlight = getOverlapRepairWorkerMaxInFlight();
+
+    if (getTerritoryRepairWorkerPendingCount() >= maxInFlight
+        || state.inFlightPairKeys.has(pairVersionKey)) {
+        return false;
+    }
+
+    const dispatchedAt = getHighResolutionTime();
+    const jobId = submitTerritoryRepairJob(
+        {
+            areaEpsilon: territoryChangeAreaEpsilon,
+            first: candidate.first,
+            loserId: candidate.loserId,
+            loserPlayer: createTerritoryRetentionPlayerSnapshot(players.get(candidate.loserId)),
+            second: candidate.second,
+            winnerId: candidate.winnerId
+        },
+        response => {
+            state.completedJobs.push({
+                candidate,
+                completedAt: getHighResolutionTime(),
+                dispatchedAt,
+                pairVersionKey,
+                response
+            });
+        },
+        maxInFlight
+    );
+
+    if (!jobId) {
+        return false;
+    }
+
+    state.inFlightPairKeys.add(pairVersionKey);
+    return true;
+}
+
+function createTerritoryRetentionPlayerSnapshot(player) {
+    if (!player) {
+        return null;
+    }
+
+    return {
+        isLeftTrailActive: Boolean(player.isLeftTrailActive),
+        isRightTrailActive: Boolean(player.isRightTrailActive),
+        trailLeftSegments: createCompactTrailSegments(player.trailLeftSegments),
+        trailRightSegments: createCompactTrailSegments(player.trailRightSegments),
+        x: Number.isFinite(player.x) ? player.x : null,
+        y: Number.isFinite(player.y) ? player.y : null
+    };
+}
+
+function createCompactTrailSegments(segments) {
+    if (!Array.isArray(segments)) {
+        return [];
+    }
+
+    for (let index = segments.length - 1; index >= 0; index--) {
+        const segment = segments[index];
+
+        if (!Array.isArray(segment) || segment.length < 2) {
+            continue;
+        }
+
+        const first = segment[0];
+        const last = segment[segment.length - 1];
+
+        if (!isFiniteTrailPoint(first) || !isFiniteTrailPoint(last)) {
+            return [];
+        }
+
+        return [[
+            { x: first.x, y: first.y },
+            { x: last.x, y: last.y }
+        ]];
+    }
+
+    return [];
+}
+
+function isFiniteTrailPoint(point) {
+    return point && Number.isFinite(point.x) && Number.isFinite(point.y);
+}
+
+function applyCompletedTerritoryRepairJobs(
+    territories,
+    state,
+    metrics,
+    changedPlayerIds
+) {
+    const completedJobs = state.completedJobs.splice(0);
+
+    for (const completed of completedJobs) {
+        const { candidate, pairVersionKey, response } = completed;
+
+        state.inFlightPairKeys.delete(pairVersionKey);
+        addCaptureApplyCount(metrics, "overlapRepairWorkerCompletedCount", 1);
+        recordCaptureApplyMax(
+            metrics,
+            "overlapRepairWorkerLatencyMs",
+            completed.completedAt - completed.dispatchedAt
+        );
+
+        if (!response || response.error) {
+            addCaptureApplyCount(metrics, "overlapRepairWorkerFailedCount", 1);
+            forgetCheckedOverlapRepairPair(state, pairVersionKey);
+            requeueTerritoryRepairWorkerCandidate(territories, state, candidate, metrics);
+            continue;
+        }
+
+        const result = response.result;
+
+        recordCaptureApplyMax(metrics, "overlapRepairWorkerComputeMs", result && result.totalMs);
+        recordCaptureApplyMax(metrics, "overlapRepairWorkerIntersectionMs", result && result.intersectionMs);
+        recordCaptureApplyMax(metrics, "overlapRepairWorkerSubtractMs", result && result.subtractMs);
+
+        if (!isTerritoryRepairWorkerCandidateCurrent(territories, candidate)) {
+            addCaptureApplyCount(metrics, "overlapRepairWorkerStaleCount", 1);
+            requeueTerritoryRepairWorkerCandidate(territories, state, candidate, metrics);
+            continue;
+        }
+
+        if (!result || !result.changed) {
+            addCaptureApplyCount(metrics, "overlapRepairWorkerNoChangeCount", 1);
+            continue;
+        }
+
+        const loserTerritory = territories.get(candidate.loserId);
+
+        if (!updateTerritoryPolygon(loserTerritory, result.retainedPolygon)) {
+            addCaptureApplyCount(metrics, "overlapRepairWorkerNoChangeCount", 1);
+            continue;
+        }
+
+        addCaptureApplyCount(metrics, "postCaptureOverlapCount", 1);
+        addCaptureApplyCount(metrics, "postCaptureOverlapRepairCount", 1);
+        addCaptureApplyCount(metrics, "postCaptureOverlapRepairChangedCount", 1);
+        addCaptureApplyCount(metrics, "overlapRepairWorkerChangedCount", 1);
+        recordFirstPostCaptureOverlap(metrics, candidate.overlapDetail, result.overlapArea);
+        registerChangedTerritoryRepair(
+            territories,
+            metrics,
+            changedPlayerIds,
+            candidate.loserId,
+            candidate.ownerId,
+            candidate.changedPlayerId,
+            candidate.otherPlayerId
+        );
+    }
+}
+
+function isTerritoryRepairWorkerCandidateCurrent(territories, candidate) {
+    const firstTerritory = territories.get(candidate.first.id);
+    const secondTerritory = territories.get(candidate.second.id);
+
+    return Boolean(
+        firstTerritory
+        && secondTerritory
+        && (firstTerritory.version || 0) === candidate.first.version
+        && (secondTerritory.version || 0) === candidate.second.version
+    );
+}
+
+function requeueTerritoryRepairWorkerCandidate(territories, state, candidate, metrics) {
+    const pendingItem = state.pending.find(item => (
+        item && item.changedPlayerId === candidate.changedPlayerId
+    ));
+
+    if (pendingItem) {
+        const remainingCandidateIds = pendingItem.candidateIds.slice(pendingItem.cursor);
+
+        if (!remainingCandidateIds.includes(candidate.otherPlayerId)) {
+            pendingItem.candidateIds.splice(
+                pendingItem.cursor,
+                0,
+                candidate.otherPlayerId
+            );
+        }
+        return;
+    }
+
+    enqueueTerritoryOverlapRepair(territories, candidate.changedPlayerId, {
+        metrics,
+        ownerId: candidate.ownerId,
+        priorityCandidateIds: [candidate.changedPlayerId, candidate.otherPlayerId]
+    });
+}
+
+function registerChangedTerritoryRepair(
+    territories,
+    metrics,
+    changedPlayerIds,
+    changedPlayerId,
+    ownerId,
+    firstPlayerId,
+    secondPlayerId
+) {
+    addCaptureApplyCount(metrics, "overlapRepairQueueChangedCount", 1);
+    addCaptureApplyCount(metrics, "changedTerritoryCount", 1);
+    changedPlayerIds.add(changedPlayerId);
+    enqueueTerritoryOverlapRepair(territories, changedPlayerId, {
+        metrics,
+        ownerId,
+        priorityCandidateIds: [firstPlayerId, secondPlayerId]
+    });
 }
 
 function enqueueTerritoryOverlapRepair(territories, changedPlayerId, options = {}) {
@@ -622,6 +1049,8 @@ function getTerritoryOverlapRepairQueueState(territories, create) {
         state = {
             checkedPairOrder: [],
             checkedPairs: new Set(),
+            completedJobs: [],
+            inFlightPairKeys: new Set(),
             pending: [],
             pendingIds: new Set()
         };
@@ -686,6 +1115,12 @@ function rememberCheckedOverlapRepairPair(state, pairVersionKey) {
     return false;
 }
 
+function forgetCheckedOverlapRepairPair(state, pairVersionKey) {
+    if (state && pairVersionKey) {
+        state.checkedPairs.delete(pairVersionKey);
+    }
+}
+
 function createTerritoryPairVersionKey(territories, firstPlayerId, secondPlayerId) {
     const firstTerritory = territories.get(firstPlayerId);
     const secondTerritory = territories.get(secondPlayerId);
@@ -731,17 +1166,51 @@ function getOverlapRepairQueueCheckedPairCacheSize() {
     return Number.isInteger(value) && value > 0 ? value : 512;
 }
 
-function trimTerritoryOverlap(loserTerritory, winnerTerritory, loserPlayer) {
+function isTerritoryRepairWorkerEnabled() {
+    return config.territory.overlapRepairWorkerEnabled !== false;
+}
+
+function getOverlapRepairWorkerMaxInFlight() {
+    const value = Number(config.territory.overlapRepairWorkerMaxInFlight);
+
+    return Number.isInteger(value) && value > 0 ? value : 2;
+}
+
+function trimTerritoryOverlap(loserTerritory, winnerTerritory, loserPlayer, options = {}) {
     if (!loserTerritory || !winnerTerritory) {
-        return false;
+        return createTerritoryTrimResult(false);
     }
 
-    const retainedPolygon = selectRetainedTerritoryPolygon(
-        subtractPolygonComponents(loserTerritory.polygon, winnerTerritory.polygon),
-        loserPlayer
+    const loserPolygon = loserTerritory.polygon;
+    const winnerPolygon = winnerTerritory.polygon;
+    const subtract = subtractTerritoryPolygon(
+        loserTerritory,
+        winnerPolygon,
+        createIdentityOperationPolygon(
+            winnerPolygon,
+            getPolygonPointCount(winnerPolygon)
+        ),
+        loserPlayer,
+        {
+            ...options,
+            subjectOperation: createIdentityOperationPolygon(
+                loserPolygon,
+                getPolygonPointCount(loserPolygon)
+            )
+        }
     );
 
-    return updateTerritoryPolygon(loserTerritory, retainedPolygon);
+    return createTerritoryTrimResult(
+        updateTerritoryPolygon(loserTerritory, subtract.retainedPolygon),
+        subtract.removedArea
+    );
+}
+
+function createTerritoryTrimResult(changed, removedArea = 0) {
+    return {
+        changed,
+        removedArea: Number.isFinite(removedArea) ? Math.max(0, removedArea) : 0
+    };
 }
 
 function selectOverlapWinnerId(firstId, firstTerritory, secondId, secondTerritory, ownerId, changedPlayerIds) {
@@ -815,11 +1284,27 @@ function createCaptureApplyMetrics() {
         operationSimplifyMaxAreaDriftRatio: 0,
         operationSimplifyOutputPointCount: 0,
         operationSimplifySubjectCount: 0,
+        operationSubtractFallbackCount: 0,
+        operationSubtractMaxResidualOverlapArea: 0,
+        operationSubtractValidationCount: 0,
+        operationSubtractValidationRejectedCount: 0,
         overlapRepairQueueBudgetHitCount: 0,
         overlapRepairQueueChangedCount: 0,
         overlapRepairQueuePendingCount: 0,
         overlapRepairQueueProcessedCount: 0,
         overlapRepairQueueQueuedCount: 0,
+        overlapRepairWorkerBackpressureCount: 0,
+        overlapRepairWorkerChangedCount: 0,
+        overlapRepairWorkerCompletedCount: 0,
+        overlapRepairWorkerComputeMs: 0,
+        overlapRepairWorkerDispatchedCount: 0,
+        overlapRepairWorkerFailedCount: 0,
+        overlapRepairWorkerInFlightCount: 0,
+        overlapRepairWorkerIntersectionMs: 0,
+        overlapRepairWorkerLatencyMs: 0,
+        overlapRepairWorkerNoChangeCount: 0,
+        overlapRepairWorkerStaleCount: 0,
+        overlapRepairWorkerSubtractMs: 0,
         ownerChangedCount: 0,
         postCaptureOverlapBoundsRejectedCount: 0,
         postCaptureOverlapCheckCount: 0,
@@ -946,6 +1431,7 @@ function recordSlowestCaptureApplySubtract(metrics, detail) {
         resultPointCount: detail.resultPointCount,
         subjectArea: roundToMilliseconds(detail.subjectArea),
         subjectPointCount: detail.subjectPointCount,
+        usedFallback: Boolean(detail.usedFallback),
         usedSimplified: Boolean(detail.usedSimplified)
     };
 }
@@ -1009,19 +1495,25 @@ function createTerritoryPairKey(firstId, secondId) {
         : `${secondId}\0${firstId}`;
 }
 
-function recordFirstPostCaptureOverlap(metrics, firstId, secondId, firstTerritory, secondTerritory, overlapArea) {
+function createPostCaptureOverlapDetail(firstId, secondId, firstTerritory, secondTerritory) {
+    return {
+        firstId,
+        firstPointCount: getPolygonPointCount(firstTerritory && firstTerritory.polygon),
+        firstVersion: firstTerritory && firstTerritory.version || 0,
+        secondId,
+        secondPointCount: getPolygonPointCount(secondTerritory && secondTerritory.polygon),
+        secondVersion: secondTerritory && secondTerritory.version || 0
+    };
+}
+
+function recordFirstPostCaptureOverlap(metrics, detail, overlapArea) {
     if (!metrics || metrics.postCaptureOverlapFirst) {
         return;
     }
 
     metrics.postCaptureOverlapFirst = {
-        firstId,
-        firstPointCount: getPolygonPointCount(firstTerritory.polygon),
-        firstVersion: firstTerritory.version || 0,
+        ...detail,
         overlapArea: roundToMilliseconds(overlapArea),
-        secondId,
-        secondPointCount: getPolygonPointCount(secondTerritory.polygon),
-        secondVersion: secondTerritory.version || 0
     };
 }
 
@@ -1067,31 +1559,217 @@ function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolyg
         : unionPolygons(currentPolygon, capturedPolygon);
 }
 
-function getTerritoryOperationPolygon(territory, metrics, diagnostics) {
+function subtractTerritoryPolygon(
+    subjectTerritory,
+    clippingPolygon,
+    clippingOperation,
+    subjectPlayer,
+    options = {}
+) {
+    const diagnostics = options.diagnostics;
+    const metrics = options.metrics;
+    const phasePrefix = options.phasePrefix || "territoryOperation";
+    const subjectPolygon = subjectTerritory && subjectTerritory.polygon || [];
+    const subjectArea = getTerritoryArea(subjectTerritory);
+    const subjectOperation = options.subjectOperation || getTerritoryOperationPolygon(
+        subjectTerritory,
+        metrics,
+        diagnostics,
+        options.subjectKind || "subject",
+        `${phasePrefix}SimplifySubject`
+    );
+    const safeClippingOperation = clippingOperation || createIdentityOperationPolygon(
+        clippingPolygon,
+        getPolygonPointCount(clippingPolygon)
+    );
+    const operationSubjectArea = calculatePolygonArea(subjectOperation.polygon);
+    const operationSubtract = measureCaptureApplyOperation(
+        diagnostics,
+        `${phasePrefix}Subtract`,
+        () => subtractPolygonComponents(subjectOperation.polygon, safeClippingOperation.polygon)
+    );
+    let retainedPolygon = selectRetainedTerritoryPolygon(operationSubtract.value, subjectPlayer);
+    let operationResultArea = calculatePolygonArea(retainedPolygon);
+    const attemptedSimplified = subjectOperation.simplified || safeClippingOperation.simplified;
+    const simplifyAreaDrift = getOperationSubtractAreaDrift(
+        subjectOperation,
+        safeClippingOperation
+    );
+    let usedFallback = false;
+    let noOverlap = false;
+
+    if (attemptedSimplified) {
+        addCaptureApplyCount(metrics, "operationSubtractValidationCount", 1);
+        const validation = measureCaptureApplyPhase(
+            diagnostics,
+            `${phasePrefix}SubtractValidation`,
+            () => validateOperationalSubtract(
+                subjectPolygon,
+                clippingPolygon,
+                retainedPolygon,
+                {
+                    diagnostics,
+                    phasePrefix,
+                    simplifyAreaDrift,
+                    subjectArea
+                }
+            )
+        );
+
+        recordCaptureApplyMax(
+            metrics,
+            "operationSubtractMaxResidualOverlapArea",
+            validation.residualOverlapArea
+        );
+
+        if (validation.noOverlap) {
+            retainedPolygon = subjectPolygon;
+            operationResultArea = subjectArea;
+            noOverlap = true;
+        } else if (!validation.valid) {
+            addCaptureApplyCount(metrics, "operationSubtractValidationRejectedCount", 1);
+            addCaptureApplyCount(metrics, "operationSubtractFallbackCount", 1);
+            usedFallback = true;
+            retainedPolygon = measureCaptureApplyPhase(
+                diagnostics,
+                `${phasePrefix}SubtractFallback`,
+                () => selectRetainedTerritoryPolygon(
+                    subtractPolygonComponents(subjectPolygon, clippingPolygon),
+                    subjectPlayer
+                )
+            );
+            operationResultArea = calculatePolygonArea(retainedPolygon);
+        }
+    }
+
+    return {
+        noOverlap,
+        operationResultArea,
+        operationSubjectArea: usedFallback || noOverlap
+            ? subjectArea
+            : operationSubjectArea,
+        removedArea: Math.max(0, subjectArea - operationResultArea),
+        retainedPolygon,
+        usedFallback,
+        usedSimplified: attemptedSimplified && !usedFallback && !noOverlap
+    };
+}
+
+function validateOperationalSubtract(
+    subjectPolygon,
+    clippingPolygon,
+    retainedPolygon,
+    options = {}
+) {
+    const subjectArea = Number.isFinite(options.subjectArea)
+        ? options.subjectArea
+        : calculatePolygonArea(subjectPolygon);
+    const retainedArea = calculatePolygonArea(retainedPolygon);
+    const removedArea = Math.max(0, subjectArea - retainedArea);
+
+    if (retainedArea > subjectArea + territoryChangeAreaEpsilon) {
+        return {
+            noOverlap: false,
+            residualOverlapArea: 0,
+            valid: false
+        };
+    }
+
+    if (retainedArea <= territoryChangeAreaEpsilon) {
+        const exactOverlapArea = measureCaptureApplyPhase(
+            options.diagnostics,
+            `${options.phasePrefix}SubtractAmbiguousIntersection`,
+            () => calculatePolygonIntersectionArea(subjectPolygon, clippingPolygon)
+        );
+
+        return {
+            noOverlap: exactOverlapArea <= territoryChangeAreaEpsilon,
+            residualOverlapArea: 0,
+            valid: subjectArea - exactOverlapArea <= territoryChangeAreaEpsilon
+        };
+    }
+
+    const residualOverlapArea = measureCaptureApplyPhase(
+        options.diagnostics,
+        `${options.phasePrefix}SubtractResidualIntersection`,
+        () => calculatePolygonIntersectionArea(retainedPolygon, clippingPolygon)
+    );
+
+    if (residualOverlapArea > territoryChangeAreaEpsilon) {
+        return {
+            noOverlap: false,
+            residualOverlapArea,
+            valid: false
+        };
+    }
+
+    const ambiguousAreaThreshold = Math.max(
+        territoryChangeAreaEpsilon,
+        Number(options.simplifyAreaDrift) || 0
+    );
+
+    if (removedArea <= ambiguousAreaThreshold) {
+        const exactOverlapArea = measureCaptureApplyPhase(
+            options.diagnostics,
+            `${options.phasePrefix}SubtractAmbiguousIntersection`,
+            () => calculatePolygonIntersectionArea(subjectPolygon, clippingPolygon)
+        );
+
+        if (exactOverlapArea <= territoryChangeAreaEpsilon) {
+            return {
+                noOverlap: true,
+                residualOverlapArea,
+                valid: true
+            };
+        }
+    }
+
+    return {
+        noOverlap: false,
+        residualOverlapArea,
+        valid: true
+    };
+}
+
+function getOperationSubtractAreaDrift(subjectOperation, clippingOperation) {
+    return [subjectOperation, clippingOperation].reduce((sum, operation) => (
+        sum + (Number.isFinite(operation && operation.areaDrift)
+            ? Math.max(0, operation.areaDrift)
+            : 0)
+    ), 0);
+}
+
+function getTerritoryOperationPolygon(
+    territory,
+    metrics,
+    diagnostics,
+    kind = "subject",
+    phaseName = "captureApplySimplifySubject"
+) {
     const polygon = territory && territory.polygon || [];
     const pointCount = getPolygonPointCount(polygon);
-    const options = createOperationSimplifyOptions("subject");
+    const options = createOperationSimplifyOptions(kind);
 
     if (pointCount < options.minInputPointCount) {
         return createIdentityOperationPolygon(polygon, pointCount);
     }
 
     const settingsKey = createOperationSimplifyKey(options);
+    const cache = getTerritoryOperationPolygonCache(territory);
+    const cachedOperation = cache && cache.entries.get(settingsKey);
 
-    if (territory.operationPolygon
-        && territory.operationPolygonVersion === territory.version
-        && territory.operationPolygonSettingsKey === settingsKey) {
+    if (cachedOperation) {
         const cached = {
-            ...territory.operationPolygonStats,
+            ...cachedOperation.stats,
             cacheHit: true,
-            polygon: territory.operationPolygon
+            polygon: cachedOperation.polygon
         };
 
-        recordOperationSimplifyUse(metrics, "subject", cached);
+        recordOperationSimplifyUse(metrics, kind, cached);
         return cached;
     }
 
-    const operation = measureCaptureApplyPhase(diagnostics, "captureApplySimplifySubject", () => (
+    const operation = measureCaptureApplyPhase(diagnostics, phaseName, () => (
         createOperationalPolygon(polygon, options)
     ));
     const result = {
@@ -1100,18 +1778,20 @@ function getTerritoryOperationPolygon(territory, metrics, diagnostics) {
         cacheHit: false
     };
 
-    territory.operationPolygon = result.polygon;
-    territory.operationPolygonVersion = territory.version;
-    territory.operationPolygonSettingsKey = settingsKey;
-    territory.operationPolygonStats = createOperationPolygonStats(result);
-    recordOperationSimplifyUse(metrics, "subject", result);
+    if (cache) {
+        cache.entries.set(settingsKey, {
+            polygon: result.polygon,
+            stats: createOperationPolygonStats(result)
+        });
+    }
+    recordOperationSimplifyUse(metrics, kind, result);
 
     return result;
 }
 
 function getCapturedOperationPolygon(capturedPolygon, metrics, diagnostics) {
     const pointCount = getPolygonPointCount(capturedPolygon);
-    const options = createOperationSimplifyOptions("captured");
+    const options = createOperationSimplifyOptions("clipping");
 
     if (pointCount < options.minInputPointCount) {
         return createIdentityOperationPolygon(capturedPolygon, pointCount);
@@ -1126,23 +1806,43 @@ function getCapturedOperationPolygon(capturedPolygon, metrics, diagnostics) {
         cacheHit: false
     };
 
-    recordOperationSimplifyUse(metrics, "captured", result);
+    recordOperationSimplifyUse(metrics, "clipping", result);
 
     return result;
 }
 
+function getTerritoryOperationPolygonCache(territory) {
+    if (!territory || typeof territory !== "object") {
+        return null;
+    }
+
+    const version = territory.version || 0;
+    let cache = territoryOperationPolygonCaches.get(territory);
+
+    if (!cache || cache.version !== version) {
+        cache = {
+            entries: new Map(),
+            version
+        };
+        territoryOperationPolygonCaches.set(territory, cache);
+    }
+
+    return cache;
+}
+
 function createOperationSimplifyOptions(kind) {
     const territoryConfig = config.territory;
+    const isClipping = kind === "clipping";
 
     return {
         maxAreaDrift: operationSimplifyMaxAreaDrift,
         maxAreaDriftRatio: territoryConfig.operationSimplifyMaxAreaDriftRatio,
-        minInputPointCount: kind === "captured"
+        minInputPointCount: isClipping
             ? territoryConfig.operationSimplifyClippingMinPoints
             : territoryConfig.operationSimplifySubjectMinPoints,
         minPointCount: territoryConfig.operationSimplifyMinPoints,
         minTolerance: territoryConfig.operationSimplifyMinTolerance,
-        targetPointCount: kind === "captured"
+        targetPointCount: isClipping
             ? territoryConfig.operationSimplifyClippingTargetPoints
             : territoryConfig.operationSimplifySubjectTargetPoints,
         tolerance: territoryConfig.operationSimplifyTolerance
@@ -1208,7 +1908,7 @@ function recordOperationSimplifyUse(metrics, kind, operation) {
     recordCaptureApplyMax(metrics, "operationSimplifyMaxAreaDrift", operation.areaDrift);
     recordCaptureApplyMax(metrics, "operationSimplifyMaxAreaDriftRatio", operation.areaDriftRatio);
 
-    if (kind === "captured") {
+    if (kind === "clipping") {
         addCaptureApplyCount(metrics, "operationSimplifyCapturedCount", 1);
     } else {
         addCaptureApplyCount(metrics, "operationSimplifySubjectCount", 1);
@@ -1238,6 +1938,7 @@ function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     delete territory.operationPolygonSettingsKey;
     delete territory.operationPolygonStats;
     delete territory.operationPolygonVersion;
+    territoryOperationPolygonCaches.delete(territory);
 
     return true;
 }
