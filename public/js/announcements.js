@@ -210,15 +210,32 @@ function selectAnnouncement(feed, dismissedIds, now) {
         return null;
     }
 
-    return feed.announcements
-        .filter(announcement => isAnnouncementVisible(announcement, dismissedIds, now))
-        .sort((first, second) => Date.parse(second.publishedAt) - Date.parse(first.publishedAt))[0]
-        || null;
+    let selectedAnnouncement = null;
+    let selectedPublishedAt = Number.NEGATIVE_INFINITY;
+
+    for (const announcement of feed.announcements) {
+        const publishedAt = Date.parse(announcement.publishedAt);
+
+        if (publishedAt <= selectedPublishedAt
+            || !isAnnouncementVisible(announcement, dismissedIds, now, publishedAt)) {
+            continue;
+        }
+
+        selectedAnnouncement = announcement;
+        selectedPublishedAt = publishedAt;
+    }
+
+    return selectedAnnouncement;
 }
 
-function isAnnouncementVisible(announcement, dismissedIds, now) {
+function isAnnouncementVisible(
+    announcement,
+    dismissedIds,
+    now,
+    publishedAt = Date.parse(announcement.publishedAt)
+) {
     if (!announcement.active
-        || Date.parse(announcement.publishedAt) > now
+        || publishedAt > now
         || (announcement.expiresAt && Date.parse(announcement.expiresAt) <= now)) {
         return false;
     }

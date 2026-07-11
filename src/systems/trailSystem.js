@@ -33,6 +33,12 @@ const pathPrimitiveCache = new WeakMap();
 const selfTrailLinePrimitiveCache = new WeakMap();
 const trailSegmentBoundsCache = new WeakMap();
 
+/**
+ * Owns authoritative trail points and their derived line/arc indexes.
+ * Generation changes and tombstones are required whenever a trail lifecycle
+ * ends so delayed snapshots cannot restore stale geometry.
+ */
+
 const trailSides = Object.freeze({
     left: Object.freeze({
         activeKey: "isLeftTrailActive",

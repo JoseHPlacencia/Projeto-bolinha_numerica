@@ -294,7 +294,8 @@ const rooms = Object.freeze({
     roomCodeCharset: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
     roomCodeLength: 6,
     roomCodeMaxGenerationAttempts: 100,
-    privateRoomPasswordMinLength: 4
+    privateRoomPasswordMinLength: 4,
+    privateRoomPasswordMaxLength: 64
 });
 
 const roomOptionMultipliers = Object.freeze([0.5, 0.75, 1, 1.5, 2]);

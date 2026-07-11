@@ -7,37 +7,47 @@ const GAMEPAD_DPAD_BUTTONS = Object.freeze({
     15: "move-right"
 });
 const GAMEPAD_DEAD_ZONE = 0.28;
+const GAMEPAD_IDLE_POLL_INTERVAL_MS = 250;
 
 export function registerGamepadDirectionInput(inputActionAngles, inputState, inputOwnership, options = {}) {
     const pressedGamepadActions = new Set();
     let lockedGamepadSource = null;
 
-    requestAnimationFrame(updateGamepadInput);
+    updateGamepadInput();
 
     function updateGamepadInput() {
         if (!isInputEnabled(options)) {
             releaseLockedGamepadSource();
             lockedGamepadSource = null;
             inputOwnership.release("gamepad");
-            requestAnimationFrame(updateGamepadInput);
+            scheduleNextGamepadUpdate(false);
             return;
         }
 
         const gamepadInput = getGamepadInput();
+
+        if (!gamepadInput.connected) {
+            releaseLockedGamepadSource();
+            lockedGamepadSource = null;
+            inputOwnership.release("gamepad");
+            scheduleNextGamepadUpdate(false);
+            return;
+        }
+
         const nextSource = getLockedGamepadSource(gamepadInput);
 
         if (!nextSource) {
             releaseLockedGamepadSource();
             lockedGamepadSource = null;
             inputOwnership.release("gamepad");
-            requestAnimationFrame(updateGamepadInput);
+            scheduleNextGamepadUpdate(true);
             return;
         }
 
         if (!inputOwnership.claim("gamepad")) {
             releaseLockedGamepadSource();
             lockedGamepadSource = null;
-            requestAnimationFrame(updateGamepadInput);
+            scheduleNextGamepadUpdate(true);
             return;
         }
 
@@ -48,7 +58,7 @@ export function registerGamepadDirectionInput(inputActionAngles, inputState, inp
 
         updateLockedGamepadInput(gamepadInput);
 
-        requestAnimationFrame(updateGamepadInput);
+        scheduleNextGamepadUpdate(true);
     }
 
     function getLockedGamepadSource(gamepadInput) {
@@ -126,7 +136,7 @@ export function registerGamepadDirectionInput(inputActionAngles, inputState, inp
         replacePressedGamepadActions(nextActions);
 
         const angle = getDirectionalActionsAngle(
-            Array.from(pressedGamepadActions),
+            pressedGamepadActions,
             inputActionAngles
         );
 
@@ -144,11 +154,21 @@ export function registerGamepadDirectionInput(inputActionAngles, inputState, inp
             pressedGamepadActions.add(action);
         }
     }
+
+    function scheduleNextGamepadUpdate(active) {
+        if (active) {
+            requestAnimationFrame(updateGamepadInput);
+            return;
+        }
+
+        setTimeout(updateGamepadInput, GAMEPAD_IDLE_POLL_INTERVAL_MS);
+    }
 }
 
 function getGamepadInput() {
     const input = {
         actions: new Set(),
+        connected: false,
         leftStick: null,
         rightStick: null
     };
@@ -162,6 +182,7 @@ function getGamepadInput() {
             continue;
         }
 
+        input.connected = true;
         input.leftStick = input.leftStick || getGamepadStickDirection(gamepad, 0, 1);
         input.rightStick = input.rightStick || getGamepadStickDirection(gamepad, 2, 3);
         addGamepadActions(input.actions, gamepad);

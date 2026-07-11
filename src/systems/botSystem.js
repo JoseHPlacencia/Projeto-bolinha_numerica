@@ -8,11 +8,46 @@ const {
     findClosestPolygonBoundaryContact,
     isPointInPolygon
 } = require("../utils/geometry");
-const { clamp, distanceBetween, lerpAngle } = require("../utils/math");
-const { getHighResolutionTime } = require("../utils/time");
+const { clamp, distanceBetween } = require("../utils/math");
+const {
+    addBotTargetingDiagnosticValue,
+    createBotUpdateDiagnostics,
+    createEmptyBotDiagnostics,
+    getMaxBotDecisionsPerTick,
+    getSlowestBotPhase,
+    measureBotPhase
+} = require("./botDiagnostics");
+const { createBotRouteSafety } = require("./botRouteSafety");
+const {
+    getPointBoundsDistanceSquared,
+    getPointIndex,
+    getTrailPointsCached,
+    getTrailTargetIndexCached,
+    hasAnyTrail,
+    hasAnyTrailCached,
+    isFinitePoint,
+    isValidBounds
+} = require("./botTrailGeometry");
 
 const BOT_ID_PREFIX = "bot:";
 const geometryEpsilon = 1e-7;
+
+const {
+    chooseSelfTrailSafeAngle,
+    clampPointToMap,
+    getAngleDelta,
+    getBotAi,
+    getSelfTrailClearanceRecentPointSkip
+} = createBotRouteSafety({ getReturnTarget });
+
+/**
+ * Bot manager and targeting policy.
+ *
+ * Expensive data shared by every bot belongs in the decision-cycle context;
+ * geometry tied to bots processed in one server tick belongs in the tick
+ * context shared with botRouteSafety. See .ai/docs/ARCHITECTURE.md before moving
+ * work between those scopes.
+ */
 
 function createBotManager({ roomCode, players, territories, numberSystem, botCount = null, botDifficulty = null, runtimeConfig = null }) {
     const state = {
@@ -63,25 +98,38 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
 
         if (state.pendingDecisionIds.length === 0 && nowMs - state.lastDecisionAt >= config.bots.decisionIntervalMs) {
             state.lastDecisionAt = nowMs;
-            state.pendingDecisionIds = [...state.botIds];
+            // Reverse once so pop() preserves insertion order without Array.shift()'s O(B) reindexing.
+            state.pendingDecisionIds = [...state.botIds].reverse();
             state.decisionCycle++;
             diagnostics.cycle = state.decisionCycle;
-            state.decisionContext = measureBotPhase(diagnostics, "correctNumbers", () => createBotDecisionContext(numberSystem));
+            state.decisionContext = measureBotPhase(
+                diagnostics,
+                "correctNumbers",
+                () => createBotDecisionContext(numberSystem, players)
+            );
         }
 
         if (state.pendingDecisionIds.length > 0 && !state.decisionContext) {
-            state.decisionContext = measureBotPhase(diagnostics, "correctNumbers", () => createBotDecisionContext(numberSystem));
+            state.decisionContext = measureBotPhase(
+                diagnostics,
+                "correctNumbers",
+                () => createBotDecisionContext(numberSystem, players)
+            );
         }
 
         diagnostics.pendingBefore = state.pendingDecisionIds.length;
 
         measureBotPhase(diagnostics, "decisions", () => {
-            const tickContext = createBotDecisionTickContext(state.decisionContext, diagnostics, nowMs);
+            const tickContext = createBotDecisionTickContext(
+                state.decisionContext,
+                diagnostics,
+                nowMs
+            );
             const maxDecisions = getMaxBotDecisionsPerTick();
             let processed = 0;
 
             while (processed < maxDecisions && state.pendingDecisionIds.length > 0) {
-                const botId = state.pendingDecisionIds.shift();
+                const botId = state.pendingDecisionIds.pop();
                 const bot = players.get(botId);
 
                 if (!bot) {
@@ -107,336 +155,31 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
     }
 }
 
-function createEmptyBotDiagnostics() {
-    return {
-        cycle: 0,
-        decisionsProcessed: 0,
-        pendingAfter: 0,
-        pendingBefore: 0,
-        phases: {},
-        selfTrailSafety: createEmptySelfTrailSafetyDiagnostics(),
-        targeting: createEmptyBotTargetingDiagnostics(),
-        slowestPhase: null
-    };
-}
+function createBotDecisionContext(numberSystem, players) {
+    const correctNumbers = getCorrectNumbers(numberSystem);
 
-function createBotUpdateDiagnostics(state) {
     return {
-        cycle: state.decisionCycle,
-        decisionsProcessed: 0,
-        pendingAfter: 0,
-        pendingBefore: 0,
-        phases: {},
-        selfTrailSafety: createEmptySelfTrailSafetyDiagnostics(),
-        targeting: createEmptyBotTargetingDiagnostics(),
-        slowestPhase: null
-    };
-}
-
-function createEmptyBotTargetingDiagnostics() {
-    return {
-        balanceCandidateCount: 0,
-        balanceEnemyEvaluations: 0,
-        coordinatedNumberCacheHitCount: 0,
-        coordinatedNumberCacheMissCount: 0,
-        huntCandidateCount: 0,
-        huntEnemyEvaluations: 0,
-        returnTargetCacheHitCount: 0,
-        returnTargetCacheMissCount: 0,
-        trailBlockBoundsRejected: 0,
-        trailBlockChecks: 0,
-        trailIndexCacheHitCount: 0,
-        trailIndexCacheMissCount: 0,
-        trailPointChecks: 0,
-        trailPointDistanceRejected: 0,
-        trailPointTerritoryRejected: 0
-    };
-}
-
-function createEmptySelfTrailSafetyDiagnostics() {
-    return {
-        budgetHitCount: 0,
-        bypassCount: 0,
-        candidateCount: 0,
-        coarseEvaluationCount: 0,
-        earlyExitCount: 0,
-        decisionCount: 0,
-        evaluatedCandidateCount: 0,
-        evaluatedLocalCandidateCount: 0,
-        fullEvaluationCount: 0,
-        filteredTrailPointCount: 0,
-        filteredTrailSegmentCount: 0,
-        localCandidateCount: 0,
-        maxBudgetElapsedMs: 0,
-        pathEvaluationCount: 0,
-        pointBlockBoundsRejected: 0,
-        pointBlockChecks: 0,
-        pointBlockCount: 0,
-        pointDistanceCheckCount: 0,
-        sampleCount: 0,
-        safetyCacheHitCount: 0,
-        safetyCacheMissCount: 0,
-        selectedRefineCandidateCount: 0,
-        segmentBlockBoundsRejected: 0,
-        segmentBlockChecks: 0,
-        segmentBlockCount: 0,
-        segmentBoundsRejected: 0,
-        segmentCrossCheckCount: 0,
-        trailPointCount: 0,
-        trailSegmentCount: 0,
-        unsafeTargetCount: 0
-    };
-}
-
-function createBotDecisionContext(numberSystem) {
-    return {
-        correctNumbers: getCorrectNumbers(numberSystem)
+        correctNumbers,
+        numberContestIndex: createNumberContestIndex(players, correctNumbers)
     };
 }
 
 function createBotDecisionTickContext(decisionContext, diagnostics, nowMs = Date.now()) {
+    const correctNumbers = decisionContext && Array.isArray(decisionContext.correctNumbers)
+        ? decisionContext.correctNumbers
+        : [];
+
     return {
         coordinatedCorrectNumbersCache: new Map(),
-        correctNumbers: decisionContext && Array.isArray(decisionContext.correctNumbers)
-            ? decisionContext.correctNumbers
-            : [],
+        correctNumbers,
         diagnostics,
+        numberContestIndex: decisionContext && decisionContext.numberContestIndex,
         nowMs,
         returnTargetCache: new Map(),
         selfTrailSegmentCache: new Map(),
         trailPointCache: new Map(),
         trailTargetIndexCache: new Map()
     };
-}
-
-function measureBotPhase(diagnostics, name, callback) {
-    const startedAt = getHighResolutionTime();
-
-    try {
-        return callback();
-    } finally {
-        const durationMs = getHighResolutionTime() - startedAt;
-
-        if (diagnostics && diagnostics.phases) {
-            diagnostics.phases[name] = (diagnostics.phases[name] || 0) + durationMs;
-        }
-    }
-}
-
-function getSlowestBotPhase(phases) {
-    let slowestPhase = null;
-
-    for (const [name, durationMs] of Object.entries(phases || {})) {
-        if (!Number.isFinite(durationMs)) {
-            continue;
-        }
-
-        if (!slowestPhase || durationMs > slowestPhase.durationMs) {
-            slowestPhase = {
-                name,
-                durationMs: roundToMilliseconds(durationMs)
-            };
-        }
-    }
-
-    return slowestPhase;
-}
-
-function getMaxBotDecisionsPerTick() {
-    const value = Number(config.bots.maxDecisionsPerTick);
-
-    return Number.isInteger(value) && value > 0 ? value : 2;
-}
-
-function getBotTargetingDiagnostics(context) {
-    const diagnostics = context && context.diagnostics;
-
-    if (!diagnostics) {
-        return null;
-    }
-
-    if (!diagnostics.targeting) {
-        diagnostics.targeting = createEmptyBotTargetingDiagnostics();
-    }
-
-    return diagnostics.targeting;
-}
-
-function addBotTargetingDiagnosticValue(context, name, value) {
-    if (!Number.isFinite(value) || value <= 0) {
-        return;
-    }
-
-    const diagnostics = getBotTargetingDiagnostics(context);
-
-    if (!diagnostics) {
-        return;
-    }
-
-    diagnostics[name] = (diagnostics[name] || 0) + value;
-}
-
-function getBotSelfTrailSafetyBudgetMs() {
-    const value = Number(config.bots.selfTrailSafetyBudgetMs);
-
-    return Number.isFinite(value) && value > 0 ? value : 4;
-}
-
-function getBotSelfTrailSafetyMaxCandidates() {
-    const value = Number(config.bots.selfTrailSafetyMaxCandidates);
-
-    return Number.isInteger(value) && value > 0 ? value : 24;
-}
-
-function getBotSelfTrailSafetyTrapMaxCandidates() {
-    const value = Number(config.bots.selfTrailSafetyTrapMaxCandidates);
-
-    return Number.isInteger(value) && value > 0 ? value : Math.max(36, getBotSelfTrailSafetyMaxCandidates());
-}
-
-function getBotSelfTrailSafetyMaxLocalCandidates() {
-    const value = Number(config.bots.selfTrailSafetyMaxLocalCandidates);
-
-    return Number.isInteger(value) && value > 0 ? value : 8;
-}
-
-function getBotSelfTrailSafetyRefineCandidates(trapMode = false) {
-    const value = Number(
-        trapMode
-            ? config.bots.selfTrailSafetyTrapRefineCandidates
-            : config.bots.selfTrailSafetyRefineCandidates
-    );
-
-    return Number.isInteger(value) && value > 0
-        ? value
-        : trapMode
-            ? 8
-            : 6;
-}
-
-function getBotSelfTrailSafetyCoarseLookaheadRatio() {
-    const value = Number(config.bots.selfTrailSafetyCoarseLookaheadRatio);
-
-    return Number.isFinite(value) && value > 0 && value <= 1 ? value : 0.6;
-}
-
-function getBotSelfTrailSafetyCriticalClearance() {
-    const value = Number(config.bots.selfTrailSafetyCriticalClearanceRatio);
-    const ratio = Number.isFinite(value) && value > 0 ? value : 0.72;
-
-    return config.bots.selfTrailAvoidDistance * ratio;
-}
-
-function getBotSelfTrailSafetyBlockSize() {
-    const value = Number(config.bots.selfTrailSafetyBlockSize);
-
-    return Number.isInteger(value) && value > 0
-        ? value
-        : Math.max(8, Number(config.territory.trailSpatialBlockPrimitiveCount) || 48);
-}
-
-function getBotSelfTrailLookaheadMaxDistance() {
-    const value = Number(config.bots.selfTrailLookaheadMaxDistance);
-
-    return Number.isFinite(value) && value > 0 ? value : config.world.playerSize * 12;
-}
-
-function getBotSelfTrailTrapLookaheadMaxDistance() {
-    const value = Number(config.bots.selfTrailTrapLookaheadMaxDistance);
-
-    return Number.isFinite(value) && value > 0
-        ? value
-        : Math.max(getBotSelfTrailLookaheadMaxDistance(), config.world.playerSize * 20);
-}
-
-function getBotSelfTrailEscapeMemoryMs() {
-    const value = Number(config.bots.selfTrailEscapeMemoryMs);
-
-    return Number.isFinite(value) && value > 0 ? value : 650;
-}
-
-function getSelfTrailSafetyDiagnostics(context) {
-    const diagnostics = context && context.diagnostics;
-
-    if (!diagnostics) {
-        return null;
-    }
-
-    if (!diagnostics.selfTrailSafety) {
-        diagnostics.selfTrailSafety = createEmptySelfTrailSafetyDiagnostics();
-    }
-
-    return diagnostics.selfTrailSafety;
-}
-
-function addSelfTrailSafetyDiagnosticValue(diagnostics, name, value) {
-    if (!diagnostics || !Number.isFinite(value) || value <= 0) {
-        return;
-    }
-
-    diagnostics[name] = (diagnostics[name] || 0) + value;
-}
-
-function recordSelfTrailSafetyBudgetElapsed(diagnostics, elapsedMs) {
-    if (!diagnostics || !Number.isFinite(elapsedMs)) {
-        return;
-    }
-
-    diagnostics.maxBudgetElapsedMs = Math.max(
-        diagnostics.maxBudgetElapsedMs || 0,
-        roundToMilliseconds(elapsedMs)
-    );
-}
-
-function createSelfTrailSafetyBudget(diagnostics) {
-    return {
-        budgetHit: false,
-        budgetMs: getBotSelfTrailSafetyBudgetMs(),
-        diagnostics,
-        startedAt: getHighResolutionTime()
-    };
-}
-
-function hasSelfTrailSafetyBudgetRemaining(budget) {
-    if (!budget || !Number.isFinite(budget.budgetMs) || budget.budgetMs <= 0) {
-        return true;
-    }
-
-    const elapsedMs = getHighResolutionTime() - budget.startedAt;
-    recordSelfTrailSafetyBudgetElapsed(budget.diagnostics, elapsedMs);
-
-    if (elapsedMs <= budget.budgetMs) {
-        return true;
-    }
-
-    markSelfTrailSafetyBudgetHit(budget);
-    return false;
-}
-
-function finishSelfTrailSafetyBudget(budget) {
-    if (!budget || !Number.isFinite(budget.startedAt)) {
-        return;
-    }
-
-    const elapsedMs = getHighResolutionTime() - budget.startedAt;
-    recordSelfTrailSafetyBudgetElapsed(budget.diagnostics, elapsedMs);
-
-    if (Number.isFinite(budget.budgetMs) && elapsedMs > budget.budgetMs) {
-        markSelfTrailSafetyBudgetHit(budget);
-    }
-}
-
-function markSelfTrailSafetyBudgetHit(budget) {
-    if (!budget || budget.budgetHit) {
-        return;
-    }
-
-    budget.budgetHit = true;
-    addSelfTrailSafetyDiagnosticValue(budget.diagnostics, "budgetHitCount", 1);
-}
-
-function roundToMilliseconds(value) {
-    return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null;
 }
 
 function createBot(roomCode, players, territories, botNumber, botDifficulty = null, runtimeConfig = null) {
@@ -992,10 +735,6 @@ function getBalanceCaptureMaxEnemyCandidates() {
 
 function getHuntMaxEnemyCandidates() {
     return getPositiveIntegerOption(config.bots.huntMaxEnemyCandidates, 8);
-}
-
-function getBotTrailTargetBlockSize() {
-    return getPositiveIntegerOption(config.bots.trailTargetBlockSize, 32);
 }
 
 function getPositiveIntegerOption(value, fallback) {
@@ -1679,27 +1418,37 @@ function getCoordinatedCorrectNumbersForBot(bot, players, correctNumbers, contex
         }
 
         addBotTargetingDiagnosticValue(context, "coordinatedNumberCacheMissCount", 1);
-        const coordinatedNumbers = getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers);
+        const coordinatedNumbers = getUncachedCoordinatedCorrectNumbersForBot(
+            bot,
+            players,
+            correctNumbers,
+            context
+        );
 
         context.coordinatedCorrectNumbersCache.set(cacheKey, coordinatedNumbers);
         return coordinatedNumbers;
     }
 
-    return getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers);
+    return getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers, context);
 }
 
-function getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers) {
+function getUncachedCoordinatedCorrectNumbersForBot(bot, players, correctNumbers, context = null) {
     return correctNumbers.filter(number => (
-        !isNumberClearlyClaimedByCloserBot(bot, players, number)
+        !isNumberClearlyClaimedByCloserBot(bot, players, number, context && context.numberContestIndex)
     ));
 }
 
-function isNumberClearlyClaimedByCloserBot(bot, players, number) {
+function isNumberClearlyClaimedByCloserBot(bot, players, number, contestIndex = null) {
     if (!isFinitePoint(bot) || !isFinitePoint(number)) {
         return false;
     }
 
     const botDistance = distanceBetween(bot.x, bot.y, number.x, number.y);
+    const indexedCompetitor = getIndexedNumberCompetitor(contestIndex, number, bot.id);
+
+    if (indexedCompetitor) {
+        return isClearlyCloserToNumber(indexedCompetitor.distance, botDistance);
+    }
 
     for (const player of players.values()) {
         if (!player
@@ -1717,6 +1466,70 @@ function isNumberClearlyClaimedByCloserBot(bot, players, number) {
     }
 
     return false;
+}
+
+function createNumberContestIndex(players, correctNumbers) {
+    const index = new Map();
+
+    if (!players || typeof players.values !== "function" || !Array.isArray(correctNumbers)) {
+        return index;
+    }
+
+    const contestants = [...players.values()].filter(player => (
+        isNumberContestantBot(player) && isFinitePoint(player)
+    ));
+
+    for (const number of correctNumbers) {
+        if (!isFinitePoint(number)) {
+            continue;
+        }
+
+        let closestDistance = Infinity;
+        let closestPlayerId = null;
+        let secondClosestDistance = Infinity;
+        let secondClosestPlayerId = null;
+
+        for (const contestant of contestants) {
+            const distance = distanceBetween(contestant.x, contestant.y, number.x, number.y);
+
+            if (distance < closestDistance) {
+                secondClosestDistance = closestDistance;
+                secondClosestPlayerId = closestPlayerId;
+                closestDistance = distance;
+                closestPlayerId = contestant.id;
+            } else if (distance < secondClosestDistance) {
+                secondClosestDistance = distance;
+                secondClosestPlayerId = contestant.id;
+            }
+        }
+
+        index.set(number, {
+            closest: createNumberContestant(closestPlayerId, closestDistance),
+            secondClosest: createNumberContestant(secondClosestPlayerId, secondClosestDistance)
+        });
+    }
+
+    return index;
+}
+
+function createNumberContestant(playerId, distance) {
+    return playerId === null ? null : { distance, playerId };
+}
+
+function getIndexedNumberCompetitor(contestIndex, number, botId) {
+    if (!(contestIndex instanceof Map)) {
+        return null;
+    }
+
+    const entry = contestIndex.get(number);
+
+    if (!entry || !entry.closest) {
+        return null;
+    }
+
+    return entry.closest.playerId === botId
+        ? entry.secondClosest
+        : entry.closest;
 }
 
 function isNumberContestantBot(player) {
@@ -1879,70 +1692,6 @@ function isTrailPointMarkableByBot(territoryPolygon, point) {
         && !isPointInPolygon(territoryPolygon, point.x, point.y);
 }
 
-function getNearestDistanceSquared(origin, pointIndexOrPoints, diagnostics = null) {
-    const pointIndex = getPointIndex(pointIndexOrPoints);
-    const sourcePoints = pointIndex
-        ? pointIndex.points
-        : pointIndexOrPoints || [];
-    let nearestDistanceSquared = Infinity;
-
-    if (pointIndex && pointIndex.blocks.length > 0) {
-        const orderedBlocks = pointIndex.blocks.map(block => ({
-            block,
-            distanceSquared: getPointBoundsDistanceSquared(origin, block.bounds)
-        })).sort((first, second) => first.distanceSquared - second.distanceSquared);
-        let blockBoundsRejected = 0;
-        let checkedPointCount = 0;
-
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockChecks", orderedBlocks.length);
-
-        for (const item of orderedBlocks) {
-            if (item.distanceSquared > nearestDistanceSquared + geometryEpsilon) {
-                blockBoundsRejected++;
-                continue;
-            }
-
-            for (const point of item.block.points) {
-                checkedPointCount++;
-                const deltaX = origin.x - point.x;
-                const deltaY = origin.y - point.y;
-                const distanceSquared = deltaX * deltaX + deltaY * deltaY;
-
-                if (distanceSquared < nearestDistanceSquared) {
-                    nearestDistanceSquared = distanceSquared;
-                }
-            }
-        }
-
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockBoundsRejected", blockBoundsRejected);
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointDistanceCheckCount", checkedPointCount);
-
-        return nearestDistanceSquared;
-    }
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "pointDistanceCheckCount", sourcePoints.length);
-
-    for (const point of sourcePoints) {
-        const deltaX = origin.x - point.x;
-        const deltaY = origin.y - point.y;
-        const distanceSquared = deltaX * deltaX + deltaY * deltaY;
-
-        if (distanceSquared < nearestDistanceSquared) {
-            nearestDistanceSquared = distanceSquared;
-        }
-    }
-
-    return nearestDistanceSquared;
-}
-
-function getPointIndex(value) {
-    return value
-        && Array.isArray(value.points)
-        && Array.isArray(value.blocks)
-        ? value
-        : null;
-}
-
 function findNearestTrailPointByQuery(origin, pointIndexOrPoints, options = {}, context = null) {
     const pointIndex = getPointIndex(pointIndexOrPoints);
     const sourcePoints = pointIndex
@@ -2060,17 +1809,6 @@ function findNearestTrailPointByQuery(origin, pointIndexOrPoints, options = {}, 
     return nearest;
 }
 
-function getAngleDelta(fromAngle, toAngle) {
-    return Math.atan2(
-        Math.sin(toAngle - fromAngle),
-        Math.cos(toAngle - fromAngle)
-    );
-}
-
-function normalizeAngle(angle) {
-    return Math.atan2(Math.sin(angle), Math.cos(angle));
-}
-
 function estimateTravelTime(player, target) {
     return distanceBetween(player.x, player.y, target.x, target.y) / getPlayerMovementSpeed(player);
 }
@@ -2139,1431 +1877,6 @@ function applyDecisionNoise(angle, options = {}) {
     const noiseScale = options.avoidingSelfTrail ? 0.25 : 1;
 
     return angle + (Math.random() * 2 - 1) * config.bots.angleNoiseRadians * noiseScale;
-}
-
-function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null) {
-    const diagnostics = getSelfTrailSafetyDiagnostics(context);
-    const safetyCache = createSelfTrailSafetyCache();
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "decisionCount", 1);
-
-    const trailPoints = getTrailPointsCached(context, bot, { skipRecent: getSelfTrailClearanceRecentPointSkip() });
-    const trailSegments = getSelfTrailSegmentsCached(context, bot, { skipRecent: getSelfTrailCollisionRecentPointSkip() });
-
-    if ((trailPoints.length === 0 && trailSegments.length === 0) || !Number.isFinite(targetAngle)) {
-        clearSelfTrailEscapeMemory(bot);
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "bypassCount", 1);
-        return {
-            angle: targetAngle,
-            avoidingSelfTrail: false
-        };
-    }
-
-    const trailGeometry = createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, options, diagnostics);
-    const nearestSelfTrailDistanceSquared = getNearestDistanceSquared(bot, trailGeometry.pointIndex, diagnostics);
-    const bypassDistance = getSelfTrailLookaheadDistance(options) + config.bots.selfTrailAvoidDistance;
-
-    if (
-        trailGeometry.points.length === 0
-        && trailGeometry.segments.length === 0
-    ) {
-        clearSelfTrailEscapeMemory(bot);
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "bypassCount", 1);
-        return {
-            angle: targetAngle,
-            avoidingSelfTrail: false
-        };
-    }
-
-    if (
-        nearestSelfTrailDistanceSquared > bypassDistance * bypassDistance
-        && trailGeometry.segments.length === 0
-    ) {
-        clearSelfTrailEscapeMemory(bot);
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "bypassCount", 1);
-        return {
-            angle: targetAngle,
-            avoidingSelfTrail: false
-        };
-    }
-
-    const budget = createSelfTrailSafetyBudget(diagnostics);
-    const targetSafety = getCachedSelfTrailPathSafety(
-        bot,
-        targetAngle,
-        trailGeometry,
-        options,
-        budget,
-        diagnostics,
-        safetyCache
-    );
-
-    if (!isSelfTrailPathUnsafe(targetSafety)) {
-        clearSelfTrailEscapeMemory(bot);
-        finishSelfTrailSafetyBudget(budget);
-        return {
-            angle: targetAngle,
-            avoidingSelfTrail: false
-        };
-    }
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "unsafeTargetCount", 1);
-
-    const riskOptions = createSelfTrailRiskOptions(options, targetSafety, nearestSelfTrailDistanceSquared);
-    const activeTrailGeometry = riskOptions.trapMode
-        ? createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, riskOptions, diagnostics)
-        : trailGeometry;
-    const activeTargetSafety = riskOptions.trapMode
-        ? getCachedSelfTrailPathSafety(
-            bot,
-            targetAngle,
-            activeTrailGeometry,
-            riskOptions,
-            budget,
-            diagnostics,
-            safetyCache
-        )
-        : targetSafety;
-    const rememberedCandidate = chooseRememberedSelfTrailEscapeCandidate(
-        bot,
-        targetAngle,
-        activeTrailGeometry,
-        riskOptions,
-        context,
-        budget,
-        diagnostics,
-        safetyCache
-    );
-
-    if (rememberedCandidate) {
-        finishSelfTrailSafetyBudget(budget);
-        return {
-            angle: rememberedCandidate.angle,
-            avoidingSelfTrail: true,
-            suppressNoise: true
-        };
-    }
-
-    const candidates = limitSelfTrailAvoidanceCandidates(
-        createSelfTrailAvoidanceCandidates(bot, targetAngle, riskOptions, activeTrailGeometry),
-        riskOptions
-    );
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "candidateCount", candidates.length);
-
-    const candidateEvaluationOptions = createCoarseSelfTrailSafetyOptions(riskOptions);
-    const coarseCandidateEvaluations = evaluateCoarseSelfTrailCandidates(
-        bot,
-        targetAngle,
-        activeTrailGeometry,
-        candidates,
-        candidateEvaluationOptions,
-        budget,
-        diagnostics,
-        safetyCache
-    );
-    const refinementCandidates = selectSelfTrailRefinementCandidates(coarseCandidateEvaluations, riskOptions);
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "selectedRefineCandidateCount", refinementCandidates.length);
-
-    let bestAnyCandidate = {
-        angle: targetAngle,
-        safety: activeTargetSafety,
-        score: scoreSelfTrailCandidate(targetAngle, targetAngle, activeTargetSafety, riskOptions)
-    };
-    const canKeepTargetCandidate = !isSelfTrailPathUnsafe(targetSafety)
-        && !isSelfTrailPathUnsafe(activeTargetSafety);
-    let bestSafeCandidate = canKeepTargetCandidate
-        ? bestAnyCandidate
-        : null;
-    let bestNonCrossingCandidate = canKeepTargetCandidate
-        && !activeTargetSafety.crossesTrail
-        && !activeTargetSafety.budgetHit
-        ? bestAnyCandidate
-        : null;
-
-    for (const coarseCandidate of refinementCandidates) {
-        if (!hasSelfTrailSafetyBudgetRemaining(budget)) {
-            break;
-        }
-
-        if (Math.abs(getAngleDelta(coarseCandidate.angle, targetAngle)) <= 0.001) {
-            continue;
-        }
-
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "evaluatedCandidateCount", 1);
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "fullEvaluationCount", 1);
-
-        const safety = getCachedSelfTrailPathSafety(
-            bot,
-            coarseCandidate.angle,
-            activeTrailGeometry,
-            riskOptions,
-            budget,
-            diagnostics,
-            safetyCache
-        );
-        const score = scoreSelfTrailCandidate(coarseCandidate.angle, targetAngle, safety, riskOptions);
-
-        if (score > bestAnyCandidate.score) {
-            bestAnyCandidate = {
-                angle: coarseCandidate.angle,
-                safety,
-                score
-            };
-        }
-
-        if (!isSelfTrailPathUnsafe(safety) && (!bestSafeCandidate || score > bestSafeCandidate.score)) {
-            bestSafeCandidate = {
-                angle: coarseCandidate.angle,
-                safety,
-                score
-            };
-        }
-
-        if (!safety.crossesTrail && !safety.budgetHit && (!bestNonCrossingCandidate || score > bestNonCrossingCandidate.score)) {
-            bestNonCrossingCandidate = {
-                angle: coarseCandidate.angle,
-                safety,
-                score
-            };
-        }
-    }
-
-    const bestCandidate = bestSafeCandidate
-        || (hasSelfTrailSafetyBudgetRemaining(budget)
-            ? chooseLocalSelfTrailEscapeCandidate(
-                bot,
-                targetAngle,
-                activeTrailGeometry,
-                candidates,
-                riskOptions,
-                budget,
-                diagnostics,
-                safetyCache
-            )
-            : null)
-        || bestNonCrossingCandidate
-        || chooseCoarseSelfTrailFallbackCandidate(coarseCandidateEvaluations, targetAngle)
-        || bestAnyCandidate;
-
-    rememberSelfTrailEscapeCandidate(bot, bestCandidate, activeTargetSafety, riskOptions, context);
-    finishSelfTrailSafetyBudget(budget);
-
-    return {
-        angle: bestCandidate.angle,
-        avoidingSelfTrail: true,
-        suppressNoise: shouldSuppressSelfTrailEscapeNoise(activeTargetSafety, bestCandidate)
-    };
-}
-
-function createSelfTrailRiskOptions(options = {}, targetSafety = {}, nearestSelfTrailDistanceSquared = Infinity) {
-    const nearestDistance = Math.sqrt(nearestSelfTrailDistanceSquared);
-    const trapMode = Boolean(
-        targetSafety.crossesTrail
-        || targetSafety.budgetHit
-        || targetSafety.clearance < config.bots.selfTrailAvoidDistance * 1.25
-        || nearestDistance < config.bots.selfTrailAvoidDistance * 1.4
-    );
-
-    if (!trapMode) {
-        return options;
-    }
-
-    return {
-        ...options,
-        includeReturnRoute: true,
-        selfTrailLookaheadDistance: getBotSelfTrailTrapLookaheadMaxDistance(),
-        trapMode: true
-    };
-}
-
-function chooseRememberedSelfTrailEscapeCandidate(
-    bot,
-    targetAngle,
-    trailGeometry,
-    options = {},
-    context = null,
-    budget = null,
-    diagnostics = null,
-    safetyCache = null
-) {
-    const ai = getBotAi(bot);
-    const nowMs = getSelfTrailDecisionNowMs(context);
-
-    if (!Number.isFinite(ai.selfTrailEscapeAngle)
-        || !Number.isFinite(ai.selfTrailEscapeUntilMs)
-        || ai.selfTrailEscapeUntilMs <= nowMs) {
-        return null;
-    }
-
-    const safety = getCachedSelfTrailPathSafety(
-        bot,
-        ai.selfTrailEscapeAngle,
-        trailGeometry,
-        options,
-        budget,
-        diagnostics,
-        safetyCache
-    );
-
-    if (isSelfTrailPathUnsafe(safety)) {
-        clearSelfTrailEscapeMemory(bot);
-        return null;
-    }
-
-    return {
-        angle: ai.selfTrailEscapeAngle,
-        safety,
-        score: scoreSelfTrailCandidate(ai.selfTrailEscapeAngle, targetAngle, safety, options)
-    };
-}
-
-function createSelfTrailSafetyCache() {
-    return new Map();
-}
-
-function getCachedSelfTrailPathSafety(
-    bot,
-    targetAngle,
-    trailGeometry,
-    options = {},
-    budget = null,
-    diagnostics = null,
-    safetyCache = null
-) {
-    const cacheKey = safetyCache && createSelfTrailSafetyCacheKey(targetAngle, trailGeometry, options);
-
-    if (cacheKey && safetyCache.has(cacheKey)) {
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "safetyCacheHitCount", 1);
-        return safetyCache.get(cacheKey);
-    }
-
-    if (cacheKey) {
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "safetyCacheMissCount", 1);
-    }
-
-    const safety = getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options, budget, diagnostics);
-
-    if (cacheKey) {
-        safetyCache.set(cacheKey, safety);
-    }
-
-    return safety;
-}
-
-function createSelfTrailSafetyCacheKey(targetAngle, trailGeometry, options = {}) {
-    return [
-        Math.round(normalizeAngle(targetAngle) * 1000),
-        options.selfTrailSafetyMode || "full",
-        options.centerOnly ? "center" : "wide",
-        options.stopOnUnsafe ? "stop" : "scan",
-        Math.round(getSelfTrailLookaheadDistance(options)),
-        Math.round((trailGeometry && trailGeometry.lookaheadDistance || 0) * 10),
-        options.trapMode ? 1 : 0
-    ].join(":");
-}
-
-function createCoarseSelfTrailSafetyOptions(options = {}) {
-    const lookaheadDistance = getSelfTrailLookaheadDistance(options);
-
-    return {
-        ...options,
-        centerOnly: true,
-        selfTrailLookaheadDistance: Math.max(
-            config.world.playerSize * 3,
-            lookaheadDistance * getBotSelfTrailSafetyCoarseLookaheadRatio()
-        ),
-        selfTrailSafetyMode: "coarse",
-        stopOnUnsafe: true
-    };
-}
-
-function evaluateCoarseSelfTrailCandidates(
-    bot,
-    targetAngle,
-    trailGeometry,
-    candidates,
-    options = {},
-    budget = null,
-    diagnostics = null,
-    safetyCache = null
-) {
-    const evaluations = [];
-
-    for (const angle of candidates || []) {
-        if (!hasSelfTrailSafetyBudgetRemaining(budget)) {
-            break;
-        }
-
-        if (Math.abs(getAngleDelta(angle, targetAngle)) <= 0.001) {
-            continue;
-        }
-
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "coarseEvaluationCount", 1);
-
-        const safety = getCachedSelfTrailPathSafety(
-            bot,
-            angle,
-            trailGeometry,
-            options,
-            budget,
-            diagnostics,
-            safetyCache
-        );
-
-        evaluations.push({
-            angle,
-            safety,
-            score: scoreSelfTrailCandidate(angle, targetAngle, safety, options)
-        });
-    }
-
-    return evaluations;
-}
-
-function selectSelfTrailRefinementCandidates(evaluations, options = {}) {
-    const maxCount = getBotSelfTrailSafetyRefineCandidates(Boolean(options.trapMode));
-    const sorted = [...(evaluations || [])].sort((first, second) => second.score - first.score);
-    const selected = [];
-    const seen = new Set();
-
-    for (const evaluation of sorted) {
-        if (selected.length >= maxCount) {
-            break;
-        }
-
-        if (!evaluation || !Number.isFinite(evaluation.angle)) {
-            continue;
-        }
-
-        const key = Math.round(evaluation.angle * 1000);
-
-        if (seen.has(key)) {
-            continue;
-        }
-
-        seen.add(key);
-        selected.push(evaluation);
-    }
-
-    return selected;
-}
-
-function chooseCoarseSelfTrailFallbackCandidate(evaluations, targetAngle) {
-    const candidates = (evaluations || [])
-        .filter(evaluation => (
-            evaluation
-            && Number.isFinite(evaluation.angle)
-            && Math.abs(getAngleDelta(evaluation.angle, targetAngle)) > 0.001
-        ))
-        .sort((first, second) => second.score - first.score);
-
-    return candidates[0] || null;
-}
-
-function rememberSelfTrailEscapeCandidate(bot, candidate, targetSafety = {}, options = {}, context = null) {
-    if (!candidate || !Number.isFinite(candidate.angle)) {
-        clearSelfTrailEscapeMemory(bot);
-        return;
-    }
-
-    if (!options.trapMode && !isSelfTrailCriticalSafety(targetSafety)) {
-        clearSelfTrailEscapeMemory(bot);
-        return;
-    }
-
-    const ai = getBotAi(bot);
-    const nowMs = getSelfTrailDecisionNowMs(context);
-
-    ai.selfTrailEscapeAngle = candidate.angle;
-    ai.selfTrailEscapeUntilMs = nowMs + getBotSelfTrailEscapeMemoryMs();
-}
-
-function clearSelfTrailEscapeMemory(bot) {
-    if (!bot || !bot.botAi) {
-        return;
-    }
-
-    bot.botAi.selfTrailEscapeAngle = null;
-    bot.botAi.selfTrailEscapeUntilMs = 0;
-}
-
-function getSelfTrailDecisionNowMs(context = null) {
-    return Number.isFinite(context && context.nowMs) ? context.nowMs : Date.now();
-}
-
-function shouldSuppressSelfTrailEscapeNoise(targetSafety = {}, candidate = null) {
-    return isSelfTrailCriticalSafety(targetSafety)
-        || !candidate
-        || !candidate.safety
-        || isSelfTrailPathUnsafe(candidate.safety, 0.8);
-}
-
-function isSelfTrailCriticalSafety(safety = {}) {
-    return Boolean(
-        safety.budgetHit
-        || safety.crossesTrail
-        || safety.clearance < config.bots.selfTrailAvoidDistance * 0.85
-    );
-}
-
-function scoreSelfTrailCandidate(angle, targetAngle, safety, options = {}) {
-    const targetPenaltyScale = options.allowReverse ? 0.35 : 0.85;
-    const targetPenalty = Math.abs(getAngleDelta(angle, targetAngle))
-        * config.bots.selfTrailAvoidDistance
-        * targetPenaltyScale;
-    const crossPenalty = safety.crossesTrail ? config.world.mapRadius * 10 : 0;
-    const budgetPenalty = safety.budgetHit ? config.bots.selfTrailAvoidDistance * 2 : 0;
-    const clearanceScore = Number.isFinite(safety.clearance)
-        ? safety.clearance * 4
-        : config.bots.selfTrailAvoidDistance * 4;
-
-    return clearanceScore - targetPenalty - crossPenalty - budgetPenalty;
-}
-
-function createSelfTrailAvoidanceCandidates(bot, targetAngle, options = {}, trailGeometry = null) {
-    const returnTarget = getReturnTarget(bot, options.territories);
-    const returnAngle = Math.atan2(returnTarget.y - bot.y, returnTarget.x - bot.x);
-    const baseAngles = options.allowReverse || options.includeReturnRoute
-        ? [targetAngle, bot.angle, returnAngle].filter(Number.isFinite)
-        : [targetAngle, bot.angle].filter(Number.isFinite);
-    const offsets = options.allowReverse
-        ? [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.45, -1.45, 1.9, -1.9, 2.45, -2.45, Math.PI]
-        : [0, 0.3, -0.3, 0.6, -0.6, 0.95, -0.95, 1.3, -1.3, 1.75, -1.75, 2.35, -2.35, Math.PI];
-    const candidates = [];
-    const seen = new Set();
-
-    for (const baseAngle of baseAngles) {
-        for (const offset of offsets) {
-            addSelfTrailCandidate(candidates, seen, baseAngle + offset);
-        }
-    }
-
-    const fullCircleSteps = options.allowReverse ? 32 : 24;
-
-    for (let index = 0; index < fullCircleSteps; index++) {
-        addSelfTrailCandidate(candidates, seen, targetAngle + (Math.PI * 2 * index) / fullCircleSteps);
-    }
-
-    if (options.trapMode) {
-        addSelfTrailTrapEscapeCandidates(candidates, seen, bot, targetAngle, trailGeometry);
-    }
-
-    return candidates;
-}
-
-function addSelfTrailTrapEscapeCandidates(candidates, seen, bot, targetAngle, trailGeometry = null) {
-    const feature = getNearestSelfTrailFeature(bot, trailGeometry);
-
-    addSelfTrailCandidate(candidates, seen, bot.angle + Math.PI);
-    addSelfTrailCandidate(candidates, seen, bot.angle + Math.PI / 2);
-    addSelfTrailCandidate(candidates, seen, bot.angle - Math.PI / 2);
-
-    if (!feature) {
-        return;
-    }
-
-    if (Number.isFinite(feature.awayAngle)) {
-        addSelfTrailCandidate(candidates, seen, feature.awayAngle);
-        addSelfTrailCandidate(candidates, seen, feature.awayAngle + 0.45);
-        addSelfTrailCandidate(candidates, seen, feature.awayAngle - 0.45);
-        addSelfTrailCandidate(candidates, seen, feature.awayAngle + Math.PI / 2);
-        addSelfTrailCandidate(candidates, seen, feature.awayAngle - Math.PI / 2);
-    }
-
-    if (Number.isFinite(feature.segmentAngle)) {
-        addSelfTrailCandidate(candidates, seen, feature.segmentAngle);
-        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + Math.PI);
-        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + 0.55);
-        addSelfTrailCandidate(candidates, seen, feature.segmentAngle - 0.55);
-        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + Math.PI + 0.55);
-        addSelfTrailCandidate(candidates, seen, feature.segmentAngle + Math.PI - 0.55);
-    }
-
-    addSelfTrailCandidate(candidates, seen, targetAngle + Math.PI);
-}
-
-function getNearestSelfTrailFeature(bot, trailGeometry = null) {
-    if (!bot || !trailGeometry) {
-        return null;
-    }
-
-    let bestFeature = null;
-
-    for (const point of trailGeometry.points || []) {
-        const distanceSquared = getDistanceSquared(bot, point);
-
-        if (!bestFeature || distanceSquared < bestFeature.distanceSquared) {
-            bestFeature = createSelfTrailFeature(bot, point, distanceSquared, null);
-        }
-    }
-
-    for (const segment of trailGeometry.segments || []) {
-        const closestPoint = getClosestPointOnSegment(bot, segment.start, segment.end);
-        const distanceSquared = getDistanceSquared(bot, closestPoint);
-        const segmentAngle = Math.atan2(segment.end.y - segment.start.y, segment.end.x - segment.start.x);
-
-        if (!bestFeature || distanceSquared < bestFeature.distanceSquared) {
-            bestFeature = createSelfTrailFeature(bot, closestPoint, distanceSquared, segmentAngle);
-        }
-    }
-
-    return bestFeature;
-}
-
-function createSelfTrailFeature(bot, point, distanceSquared, segmentAngle) {
-    return {
-        awayAngle: Math.atan2(bot.y - point.y, bot.x - point.x),
-        distanceSquared,
-        point,
-        segmentAngle
-    };
-}
-
-function getClosestPointOnSegment(point, start, end) {
-    const segmentX = end.x - start.x;
-    const segmentY = end.y - start.y;
-    const lengthSquared = segmentX * segmentX + segmentY * segmentY;
-
-    if (lengthSquared <= geometryEpsilon) {
-        return start;
-    }
-
-    const t = clamp(
-        ((point.x - start.x) * segmentX + (point.y - start.y) * segmentY) / lengthSquared,
-        0,
-        1
-    );
-
-    return {
-        x: start.x + segmentX * t,
-        y: start.y + segmentY * t
-    };
-}
-
-function getDistanceSquared(first, second) {
-    const deltaX = first.x - second.x;
-    const deltaY = first.y - second.y;
-
-    return deltaX * deltaX + deltaY * deltaY;
-}
-
-function limitSelfTrailAvoidanceCandidates(candidates, options = {}) {
-    const maxCandidates = options.trapMode
-        ? getBotSelfTrailSafetyTrapMaxCandidates()
-        : getBotSelfTrailSafetyMaxCandidates();
-
-    if (!Array.isArray(candidates) || candidates.length <= maxCandidates) {
-        return candidates || [];
-    }
-
-    return candidates.slice(0, maxCandidates);
-}
-
-function chooseLocalSelfTrailEscapeCandidate(
-    bot,
-    targetAngle,
-    trailGeometry,
-    candidates,
-    options = {},
-    budget = null,
-    diagnostics = null,
-    safetyCache = null
-) {
-    const localOptions = {
-        ...options,
-        targetDistance: Math.max(config.world.playerSize * 4, config.bots.selfTrailAvoidDistance)
-    };
-    const localCandidates = (candidates || []).slice(0, getBotSelfTrailSafetyMaxLocalCandidates());
-    let bestCandidate = null;
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "localCandidateCount", localCandidates.length);
-
-    for (const angle of localCandidates) {
-        if (!hasSelfTrailSafetyBudgetRemaining(budget)) {
-            break;
-        }
-
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "evaluatedLocalCandidateCount", 1);
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "fullEvaluationCount", 1);
-
-        const safety = getCachedSelfTrailPathSafety(
-            bot,
-            angle,
-            trailGeometry,
-            localOptions,
-            budget,
-            diagnostics,
-            safetyCache
-        );
-
-        if (isSelfTrailPathUnsafe(safety)) {
-            continue;
-        }
-
-        const score = scoreSelfTrailCandidate(angle, targetAngle, safety, options);
-
-        if (!bestCandidate || score > bestCandidate.score) {
-            bestCandidate = {
-                angle,
-                safety,
-                score
-            };
-        }
-    }
-
-    return bestCandidate;
-}
-
-function addSelfTrailCandidate(candidates, seen, rawAngle) {
-    const angle = normalizeAngle(rawAngle);
-    const key = Math.round(angle * 1000);
-
-    if (seen.has(key)) {
-        return;
-    }
-
-    seen.add(key);
-    candidates.push(angle);
-}
-
-function isSelfTrailPathUnsafe(safety, thresholdScale = 1) {
-    return safety.budgetHit
-        || safety.crossesTrail
-        || safety.clearance < config.bots.selfTrailAvoidDistance * thresholdScale;
-}
-
-function createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, options = {}, diagnostics = null) {
-    const lookaheadDistance = getSelfTrailLookaheadDistance(options);
-    const bounds = createBoundsAroundPoint(
-        bot,
-        lookaheadDistance + config.bots.selfTrailAvoidDistance + config.world.playerSize
-    );
-    const points = filterPointsByBounds(trailPoints, bounds);
-    const segments = filterSegmentsByBounds(trailSegments, bounds);
-    const pointIndex = createPointBlockIndex(points, getBotSelfTrailSafetyBlockSize());
-    const segmentIndex = createSegmentBlockIndex(segments, getBotSelfTrailSafetyBlockSize());
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "trailPointCount", trailPoints.length);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "trailSegmentCount", trailSegments.length);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "filteredTrailPointCount", points.length);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "filteredTrailSegmentCount", segments.length);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockCount", pointIndex.blocks.length);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockCount", segmentIndex.blocks.length);
-
-    return {
-        bounds,
-        lookaheadDistance,
-        pointIndex,
-        points,
-        segmentIndex,
-        segments
-    };
-}
-
-function getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options = {}, budget = null, diagnostics = null) {
-    const trailPoints = trailGeometry && trailGeometry.pointIndex
-        ? trailGeometry.pointIndex
-        : trailGeometry && Array.isArray(trailGeometry.points)
-            ? trailGeometry.points
-            : [];
-    const trailSegments = trailGeometry && trailGeometry.segmentIndex
-        ? trailGeometry.segmentIndex
-        : trailGeometry && Array.isArray(trailGeometry.segments)
-            ? trailGeometry.segments
-            : [];
-    let position = {
-        x: bot.x,
-        y: bot.y
-    };
-    let angle = bot.angle;
-    let nearestDistanceSquared = Infinity;
-    let budgetHit = false;
-    let crossesTrail = false;
-    const lookaheadDistance = Number.isFinite(trailGeometry && trailGeometry.lookaheadDistance)
-        ? Math.min(trailGeometry.lookaheadDistance, getSelfTrailLookaheadDistance(options))
-        : getSelfTrailLookaheadDistance(options);
-    const sampleCount = getSelfTrailLookaheadSampleCount(lookaheadDistance);
-    const stepDistance = lookaheadDistance / sampleCount;
-    const stepDeltaTime = stepDistance / getBotMovementSpeed(bot);
-    const criticalClearance = getSelfTrailPathEarlyExitClearance(options);
-    const criticalClearanceSquared = criticalClearance * criticalClearance;
-    let previousSamples = createSelfTrailPathSamplePoints(position, angle, options);
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "pathEvaluationCount", 1);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "sampleCount", sampleCount);
-
-    for (let index = 0; index < sampleCount; index++) {
-        if (!hasSelfTrailSafetyBudgetRemaining(budget)) {
-            budgetHit = true;
-            break;
-        }
-
-        angle = lerpAngle(angle, targetAngle, getSelfTrailSimulationRotationBlend(bot, stepDeltaTime));
-        position = clampPointToMap({
-            x: position.x + Math.cos(angle) * stepDistance,
-            y: position.y + Math.sin(angle) * stepDistance
-        });
-
-        const currentSamples = createSelfTrailPathSamplePoints(position, angle, options);
-
-        if (!crossesTrail && doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegments, diagnostics)) {
-            crossesTrail = true;
-        }
-
-        if (crossesTrail) {
-            addSelfTrailSafetyDiagnosticValue(diagnostics, "earlyExitCount", 1);
-            break;
-        }
-
-        for (const samplePoint of currentSamples) {
-            nearestDistanceSquared = Math.min(
-                nearestDistanceSquared,
-                getNearestDistanceSquared(samplePoint, trailPoints, diagnostics)
-            );
-        }
-
-        if (shouldStopSelfTrailPathEvaluation(crossesTrail, nearestDistanceSquared, criticalClearanceSquared, options)) {
-            addSelfTrailSafetyDiagnosticValue(diagnostics, "earlyExitCount", 1);
-            break;
-        }
-
-        previousSamples = currentSamples;
-    }
-
-    return {
-        budgetHit,
-        clearance: Math.sqrt(nearestDistanceSquared),
-        crossesTrail
-    };
-}
-
-function createSelfTrailPathSamplePoints(position, angle, options = {}) {
-    return options.centerOnly
-        ? [position]
-        : createSelfTrailAvoidanceSamplePoints(position, angle);
-}
-
-function getSelfTrailPathEarlyExitClearance(options = {}) {
-    if (Number.isFinite(options.earlyExitClearance) && options.earlyExitClearance > 0) {
-        return options.earlyExitClearance;
-    }
-
-    if (options.stopOnUnsafe) {
-        return config.bots.selfTrailAvoidDistance;
-    }
-
-    return getBotSelfTrailSafetyCriticalClearance();
-}
-
-function shouldStopSelfTrailPathEvaluation(crossesTrail, nearestDistanceSquared, criticalClearanceSquared, options = {}) {
-    return crossesTrail
-        || Boolean(options.stopOnUnsafe && nearestDistanceSquared <= criticalClearanceSquared)
-        || (!options.selfTrailSafetyMode && nearestDistanceSquared <= criticalClearanceSquared);
-}
-
-function doesSamplePathCrossSelfTrail(previousSamples, currentSamples, trailSegmentsOrIndex, diagnostics = null) {
-    const segmentIndex = getSegmentIndex(trailSegmentsOrIndex);
-    const trailSegments = segmentIndex
-        ? segmentIndex.segments
-        : trailSegmentsOrIndex;
-
-    if ((!segmentIndex || segmentIndex.blocks.length === 0)
-        && (!Array.isArray(trailSegments) || trailSegments.length === 0)) {
-        return false;
-    }
-
-    for (let index = 0; index < previousSamples.length; index++) {
-        if (doesSegmentCrossSelfTrail(previousSamples[index], currentSamples[index], segmentIndex || trailSegments, diagnostics)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-function doesSegmentCrossSelfTrail(startPoint, endPoint, trailSegmentsOrIndex, diagnostics = null) {
-    if (arePointsEqual(startPoint, endPoint)) {
-        return false;
-    }
-
-    const segmentIndex = getSegmentIndex(trailSegmentsOrIndex);
-
-    if (segmentIndex) {
-        return doesSegmentCrossSelfTrailIndex(startPoint, endPoint, segmentIndex, diagnostics);
-    }
-
-    const trailSegments = trailSegmentsOrIndex || [];
-    let checkedSegmentCount = 0;
-
-    for (const trailSegment of trailSegments) {
-        checkedSegmentCount++;
-        if (segmentsCross(startPoint, endPoint, trailSegment.start, trailSegment.end)) {
-            addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentCrossCheckCount", checkedSegmentCount);
-            return true;
-        }
-    }
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentCrossCheckCount", checkedSegmentCount);
-    return false;
-}
-
-function doesSegmentCrossSelfTrailIndex(startPoint, endPoint, segmentIndex, diagnostics = null) {
-    if (!segmentIndex || !Array.isArray(segmentIndex.blocks) || segmentIndex.blocks.length === 0) {
-        return false;
-    }
-
-    const movementBounds = getSegmentBounds(startPoint, endPoint);
-
-    if (!doBoundsOverlap(movementBounds, segmentIndex.bounds)) {
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBoundsRejected", 1);
-        return false;
-    }
-
-    let blockChecks = 0;
-    let blockBoundsRejected = 0;
-    let checkedSegmentCount = 0;
-
-    for (const block of segmentIndex.blocks) {
-        blockChecks++;
-
-        if (!doBoundsOverlap(movementBounds, block.bounds)) {
-            blockBoundsRejected++;
-            continue;
-        }
-
-        for (const trailSegment of block.segments) {
-            checkedSegmentCount++;
-
-            if (segmentsCross(startPoint, endPoint, trailSegment.start, trailSegment.end)) {
-                addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockChecks", blockChecks);
-                addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockBoundsRejected", blockBoundsRejected);
-                addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentCrossCheckCount", checkedSegmentCount);
-                return true;
-            }
-        }
-    }
-
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockChecks", blockChecks);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentBlockBoundsRejected", blockBoundsRejected);
-    addSelfTrailSafetyDiagnosticValue(diagnostics, "segmentCrossCheckCount", checkedSegmentCount);
-    return false;
-}
-
-function getSegmentIndex(value) {
-    return value
-        && Array.isArray(value.segments)
-        && Array.isArray(value.blocks)
-        ? value
-        : null;
-}
-
-function createBoundsAroundPoint(point, radius) {
-    const safeRadius = Number.isFinite(radius) && radius > 0
-        ? radius
-        : config.world.playerSize;
-
-    return {
-        maxX: point.x + safeRadius,
-        maxY: point.y + safeRadius,
-        minX: point.x - safeRadius,
-        minY: point.y - safeRadius
-    };
-}
-
-function filterPointsByBounds(points, bounds) {
-    if (!Array.isArray(points) || points.length === 0) {
-        return [];
-    }
-
-    return points.filter(point => isPointInBounds(point, bounds));
-}
-
-function filterSegmentsByBounds(segments, bounds) {
-    if (!Array.isArray(segments) || segments.length === 0) {
-        return [];
-    }
-
-    const filtered = [];
-
-    for (const segment of segments) {
-        if (!segment || !isFinitePoint(segment.start) || !isFinitePoint(segment.end)) {
-            continue;
-        }
-
-        const segmentBounds = getSegmentBounds(segment.start, segment.end);
-
-        if (doBoundsOverlap(segmentBounds, bounds)) {
-            filtered.push({
-                ...segment,
-                bounds: segmentBounds
-            });
-        }
-    }
-
-    return filtered;
-}
-
-function createPointBlockIndex(points, blockSize) {
-    const validPoints = (points || []).filter(isFinitePoint);
-    const blocks = [];
-    let bounds = null;
-
-    for (let index = 0; index < validPoints.length; index += blockSize) {
-        const blockPoints = validPoints.slice(index, index + blockSize);
-        const blockBounds = getPointsBounds(blockPoints);
-
-        if (!blockBounds) {
-            continue;
-        }
-
-        blocks.push({
-            bounds: blockBounds,
-            points: blockPoints
-        });
-        bounds = mergeBounds(bounds, blockBounds);
-    }
-
-    return {
-        blocks,
-        bounds,
-        points: validPoints
-    };
-}
-
-function createSegmentBlockIndex(segments, blockSize) {
-    const validSegments = (segments || []).filter(segment => (
-        segment
-        && isFinitePoint(segment.start)
-        && isFinitePoint(segment.end)
-    )).map(segment => ({
-        ...segment,
-        bounds: isValidBounds(segment.bounds)
-            ? segment.bounds
-            : getSegmentBounds(segment.start, segment.end)
-    }));
-    const blocks = [];
-    let bounds = null;
-
-    for (let index = 0; index < validSegments.length; index += blockSize) {
-        const blockSegments = validSegments.slice(index, index + blockSize);
-        const blockBounds = getBoundsUnion(blockSegments.map(segment => segment.bounds));
-
-        if (!blockBounds) {
-            continue;
-        }
-
-        blocks.push({
-            bounds: blockBounds,
-            segments: blockSegments
-        });
-        bounds = mergeBounds(bounds, blockBounds);
-    }
-
-    return {
-        blocks,
-        bounds,
-        segments: validSegments
-    };
-}
-
-function getPointsBounds(points) {
-    let bounds = null;
-
-    for (const point of points || []) {
-        if (!isFinitePoint(point)) {
-            continue;
-        }
-
-        bounds = mergeBounds(bounds, {
-            maxX: point.x,
-            maxY: point.y,
-            minX: point.x,
-            minY: point.y
-        });
-    }
-
-    return bounds;
-}
-
-function getBoundsUnion(boundsList) {
-    let bounds = null;
-
-    for (const item of boundsList || []) {
-        bounds = mergeBounds(bounds, item);
-    }
-
-    return bounds;
-}
-
-function mergeBounds(first, second) {
-    if (!isValidBounds(second)) {
-        return first;
-    }
-
-    if (!isValidBounds(first)) {
-        return {
-            maxX: second.maxX,
-            maxY: second.maxY,
-            minX: second.minX,
-            minY: second.minY
-        };
-    }
-
-    return {
-        maxX: Math.max(first.maxX, second.maxX),
-        maxY: Math.max(first.maxY, second.maxY),
-        minX: Math.min(first.minX, second.minX),
-        minY: Math.min(first.minY, second.minY)
-    };
-}
-
-function isPointInBounds(point, bounds) {
-    return isFinitePoint(point)
-        && point.x >= bounds.minX
-        && point.x <= bounds.maxX
-        && point.y >= bounds.minY
-        && point.y <= bounds.maxY;
-}
-
-function getSegmentBounds(start, end) {
-    return {
-        maxX: Math.max(start.x, end.x),
-        maxY: Math.max(start.y, end.y),
-        minX: Math.min(start.x, end.x),
-        minY: Math.min(start.y, end.y)
-    };
-}
-
-function doBoundsOverlap(firstBounds, secondBounds) {
-    if (!isValidBounds(firstBounds) || !isValidBounds(secondBounds)) {
-        return false;
-    }
-
-    return firstBounds.minX <= secondBounds.maxX + geometryEpsilon
-        && firstBounds.maxX + geometryEpsilon >= secondBounds.minX
-        && firstBounds.minY <= secondBounds.maxY + geometryEpsilon
-        && firstBounds.maxY + geometryEpsilon >= secondBounds.minY;
-}
-
-function isValidBounds(bounds) {
-    return bounds
-        && Number.isFinite(bounds.minX)
-        && Number.isFinite(bounds.minY)
-        && Number.isFinite(bounds.maxX)
-        && Number.isFinite(bounds.maxY);
-}
-
-function getPointBoundsDistanceSquared(point, bounds) {
-    if (!isFinitePoint(point) || !isValidBounds(bounds)) {
-        return Infinity;
-    }
-
-    const deltaX = point.x < bounds.minX
-        ? bounds.minX - point.x
-        : point.x > bounds.maxX
-            ? point.x - bounds.maxX
-            : 0;
-    const deltaY = point.y < bounds.minY
-        ? bounds.minY - point.y
-        : point.y > bounds.maxY
-            ? point.y - bounds.maxY
-            : 0;
-
-    return deltaX * deltaX + deltaY * deltaY;
-}
-
-function createSelfTrailAvoidanceSamplePoints(position, angle) {
-    const halfWidth = config.world.playerSize / 2;
-    const normal = {
-        x: -Math.sin(angle),
-        y: Math.cos(angle)
-    };
-
-    return [
-        position,
-        {
-            x: position.x + normal.x * halfWidth,
-            y: position.y + normal.y * halfWidth
-        },
-        {
-            x: position.x - normal.x * halfWidth,
-            y: position.y - normal.y * halfWidth
-        }
-    ];
-}
-
-function getSelfTrailSimulationRotationBlend(bot, deltaTime) {
-    const elapsedTicks = deltaTime * config.loop.tickRate;
-    const movement = getBotMovementConfig(bot);
-
-    return clamp(1 - Math.pow(1 - movement.rotationStrength, elapsedTicks), 0, 1);
-}
-
-function getBotMovementSpeed(bot) {
-    const speed = Number(getBotMovementConfig(bot).speed);
-
-    return Number.isFinite(speed) && speed > 0 ? speed : config.movement.speed;
-}
-
-function getBotMovementConfig(bot) {
-    const movement = bot && bot.runtimeConfig && bot.runtimeConfig.movement;
-    const rotationStrength = Number(movement && movement.rotationStrength);
-
-    return {
-        rotationStrength: Number.isFinite(rotationStrength)
-            ? clamp(rotationStrength, 0, 1)
-            : config.movement.rotationStrength,
-        speed: movement && movement.speed
-    };
-}
-
-function getSelfTrailLookaheadDistance(options = {}) {
-    if (Number.isFinite(options.selfTrailLookaheadDistance) && options.selfTrailLookaheadDistance > 0) {
-        return Math.min(options.selfTrailLookaheadDistance, getBotSelfTrailTrapLookaheadMaxDistance());
-    }
-
-    const decisionDistance = config.movement.speed * (config.bots.decisionIntervalMs / 1000) * 2.5;
-    const targetDistance = Number.isFinite(options.targetDistance)
-        ? Math.min(options.targetDistance, config.world.mapRadius)
-        : 0;
-    const uncappedDistance = Math.max(config.world.playerSize * 3.5, decisionDistance, targetDistance);
-
-    return Math.min(uncappedDistance, getBotSelfTrailLookaheadMaxDistance());
-}
-
-function getSelfTrailLookaheadSampleCount(lookaheadDistance) {
-    const distance = Number.isFinite(lookaheadDistance)
-        ? lookaheadDistance
-        : getSelfTrailLookaheadDistance();
-
-    return Math.max(6, Math.ceil(distance / config.world.playerSize));
-}
-
-function getSelfTrailClearanceRecentPointSkip() {
-    return Math.max(10, Math.ceil((config.world.playerSize * 4) / config.territory.trailPointSpacing));
-}
-
-function getSelfTrailCollisionRecentPointSkip() {
-    return Math.max(4, Math.ceil((config.world.playerSize * 1.2) / config.territory.trailPointSpacing));
-}
-
-function getTrailPointsCached(context, player, options = {}) {
-    if (!context || !context.trailPointCache || !player) {
-        return getTrailPoints(player, options);
-    }
-
-    const skipRecent = Number.isFinite(options.skipRecent) ? options.skipRecent : 0;
-    const cacheKey = `${player.id}:${skipRecent}`;
-
-    if (!context.trailPointCache.has(cacheKey)) {
-        context.trailPointCache.set(cacheKey, getTrailPoints(player, options));
-    }
-
-    return context.trailPointCache.get(cacheKey);
-}
-
-function getTrailTargetIndexCached(context, player) {
-    if (!context || !context.trailTargetIndexCache || !player) {
-        return createPointBlockIndex(getTrailPoints(player), getBotTrailTargetBlockSize());
-    }
-
-    const cacheKey = player.id;
-
-    if (context.trailTargetIndexCache.has(cacheKey)) {
-        addBotTargetingDiagnosticValue(context, "trailIndexCacheHitCount", 1);
-        return context.trailTargetIndexCache.get(cacheKey);
-    }
-
-    addBotTargetingDiagnosticValue(context, "trailIndexCacheMissCount", 1);
-    const pointIndex = createPointBlockIndex(
-        getTrailPointsCached(context, player),
-        getBotTrailTargetBlockSize()
-    );
-
-    context.trailTargetIndexCache.set(cacheKey, pointIndex);
-    return pointIndex;
-}
-
-function getSelfTrailSegmentsCached(context, player, options = {}) {
-    if (!context || !context.selfTrailSegmentCache || !player) {
-        return getSelfTrailSegments(player, options);
-    }
-
-    const skipRecent = Number.isFinite(options.skipRecent) ? options.skipRecent : 0;
-    const cacheKey = `${player.id}:${skipRecent}`;
-
-    if (!context.selfTrailSegmentCache.has(cacheKey)) {
-        context.selfTrailSegmentCache.set(cacheKey, getSelfTrailSegments(player, options));
-    }
-
-    return context.selfTrailSegmentCache.get(cacheKey);
-}
-
-function getTrailPoints(player, options = {}) {
-    const points = [];
-    const skipRecent = Number.isFinite(options.skipRecent)
-        ? Math.max(0, Math.floor(options.skipRecent))
-        : 0;
-
-    appendTrailPoints(points, player.trailLeftSegments, skipRecent);
-    appendTrailPoints(points, player.trailRightSegments, skipRecent);
-
-    return points;
-}
-
-function getSelfTrailSegments(player, options = {}) {
-    const segments = [];
-
-    appendSelfTrailSegments(segments, player.trailLeftSegments, options.skipRecent);
-    appendSelfTrailSegments(segments, player.trailRightSegments, options.skipRecent);
-
-    return segments;
-}
-
-function appendTrailPoints(target, segments, skipRecent = 0) {
-    if (!Array.isArray(segments)) {
-        return;
-    }
-
-    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
-        const segment = segments[segmentIndex];
-
-        if (!Array.isArray(segment)) {
-            continue;
-        }
-
-        const isLastSegment = segmentIndex === segments.length - 1;
-        const usablePointCount = isLastSegment
-            ? Math.max(0, segment.length - skipRecent)
-            : segment.length;
-
-        for (let pointIndex = 0; pointIndex < usablePointCount; pointIndex++) {
-            const point = segment[pointIndex];
-
-            if (Number.isFinite(point.x) && Number.isFinite(point.y)) {
-                target.push(point);
-            }
-        }
-    }
-}
-
-function appendSelfTrailSegments(target, segments, skipRecent = 0) {
-    if (!Array.isArray(segments)) {
-        return;
-    }
-
-    for (let segmentIndex = 0; segmentIndex < segments.length; segmentIndex++) {
-        const segment = segments[segmentIndex];
-
-        if (!Array.isArray(segment) || segment.length < 2) {
-            continue;
-        }
-
-        const isLastSegment = segmentIndex === segments.length - 1;
-        const usablePointCount = isLastSegment
-            ? Math.max(0, segment.length - skipRecent)
-            : segment.length;
-
-        for (let pointIndex = 0; pointIndex < usablePointCount - 1; pointIndex++) {
-            const start = segment[pointIndex];
-            const end = segment[pointIndex + 1];
-
-            if (isFinitePoint(start) && isFinitePoint(end)) {
-                target.push({ start, end });
-            }
-        }
-    }
-}
-
-function isFinitePoint(point) {
-    return point
-        && Number.isFinite(point.x)
-        && Number.isFinite(point.y);
-}
-
-function hasAnyTrail(player) {
-    return getTrailPoints(player).length >= 2;
-}
-
-function hasAnyTrailCached(context, player) {
-    return getTrailPointsCached(context, player).length >= 2;
-}
-
-function segmentsCross(firstStart, firstEnd, secondStart, secondEnd) {
-    if (!doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd)) {
-        return false;
-    }
-
-    const firstDirection = subtractPoints(firstEnd, firstStart);
-    const secondDirection = subtractPoints(secondEnd, secondStart);
-    const denominator = crossProduct(firstDirection, secondDirection);
-
-    if (Math.abs(denominator) <= geometryEpsilon) {
-        return false;
-    }
-
-    const startDelta = subtractPoints(secondStart, firstStart);
-    const firstT = crossProduct(startDelta, secondDirection) / denominator;
-    const secondT = crossProduct(startDelta, firstDirection) / denominator;
-
-    return firstT > geometryEpsilon
-        && firstT <= 1 + geometryEpsilon
-        && secondT > geometryEpsilon
-        && secondT < 1 - geometryEpsilon;
-}
-
-function doSegmentBoundsOverlap(firstStart, firstEnd, secondStart, secondEnd) {
-    return Math.max(Math.min(firstStart.x, firstEnd.x), Math.min(secondStart.x, secondEnd.x))
-        <= Math.min(Math.max(firstStart.x, firstEnd.x), Math.max(secondStart.x, secondEnd.x)) + geometryEpsilon
-        && Math.max(Math.min(firstStart.y, firstEnd.y), Math.min(secondStart.y, secondEnd.y))
-        <= Math.min(Math.max(firstStart.y, firstEnd.y), Math.max(secondStart.y, secondEnd.y)) + geometryEpsilon;
-}
-
-function subtractPoints(first, second) {
-    return {
-        x: first.x - second.x,
-        y: first.y - second.y
-    };
-}
-
-function crossProduct(first, second) {
-    return first.x * second.y - first.y * second.x;
-}
-
-function arePointsEqual(first, second) {
-    return Math.abs(first.x - second.x) <= geometryEpsilon
-        && Math.abs(first.y - second.y) <= geometryEpsilon;
-}
-
-function clampPointToMap(point) {
-    const radius = Math.hypot(point.x, point.y);
-    const limit = config.world.mapRadius - config.world.playerSize;
-
-    if (radius <= limit) {
-        return point;
-    }
-
-    const scale = limit / radius;
-
-    return {
-        x: point.x * scale,
-        y: point.y * scale
-    };
-}
-
-function getBotAi(bot) {
-    if (!bot.botAi) {
-        bot.botAi = {
-            expansionPlan: null,
-            orbitDirection: Math.random() < 0.5 ? -1 : 1,
-            orbitPhase: Math.random() * Math.PI * 2,
-            selfTrailEscapeAngle: null,
-            selfTrailEscapeUntilMs: 0
-        };
-    }
-
-    return bot.botAi;
 }
 
 function pruneMissingBotIds(state, players) {

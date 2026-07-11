@@ -49,9 +49,21 @@ function createThemePanel() {
     const timerEl = el.querySelector("#themeTimer");
     const balanceEl = el.querySelector("#themeBalance");
     const balanceValueEl = el.querySelector("#themeBalanceValue");
+    let lastBalanceSignature = null;
+    let lastThemeSignature = null;
 
     function update(theme, secsLeft) {
-        if (!theme) return;
+        if (!theme) {
+            return;
+        }
+
+        const signature = `${theme.id || theme.label || ""}|${secsLeft}`;
+
+        if (signature === lastThemeSignature) {
+            return;
+        }
+
+        lastThemeSignature = signature;
         emojiEl.textContent = theme.emoji || "🎯";
         labelEl.textContent = theme.label || "—";
         descEl.textContent  = theme.description || "";
@@ -72,13 +84,20 @@ function createThemePanel() {
         }
 
         const balance = Number(player && player.catchBalance);
+        const roundedBalance = Number.isFinite(balance) ? Math.round(balance) : null;
+        const signature = roundedBalance === null ? "hidden" : String(roundedBalance);
 
-        if (!Number.isFinite(balance)) {
+        if (signature === lastBalanceSignature) {
+            return;
+        }
+
+        lastBalanceSignature = signature;
+
+        if (roundedBalance === null) {
             balanceEl.hidden = true;
             return;
         }
 
-        const roundedBalance = Math.round(balance);
         balanceEl.hidden = false;
         balanceEl.classList.toggle("theme-balance--positive", roundedBalance > 0);
         balanceEl.classList.toggle("theme-balance--negative", roundedBalance < 0);

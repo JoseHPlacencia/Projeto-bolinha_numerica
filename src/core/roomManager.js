@@ -54,7 +54,6 @@ function createRoom(io, options = {}) {
     const numberSystem = createNumberSystem(
         runtimeConfig.world.mapRadius,
         players,
-        territories,
         difficultyKey,
         runtimeConfig.numbers
     );
@@ -93,6 +92,12 @@ function createRoom(io, options = {}) {
             return {
                 success: false,
                 message: `Password must be at least ${config.rooms.privateRoomPasswordMinLength} characters long.`
+            };
+        }
+        if (password.length > config.rooms.privateRoomPasswordMaxLength) {
+            return {
+                success: false,
+                message: `Password cannot exceed ${config.rooms.privateRoomPasswordMaxLength} characters.`
             };
         }
         const { hash, salt } = createPasswordHash(password);
@@ -335,9 +340,19 @@ function createPasswordHash(password) {
 }
 
 function verifyPassword(password, hash, salt) {
-    if (!password || !hash || !salt) return false;
+    if (!password
+        || password.length > config.rooms.privateRoomPasswordMaxLength
+        || !hash
+        || !salt) {
+        return false;
+    }
+
     const computedHash = crypto.createHash("sha256").update(salt + password).digest("hex");
-    return computedHash === hash;
+    const computedBuffer = Buffer.from(computedHash, "hex");
+    const storedBuffer = Buffer.from(hash, "hex");
+
+    return computedBuffer.length === storedBuffer.length
+        && crypto.timingSafeEqual(computedBuffer, storedBuffer);
 }
 
 function leaveRoom(socket, options = {}) {
@@ -403,21 +418,24 @@ function generateRoomCode() {
 
     for (let attempt = 0; attempt < config.rooms.roomCodeMaxGenerationAttempts; attempt++) {
         let code = "";
-        for (let i = 0; i < length; i++) {
-            const index = Math.floor(Math.random() * availableChars.length);
+        for (let characterIndex = 0; characterIndex < length; characterIndex++) {
+            const index = crypto.randomInt(availableChars.length);
             code += availableChars[index];
         }
-        if (!rooms.has(code)) return code;
+
+        if (!rooms.has(code)) {
+            return code;
+        }
     }
 
     throw new Error("Unable to generate unique room code.");
 }
 
-function normalizeRoomDifficulty(raw) {
-    const d = String(raw || "").trim().toLowerCase();
-    return d === "easy" || d === "hard" ? d : "medium";
-}
+function normalizeRoomDifficulty(rawDifficulty) {
+    const difficulty = String(rawDifficulty || "").trim().toLowerCase();
 
+    return difficulty === "easy" || difficulty === "hard" ? difficulty : "medium";
+}
 
 module.exports = {
     createBackgroundRoom,

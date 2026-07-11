@@ -1,23 +1,48 @@
-# O Projeto
+# Vennperio
 
-O presente projeto consiste em uma extensão universiária dos alunos da turma CC1N de 2026 da UVV, 1° Período de Ciência da Computação, sob a orientação do professor Alessandro Bertolani Oliveira, na matéria Fundamentos de Tecnologia da Computação.  
-Sua concepção visa por em prática a ODS 4 - Educação de Qualidade - através da gamificação aplicada à matemática do ensino fundamental e médio, abordando como tema a Teoria dos Conjuntos.
+Vennperio é um jogo multiplayer inspirado em Paper.io 2 que usa teoria dos conjuntos como parte da mecânica. O projeto é uma atividade de extensão universitária da turma CC1N de 2026 da Universidade Vila Velha, desenvolvida para apoiar a ODS 4 — Educação de Qualidade — por meio da gamificação da matemática.
 
-## Desenvolvimento
+O jogo está em versão alpha e permanece em desenvolvimento. A versão pública pode ser acessada em [vennperio.site](https://vennperio.site).
 
-Como entrega principal do projeto, a equipe optou por desenvolver um jogo multiplayer, nos moldes do já existente paper.io, aplicando como mecânica base elementos de teoria dos conjuntos.  
-A solução tecnológica empregada no jogo consiste em node.js para o backend, biblioteca socket.io para a comunicação com o frontend, e a biblioteca polygon-clipping para algumas operações geométricas.
+## Tecnologias
 
-## Acesso
+- Node.js e Express no servidor;
+- Socket.IO para comunicação em tempo real;
+- Canvas 2D e `OffscreenCanvas`/Web Worker na renderização;
+- `polygon-clipping` nas operações de território.
 
-O jogo está disponível em: [vennperio.site](https://vennperio.site)
-A pretensão é mantê-lo por pelo menos um ano, e em desenvolvimento contínuo.
+## Execução local
 
-## Instruções
+Requisitos: Node.js 20 ou superior e npm.
 
-**Para rodar o projeto localmente:**
-- Permita temporáriamente a execução de scripts no powershell usando `Set-ExecutionPolicy Unrestricted` (isso pode ser necessário para a instalação do [npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) embutido no node.js). Após o término dos passos seguintes, basta restringir novamente a política usando `Set-ExecutionPolicy RemoteSigned`.
-- Instale o [node.js](https://nodejs.org/pt-br/download), habilite a caixa de instalação de dependências.
-- Clone o repositório e instale as dependências usando `npm install`.
-- Rode o servidor node usando `node --watch server.js`.
-- Se desejar, use um serviço de túnel e compartilhe o link/ip para jogar com alguém em outra rede.
+```bash
+npm ci
+npm run dev
+```
+
+O servidor usa `http://localhost:3000` por padrão. A porta pode ser alterada com a variável de ambiente `PORT`, e o endereço de escuta com `HOST`.
+
+Para uma execução sem reinício automático:
+
+```bash
+npm start
+```
+
+No PowerShell, caso a política local bloqueie apenas o wrapper `npm.ps1`, use `npm.cmd` nos mesmos comandos; não é necessário liberar irrestritamente a execução de scripts do sistema.
+
+## Validação
+
+```bash
+npm run check
+npm test
+```
+
+`npm run check` verifica automaticamente a sintaxe dos arquivos JavaScript do servidor, cliente e scripts. `npm test` executa a suíte versionada em `test/`; os dois comandos também são executados no GitHub Actions.
+
+## Organização
+
+- `src/`: servidor autoritativo, regras de jogo, geometria e serialização;
+- `public/`: interface, input, interpolação de snapshots e renderização;
+- `test/`: testes automatizados de regras, geometria e protocolo de snapshots;
+- `scripts/`: ferramentas versionadas de desenvolvimento;
+- `.ai/`: contexto e documentação de desenvolvimento local; não é versionada.

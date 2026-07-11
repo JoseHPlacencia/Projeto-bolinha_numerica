@@ -2,8 +2,9 @@ import { isPerformanceMode } from "../renderSettings.js";
 import { isDarkVisualTheme } from "../visualTheme.js";
 
 const NUMBER_RADIUS = 44;
+const FULL_CIRCLE_RADIANS = Math.PI * 2;
 
-const COLORS = [
+const NUMBER_COLORS = [
     ["#4ade80", "#166534"],
     ["#f87171", "#7f1d1d"],
     ["#facc15", "#713f12"],
@@ -14,72 +15,103 @@ const COLORS = [
 
 function getColorIndex(display) {
     const displayText = String(display);
-    if (/^-\d/.test(displayText)) return 1;
-    if (/^\d+$/.test(displayText)) return 0;
-    if (displayText.includes("/")) return 2;
-    if (displayText.startsWith("\u221A")) return 3;
-    if (displayText === "\u03C0" || displayText === "e" || displayText === "\u03C6" || displayText.startsWith("\u221A")) return 4;
+
+    if (/^-\d/.test(displayText)) {
+        return 1;
+    }
+    if (/^\d+$/.test(displayText)) {
+        return 0;
+    }
+    if (displayText.includes("/")) {
+        return 2;
+    }
+    if (displayText.startsWith("\u221A")) {
+        return 3;
+    }
+    if (displayText === "\u03C0" || displayText === "e" || displayText === "\u03C6") {
+        return 4;
+    }
+
     return 5;
 }
 
-export function drawNumberLayer(ctx, numbers, viewportBounds, gameConfig) {
-    if (!numbers || numbers.length === 0) return;
+export function drawNumberLayer(context, numbers, viewportBounds, gameConfig) {
+    if (!numbers || numbers.length === 0 || !viewportBounds) {
+        return;
+    }
 
-    if (!viewportBounds) return;
     const { minX, maxX, minY, maxY } = viewportBounds;
     const padding = NUMBER_RADIUS + 8;
+    const darkTheme = isDarkVisualTheme(gameConfig);
+    const performanceMode = isPerformanceMode(gameConfig);
 
-    ctx.save();
-    ctx.textAlign    = "center";
-    ctx.textBaseline = "middle";
-    ctx.shadowColor   = "transparent";
-    ctx.shadowBlur    = 0;
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = 0;
+    context.save();
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.shadowColor = "transparent";
+    context.shadowBlur = 0;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 0;
 
-    for (const num of numbers) {
-        const [, x, y, display] = num;
+    for (const number of numbers) {
+        const [, x, y, display] = number;
 
-        if (x + padding < minX || x - padding > maxX || y + padding < minY || y - padding > maxY) continue;
+        if (x + padding < minX || x - padding > maxX || y + padding < minY || y - padding > maxY) {
+            continue;
+        }
 
         const colorIndex = getColorIndex(display);
-        const [foregroundColor, backgroundColor] = COLORS[colorIndex];
-
-        const darkTheme = isDarkVisualTheme(gameConfig);
-        const performanceMode = isPerformanceMode(gameConfig);
+        const [foregroundColor, backgroundColor] = NUMBER_COLORS[colorIndex];
 
         if (darkTheme && performanceMode) {
-            ctx.save();
-            ctx.globalAlpha = 0.2;
-            ctx.beginPath();
-            ctx.arc(x, y, NUMBER_RADIUS + 9, 0, 6.2832);
-            ctx.fillStyle = foregroundColor;
-            ctx.fill();
-            ctx.restore();
+            context.save();
+            context.globalAlpha = 0.2;
+            context.beginPath();
+            context.arc(x, y, NUMBER_RADIUS + 9, 0, FULL_CIRCLE_RADIANS);
+            context.fillStyle = foregroundColor;
+            context.fill();
+            context.restore();
         }
 
         if (darkTheme && !performanceMode) {
-            ctx.shadowColor = foregroundColor;
-            ctx.shadowBlur = 28;
+            context.shadowColor = foregroundColor;
+            context.shadowBlur = 28;
         }
 
-        ctx.beginPath();
-        ctx.arc(x, y, NUMBER_RADIUS, 0, 6.2832);
-        ctx.fillStyle = backgroundColor;
-        ctx.fill();
+        context.beginPath();
+        context.arc(x, y, NUMBER_RADIUS, 0, FULL_CIRCLE_RADIANS);
+        context.fillStyle = backgroundColor;
+        context.fill();
 
-        ctx.lineWidth   = 3;
-        ctx.strokeStyle = foregroundColor;
-        ctx.stroke();
-        ctx.shadowColor = "transparent";
-        ctx.shadowBlur = 0;
+        context.lineWidth = 3;
+        context.strokeStyle = foregroundColor;
+        context.stroke();
+        context.shadowColor = "transparent";
+        context.shadowBlur = 0;
 
-        const textLength = String(display).length;
-        const fontSize = textLength > 5 ? 13 : textLength > 4 ? 15 : textLength > 3 ? 17 : textLength > 2 ? 19 : 22;
-        ctx.font      = `900 ${fontSize}px Play,sans-serif`;
-        ctx.fillStyle = foregroundColor;
-        ctx.fillText(display, x, y);
+        context.font = `900 ${getNumberFontSize(display)}px Play,sans-serif`;
+        context.fillStyle = foregroundColor;
+        context.fillText(display, x, y);
     }
 
-    ctx.restore();
+    context.restore();
+}
+
+function getNumberFontSize(display) {
+    const textLength = String(display).length;
+
+    if (textLength > 5) {
+        return 13;
+    }
+    if (textLength > 4) {
+        return 15;
+    }
+    if (textLength > 3) {
+        return 17;
+    }
+    if (textLength > 2) {
+        return 19;
+    }
+
+    return 22;
 }

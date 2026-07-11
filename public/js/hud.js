@@ -27,6 +27,7 @@ export function createHud({ debugLevel }) {
     let lastUpdatedAt = 0;
     let lastRankUpdatedAt = 0;
     let lastLifeSignature = null;
+    let lastRankSignature = null;
 
     document.getElementById("gameLayer")?.appendChild(catchAlert.element);
 
@@ -119,12 +120,19 @@ export function createHud({ debugLevel }) {
         }
 
         lastRankUpdatedAt = now;
-        rankRows.replaceChildren(...createRankRows(leaderboard, currentPlayerId));
+
+        const entries = selectRankEntries(leaderboard, currentPlayerId);
+        const signature = createRankSignature(entries, currentPlayerId);
+
+        if (signature === lastRankSignature) {
+            return;
+        }
+
+        lastRankSignature = signature;
+        rankRows.replaceChildren(...createRankRows(entries, currentPlayerId));
     }
 
-    function createRankRows(leaderboard, currentPlayerId) {
-        const entries = selectRankEntries(leaderboard, currentPlayerId);
-
+    function createRankRows(entries, currentPlayerId) {
         if (entries.length === 0) {
             const row = document.createElement("div");
             row.className = "rank-panel__empty";
@@ -144,6 +152,17 @@ export function createHud({ debugLevel }) {
             );
             return row;
         });
+    }
+
+    function createRankSignature(entries, currentPlayerId) {
+        return entries.map(entry => [
+            entry.id === currentPlayerId,
+            entry.id,
+            entry.name || "Jogador",
+            formatPercent(entry.areaPercent),
+            Number.isFinite(entry.eliminations) ? entry.eliminations : 0,
+            entry.rank || "-"
+        ].join("\u001f")).join("\u001e");
     }
 
     function selectRankEntries(leaderboard, currentPlayerId) {

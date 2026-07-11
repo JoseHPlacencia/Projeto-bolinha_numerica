@@ -928,31 +928,51 @@ function getOpenRing(ring) {
 }
 
 function hasSelfIntersections(ring) {
-    if (ring.length < 4) {
+    const openRing = getOpenRing(ring);
+
+    if (openRing.length < 4) {
         return false;
     }
 
-    const openRing = ring.slice(0, -1);
+    const segments = createSortedCoordinateRingSegments(openRing);
 
-    for (let firstIndex = 0; firstIndex < openRing.length; firstIndex++) {
-        const firstStart = openRing[firstIndex];
-        const firstEnd = openRing[(firstIndex + 1) % openRing.length];
+    for (let firstOrderIndex = 0; firstOrderIndex < segments.length; firstOrderIndex++) {
+        const first = segments[firstOrderIndex];
 
-        for (let secondIndex = firstIndex + 1; secondIndex < openRing.length; secondIndex++) {
-            if (areAdjacentSegments(firstIndex, secondIndex, openRing.length)) {
+        for (let secondOrderIndex = firstOrderIndex + 1; secondOrderIndex < segments.length; secondOrderIndex++) {
+            const second = segments[secondOrderIndex];
+
+            if (second.bounds.minX > first.bounds.maxX + geometryEpsilon) {
+                break;
+            }
+
+            if (areAdjacentSegments(first.index, second.index, openRing.length)
+                || !doCoordinateBoundsOverlap(first.bounds, second.bounds)) {
                 continue;
             }
 
-            const secondStart = openRing[secondIndex];
-            const secondEnd = openRing[(secondIndex + 1) % openRing.length];
-
-            if (segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd)) {
+            if (segmentsIntersect(first.start, first.end, second.start, second.end)) {
                 return true;
             }
         }
     }
 
     return false;
+}
+
+function createSortedCoordinateRingSegments(openRing) {
+    return openRing
+        .map((start, index) => {
+            const end = openRing[(index + 1) % openRing.length];
+
+            return {
+                bounds: getCoordinateSegmentBounds(start, end),
+                end,
+                index,
+                start
+            };
+        })
+        .sort((first, second) => first.bounds.minX - second.bounds.minX);
 }
 
 function isPointInRing(ring, x, y) {
@@ -1122,8 +1142,9 @@ function clampUnitRange(value) {
 }
 
 function areAdjacentSegments(firstIndex, secondIndex, segmentCount) {
-    return Math.abs(firstIndex - secondIndex) <= 1
-        || (firstIndex === 0 && secondIndex === segmentCount - 1);
+    const indexDistance = Math.abs(firstIndex - secondIndex);
+
+    return indexDistance <= 1 || indexDistance === segmentCount - 1;
 }
 
 function segmentsIntersect(firstStart, firstEnd, secondStart, secondEnd) {

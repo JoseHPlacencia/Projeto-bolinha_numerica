@@ -29,9 +29,10 @@ function startGameLoop(
         const now = getHighResolutionTime();
         const tickStartedAt = now;
         const tickIntervalMs = now - previousTime;
+        const wallClockNow = Date.now();
         const phaseDurations = {};
         const deltaTime = Math.min((now - previousTime) / 1000, config.loop.maxDeltaTime);
-        const catchCombatFrame = createCatchCombatFrame(Date.now());
+        const catchCombatFrame = createCatchCombatFrame(wallClockNow);
         const gameplayContext = {
             catchCombatFrame,
             io,
@@ -46,7 +47,7 @@ function startGameLoop(
 
         measurePhase(phaseDurations, "bots", () => {
             if (botManager) {
-                botDiagnostics = botManager.update(Date.now());
+                botDiagnostics = botManager.update(wallClockNow);
             }
         });
 
@@ -60,24 +61,20 @@ function startGameLoop(
 
         const result = measurePhase(phaseDurations, "numbers", () => (
             numberSystem
-                ? numberSystem.update(Date.now())
+                ? numberSystem.update(wallClockNow)
                 : { collisions: [], themeChanged: false }
         ));
         const collisions = Array.isArray(result && result.collisions) ? result.collisions : [];
-        const numberCollectionEvents = [];
 
         measurePhase(phaseDurations, "numberEvents", () => {
             if (collisions.length <= 0) {
                 return;
             }
 
-            for (const col of collisions) {
+            for (const collision of collisions) {
                 measurePhase(phaseDurations, "numberCollected", () => {
-                    handleNumberCollected(players, territories, col, {
-                        ...gameplayContext
-                    });
+                    handleNumberCollected(players, territories, collision, gameplayContext);
                 }, true);
-                numberCollectionEvents.push(col);
             }
         });
 
@@ -90,20 +87,20 @@ function startGameLoop(
                 return;
             }
 
-            for (const col of numberCollectionEvents) {
-                const socket = io.sockets.sockets.get(col.playerId);
+            for (const collision of collisions) {
+                const socket = io.sockets.sockets.get(collision.playerId);
 
                 if (!socket) {
                     continue;
                 }
 
-                const player = players.get(col.playerId);
+                const player = players.get(collision.playerId);
 
                 socket.emit("numberCollected", {
-                    display: col.display,
-                    value: col.value,
-                    sets: col.sets,
-                    belongsToTheme: col.belongsToTheme,
+                    display: collision.display,
+                    value: collision.value,
+                    sets: collision.sets,
+                    belongsToTheme: collision.belongsToTheme,
                     catchBalance: player ? player.catchBalance : 0,
                     eliminations: player ? player.eliminations : 0,
                     lives: player ? player.lives : 0,
