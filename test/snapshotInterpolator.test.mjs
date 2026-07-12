@@ -11,9 +11,11 @@ const {
     initializePlayerTerritory
 } = require("../src/state/territories");
 const {
+    cloneClientSnapshotState,
     createClientSnapshotState,
     createSnapshot: createServerSnapshot
 } = require("../src/core/snapshotSerializer");
+const { captureClosedTrail } = require("../src/systems/dominationSystem");
 
 const interpolatorPath = new URL("../public/js/snapshotInterpolator.js", import.meta.url);
 const source = await readFile(interpolatorPath, "utf8");
@@ -32,6 +34,24 @@ const snapshotGeometrySource = (await readFile(snapshotGeometryPath, "utf8")).re
         "indexedBoundaryMaxDistanceSquared",
         "snapshotGeometryIndexedBoundaryMaxDistanceSquared"
     );
+const snapshotGeometryImportMatch = source.match(
+    /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
+);
+const snapshotGeometryImportedNames = snapshotGeometryImportMatch
+    ? snapshotGeometryImportMatch[1].split(",").map(name => name.trim()).filter(Boolean)
+    : [];
+const snapshotGeometryExportedNames = [
+    ...snapshotGeometrySource.matchAll(
+        /export\s+(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/g
+    )
+].map(match => match[1]);
+const scopedSnapshotGeometrySource = [
+    "const __snapshotGeometry = (() => {",
+    snapshotGeometrySource.replaceAll("export function ", "function "),
+    `return { ${snapshotGeometryExportedNames.join(", ")} };`,
+    "})();",
+    `const { ${snapshotGeometryImportedNames.join(", ")} } = __snapshotGeometry;`
+].join("\n");
 const snapshotDiagnosticsPath = new URL("../public/js/snapshotDiagnostics.js", import.meta.url);
 const snapshotDiagnosticsSource = (await readFile(snapshotDiagnosticsPath, "utf8"))
     .replaceAll("export function ", "function ")
@@ -51,7 +71,7 @@ const testableSource = source.replace(
     snapshotDiagnosticsSource
 ).replace(
     /import \{[\s\S]*?\} from "\.\/snapshotGeometry\.js";/,
-    snapshotGeometrySource
+    scopedSnapshotGeometrySource
 );
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(testableSource).toString("base64")}`;
 const {
@@ -145,6 +165,24 @@ function createTrailPatch(start, points, options = {}) {
         rightFillPoints: points.map(([x, y]) => [x, y + 2])
     };
 }
+
+test("snapshot geometry imports are part of the module's public exports", () => {
+    const importMatch = source.match(
+        /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
+    );
+    const importedNames = importMatch
+        ? importMatch[1].split(",").map(name => name.trim()).filter(Boolean)
+        : [];
+    const exportedNames = new Set(
+        [...snapshotGeometrySource.matchAll(
+            /export\s+(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/g
+        )].map(match => match[1])
+    );
+    const missingExports = importedNames.filter(name => !exportedNames.has(name));
+
+    assert.ok(importMatch, "snapshotGeometry import block exists");
+    assert.deepEqual(missingExports, []);
+});
 
 test("adaptive buffer shares one sorted sample set for trimming and percentile", () => {
     const metrics = calculateAdaptiveBufferMetrics([10, 10, 10, 100], {
@@ -380,6 +418,53 @@ test("geometry remains visible until an explicit removal arrives", () => {
     state = interpolator.getRenderState();
     assert.equal(state.territories.territory, undefined);
     assert.equal(state.trails.player, undefined);
+});
+
+test("pending reliable geometry does not freeze prediction for preserved trails", () => {
+    const originalDateNow = Date.now;
+    let currentTime = 1000;
+
+    Date.now = () => currentTime;
+
+    try {
+        const interpolator = createInterpolator({
+            maxSnapshots: 2,
+            trailPredictionEnabled: true,
+            trailPredictionMaxBufferMs: 1000,
+            trailPredictionPlayerHalfWidth: 35
+        });
+
+        interpolator.processSnapshot(createSnapshot(1, 1000, {
+            players: {
+                player: [10, 0, 0]
+            },
+            playerInfo: {
+                player: ["#ff00ff", 0, 0, 1, "Player", 0, 1, 1, 0]
+            },
+            trailIds: ["player"],
+            trails: {
+                player: createFullTrail([[0, 35], [10, 35]])
+            }
+        }));
+
+        currentTime = 2000;
+        interpolator.processSnapshot(createSnapshot(2, 2000, {
+            players: {
+                player: [100, 0, 0]
+            },
+            preserveTrails: true,
+            trailIds: ["player"]
+        }));
+
+        currentTime = 2100;
+        const trail = interpolator.getRenderState().trails.player;
+        const lastPoint = trail.leftSegments[0][trail.leftSegments[0].length - 1];
+
+        assert.equal(trail.leftSegments[0].length, 3);
+        assert.deepEqual([lastPoint.x, lastPoint.y], [100, 35]);
+    } finally {
+        Date.now = originalDateNow;
+    }
 });
 
 test("trail tombstone rejects late generations and accepts a newer full trail", () => {
@@ -641,6 +726,142 @@ test("territory capture and trail removal switch as one geometry state", () => {
     }
 });
 
+test("capture operation reuses the acknowledged trail instead of resending it", () => {
+    const player = new Player("player", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const clientState = createClientSnapshotState();
+    const boundaryX = Math.sqrt(200 ** 2 - 50 ** 2);
+    const trailPointCount = serverConfig.network.trailUpdateMaxPoints * 3;
+    const trailSnapshots = [];
+    let sequence = 0;
+    let laggingClientState = null;
+
+    initializePlayerTerritory(territories, player);
+    player.trailLeftSegments = [[...createCaptureTrailPoints(
+        boundaryX,
+        trailPointCount,
+        1200
+    )]];
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+        const snapshot = createServerSnapshot(
+            players,
+            territories,
+            player.id,
+            clientState,
+            null,
+            serverConfig
+        );
+
+        snapshot.sequence = ++sequence;
+        snapshot.snapshotEpoch = 1;
+        trailSnapshots.push(snapshot);
+
+        if (attempt === 0) {
+            laggingClientState = cloneClientSnapshotState(clientState);
+        }
+
+        if (snapshot.trails[player.id]
+            && snapshot.trails[player.id].partial !== true) {
+            break;
+        }
+    }
+
+    assert.equal(trailSnapshots[0].trails[player.id].partial, true);
+    assert.equal(clientState.trails.get(player.id).pointCount, trailPointCount);
+
+    assert.ok(captureClosedTrail(player, territories, players));
+    player.clearTrailState();
+
+    const laggingCaptureSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        laggingClientState,
+        null,
+        serverConfig
+    );
+
+    assert.equal(laggingCaptureSnapshot.territoryOps[player.id], undefined);
+    assert.ok(laggingCaptureSnapshot.territories[player.id]);
+
+    const captureSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        serverConfig
+    );
+    const operation = captureSnapshot.territoryOps[player.id];
+
+    captureSnapshot.sequence = ++sequence;
+    captureSnapshot.snapshotEpoch = 1;
+    assert.ok(operation);
+    assert.equal(operation.trailPoints, undefined);
+    assert.equal(operation.trailTailPoints, undefined);
+    assert.ok(JSON.stringify(operation).length < 1000);
+    assert.ok(captureSnapshot.removedTrailIds.includes(player.id));
+
+    const interpolator = createInterpolator();
+    let initialResult = null;
+
+    for (const snapshot of trailSnapshots) {
+        initialResult = interpolator.processSnapshot(snapshot);
+        assert.equal(initialResult.applied, true);
+    }
+
+    const captureResult = interpolator.processSnapshot(captureSnapshot);
+    const state = interpolator.getRenderState();
+
+    assert.equal(initialResult.applied, true);
+    assert.equal(captureResult.applied, true);
+    assert.equal(state.territories[player.id].version, 2);
+    assert.equal(state.trails[player.id], undefined);
+});
+
+test("very long capture falls back to a full territory definition", () => {
+    const player = new Player("player", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const clientState = createClientSnapshotState();
+    const boundaryX = Math.sqrt(200 ** 2 - 50 ** 2);
+    const trailPointCount = serverConfig.network.captureOperationMaxTrailPoints + 1;
+
+    initializePlayerTerritory(territories, player);
+    player.trailLeftSegments = [[...createCaptureTrailPoints(
+        boundaryX,
+        trailPointCount,
+        1200
+    )]];
+
+    createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        serverConfig
+    );
+
+    assert.ok(captureClosedTrail(player, territories, players));
+    assert.equal(territories.get(player.id).lastCaptureOperation, undefined);
+    player.clearTrailState();
+
+    const captureSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        serverConfig
+    );
+
+    assert.equal(captureSnapshot.territoryOps[player.id], undefined);
+    assert.ok(captureSnapshot.territories[player.id]);
+});
+
 test("viewport clipping preserves the visible tail of a very long trail", () => {
     const points = Array.from({ length: 5000 }, (_value, index) => ({
         x: index * 4,
@@ -848,6 +1069,32 @@ function createLongTrailPoints(count, y) {
         x: index * 4,
         y
     }));
+}
+
+function createCaptureTrailPoints(boundaryX, count, extent) {
+    return Array.from({ length: count }, (_value, index) => {
+        const progress = index / (count - 1);
+        const outerX = boundaryX + extent;
+
+        if (progress <= 1 / 3) {
+            return {
+                x: boundaryX + (outerX - boundaryX) * progress * 3,
+                y: -50
+            };
+        }
+
+        if (progress <= 2 / 3) {
+            return {
+                x: outerX,
+                y: -50 + (progress - 1 / 3) * 300
+            };
+        }
+
+        return {
+            x: outerX - (outerX - boundaryX) * (progress - 2 / 3) * 3,
+            y: 50
+        };
+    });
 }
 
 

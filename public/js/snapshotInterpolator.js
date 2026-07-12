@@ -5,6 +5,7 @@ import {
     finiteOrNull
 } from "./snapshotDiagnostics.js";
 import {
+    arePointsEqual,
     calculateRingArea,
     createBoundaryPaths,
     createClippedTrailPoints,
@@ -16,8 +17,10 @@ import {
     isPointInsideOrOnRing,
     isValidPoint,
     normalizePolygonRing,
+    projectPointOnSegment,
     removeConsecutiveDuplicatePoints,
     selectBoundaryPathByAnchor,
+    unpackPoint,
     unpackPoints,
     unpackPolygon,
     unpackSegments
@@ -523,7 +526,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function createPredictedTrailState(snapshot, players, amount) {
         const baseTrails = snapshot.trails || {};
 
-        if (!shouldPredictTrails(amount) || snapshot.preserveTrails) {
+        if (!shouldPredictTrails(amount)) {
             return baseTrails;
         }
 

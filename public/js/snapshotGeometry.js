@@ -24,7 +24,7 @@ export function unpackPoints(points) {
         .filter(Boolean);
 }
 
-function unpackPoint(point) {
+export function unpackPoint(point) {
     if (!Array.isArray(point) || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
         return null;
     }
@@ -187,7 +187,7 @@ export function findClosestPolygonBoundaryContact(ring, point) {
     return closestContact;
 }
 
-function projectPointOnSegment(point, segmentStart, segmentEnd) {
+export function projectPointOnSegment(point, segmentStart, segmentEnd) {
     const direction = subtractPoints(segmentEnd, segmentStart);
     const lengthSquared = direction.x * direction.x + direction.y * direction.y;
     const segmentT = lengthSquared <= geometryEpsilon
@@ -250,21 +250,73 @@ function removeClosingDuplicatePoint(ring) {
 }
 
 function removeCollinearPoints(ring) {
-    let index = 0;
+    removeCircularRedundantPoints(ring, (previous, current, next) => (
+        Math.abs(crossCoordinates(previous, current, next)) <= geometryEpsilon
+    ));
+}
 
-    while (ring.length >= 3 && index < ring.length) {
-        const previous = ring[(index - 1 + ring.length) % ring.length];
-        const current = ring[index];
-        const next = ring[(index + 1) % ring.length];
+function removeCircularRedundantPoints(points, isRedundant) {
+    const pointCount = points.length;
 
-        if (Math.abs(crossCoordinates(previous, current, next)) <= geometryEpsilon) {
-            ring.splice(index, 1);
-            index = Math.max(0, index - 1);
+    if (pointCount < 3) {
+        return;
+    }
+
+    const previousIndexes = new Int32Array(pointCount);
+    const nextIndexes = new Int32Array(pointCount);
+    const removed = new Uint8Array(pointCount);
+    const pendingIndexes = Array.from({ length: pointCount }, (_value, index) => index);
+    let pendingHead = 0;
+    let remainingPointCount = pointCount;
+
+    for (let index = 0; index < pointCount; index++) {
+        previousIndexes[index] = (index - 1 + pointCount) % pointCount;
+        nextIndexes[index] = (index + 1) % pointCount;
+    }
+
+    while (pendingHead < pendingIndexes.length && remainingPointCount >= 3) {
+        const index = pendingIndexes[pendingHead++];
+
+        if (removed[index]) {
             continue;
         }
 
-        index++;
+        const previousIndex = previousIndexes[index];
+        const nextIndex = nextIndexes[index];
+
+        if (!isRedundant(points[previousIndex], points[index], points[nextIndex])) {
+            continue;
+        }
+
+        removed[index] = 1;
+        nextIndexes[previousIndex] = nextIndex;
+        previousIndexes[nextIndex] = previousIndex;
+        remainingPointCount--;
+        pendingIndexes.push(previousIndex, nextIndex);
     }
+
+    if (remainingPointCount === pointCount) {
+        return;
+    }
+
+    const compacted = [];
+    let startIndex = 0;
+
+    while (startIndex < pointCount && removed[startIndex]) {
+        startIndex++;
+    }
+
+    if (startIndex < pointCount) {
+        let index = startIndex;
+
+        do {
+            compacted.push(points[index]);
+            index = nextIndexes[index];
+        } while (index !== startIndex && compacted.length < remainingPointCount);
+    }
+
+    points.length = 0;
+    points.push(...compacted);
 }
 
 function crossCoordinates(first, second, third) {
@@ -272,7 +324,7 @@ function crossCoordinates(first, second, third) {
         - (second.y - first.y) * (third.x - first.x);
 }
 
-function arePointsEqual(first, second) {
+export function arePointsEqual(first, second) {
     return Math.abs(first.x - second.x) <= geometryEpsilon
         && Math.abs(first.y - second.y) <= geometryEpsilon;
 }

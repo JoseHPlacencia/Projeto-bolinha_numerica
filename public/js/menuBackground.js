@@ -63,17 +63,19 @@ export function createMenuBackground(gameConfig) {
         const snapshotFollowId = getSnapshotFollowId(snapshot);
         if (snapshotFollowId) setFollowId(snapshotFollowId);
 
-        renderer.processSnapshot(snapshot);
-        const applyResult = snapshots.processSnapshot(snapshot);
+        const applyResult = processSnapshotSafely(snapshot);
 
         if (typeof acknowledge === "function") {
             acknowledge(createSnapshotAcknowledgement(applyResult));
-            return;
+        } else if (applyResult && applyResult.applied === false) {
+            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
         }
 
         if (applyResult && applyResult.applied === false) {
-            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
+            return;
         }
+
+        renderer.processSnapshot(snapshot);
     });
 
     return {
@@ -243,6 +245,25 @@ export function createMenuBackground(gameConfig) {
 
         context.setTransform(1, 0, 0, 1, 0, 0);
         context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function processSnapshotSafely(snapshot) {
+        try {
+            return snapshots.processSnapshot(snapshot);
+        } catch (error) {
+            console.error("Failed to apply menu snapshot; requesting a full resync.", error);
+            snapshots.reset();
+            renderer.resetSnapshots();
+
+            return {
+                applied: false,
+                invalidations: {
+                    playerInfo: [],
+                    territories: [],
+                    trails: []
+                }
+            };
+        }
     }
 }
 

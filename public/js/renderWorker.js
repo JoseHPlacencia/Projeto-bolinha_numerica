@@ -96,7 +96,18 @@ function processSnapshot(snapshot) {
         return;
     }
 
-    const applyResult = snapshots.processSnapshot(snapshot);
+    let applyResult = null;
+
+    try {
+        applyResult = snapshots.processSnapshot(snapshot);
+    } catch (error) {
+        console.error("Worker failed to apply snapshot; requesting a full resync.", error);
+        snapshots.reset();
+        self.postMessage({
+            type: "snapshotResync"
+        });
+        return;
+    }
 
     if (applyResult && applyResult.applied === false) {
         self.postMessage({

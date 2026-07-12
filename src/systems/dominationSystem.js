@@ -655,6 +655,11 @@ function storeCaptureOperation(
         return;
     }
 
+    if (capture.operation.trailPoints.length > getCaptureOperationMaxTrailPoints()) {
+        delete territory.lastCaptureOperation;
+        return;
+    }
+
     if (!arePolygonAreasClose(capture.operation.previewPolygon, territory.polygon)) {
         return;
     }
@@ -691,6 +696,14 @@ function storeCaptureOperation(
         endContact: capture.operation.endContact,
         keepAnchor: capture.operation.keepAnchor
     };
+}
+
+function getCaptureOperationMaxTrailPoints() {
+    const configuredLimit = Number(config.network.captureOperationMaxTrailPoints);
+
+    return Number.isInteger(configuredLimit) && configuredLimit >= 2
+        ? configuredLimit
+        : Math.max(512, Number(config.network.trailUpdateMaxPoints) || 512) * 4;
 }
 
 function storeCaptureAffectedTerritoryIds(territories, territory, playerId, changedPlayerIds) {

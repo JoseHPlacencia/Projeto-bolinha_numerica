@@ -215,6 +215,10 @@ function createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, 
     } else {
         const neededTrailPoints = createNeededCaptureTrailPoints(operation, knownTrail);
 
+        if (neededTrailPoints && neededTrailPoints.exceedsBudget) {
+            return null;
+        }
+
         if (neededTrailPoints) {
             serializedOperation.trailTailStart = neededTrailPoints.start;
             serializedOperation.trailTailPoints = packPoints(neededTrailPoints.points);
@@ -277,7 +281,17 @@ function createNeededCaptureTrailPoints(operation, knownTrail) {
         return null;
     }
 
+    const missingPointCount = requiredClientLength - tailStart;
+    const maxPointCount = Math.max(1, Number(config.network.trailUpdateMaxPoints) || 512);
+
+    if (missingPointCount > maxPointCount) {
+        return {
+            exceedsBudget: true
+        };
+    }
+
     return {
+        exceedsBudget: false,
         start: tailStart,
         points: operation.trailPoints.slice(tailStart, requiredClientLength)
     };

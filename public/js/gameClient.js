@@ -83,8 +83,7 @@ export function startClient(gameConfig, options = {}) {
     socket.on("gameState", (snapshot, acknowledge) => {
         applyRoomConfig(snapshot && snapshot.roomConfig);
         syncSpectatorFromSnapshot(snapshot);
-        renderer.processSnapshot(snapshot);
-        const applyResult = snapshots.processSnapshot(snapshot);
+        const applyResult = processSnapshotSafely(snapshot);
 
         if (snapshot.numbers && snapshot.numbers.theme) {
             numberHud.updateTheme(snapshot.numbers.theme, snapshot.numbers.themeEndsIn || 0);
@@ -92,12 +91,15 @@ export function startClient(gameConfig, options = {}) {
 
         if (typeof acknowledge === "function") {
             acknowledge(createSnapshotAcknowledgement(applyResult));
+        } else if (applyResult && !applyResult.applied) {
+            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
+        }
+
+        if (applyResult && applyResult.applied === false) {
             return;
         }
 
-        if (applyResult && !applyResult.applied) {
-            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
-        }
+        renderer.processSnapshot(snapshot);
     });
 
     resizeCanvases();
@@ -342,6 +344,25 @@ export function startClient(gameConfig, options = {}) {
                     trails: []
                 }
         };
+    }
+
+    function processSnapshotSafely(snapshot) {
+        try {
+            return snapshots.processSnapshot(snapshot);
+        } catch (error) {
+            console.error("Failed to apply game snapshot; requesting a full resync.", error);
+            snapshots.reset();
+            renderer.resetSnapshots();
+
+            return {
+                applied: false,
+                invalidations: {
+                    playerInfo: [],
+                    territories: [],
+                    trails: []
+                }
+            };
+        }
     }
 
     function getMinimapUpdateIntervalMs(config) {
