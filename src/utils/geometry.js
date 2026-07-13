@@ -1,4 +1,9 @@
 const polygonClipping = require("polygon-clipping");
+const {
+    findClosestRingBoundaryContact,
+    findSegmentRingBoundaryContact,
+    isPointInPolygonRing
+} = require("./polygonSpatialIndex");
 const coordinatePrecision = 1000;
 const geometryEpsilon = 1e-7;
 const redundantPointDistanceTolerance = 0.05;
@@ -174,7 +179,7 @@ function createOperationalPolygon(polygon, options = {}) {
 function isPointInPolygon(polygon, x, y) {
     const outerRing = polygon[0];
 
-    return Boolean(outerRing) && isPointInRing(outerRing, x, y);
+    return Boolean(outerRing) && isPointInPolygonRing(outerRing, x, y);
 }
 
 function isCircleInsidePolygon(polygon, x, y, radius) {
@@ -651,51 +656,11 @@ function doCoordinateBoundsOverlap(first, second) {
 }
 
 function findSegmentPolygonBoundaryContact(polygon, startPoint, endPoint) {
-    const ring = getOpenRing(polygon[0]);
-    let closestContact = null;
-
-    for (let segmentIndex = 0; segmentIndex < ring.length; segmentIndex++) {
-        const boundaryStart = coordinatesToPoint(ring[segmentIndex]);
-        const boundaryEnd = coordinatesToPoint(ring[(segmentIndex + 1) % ring.length]);
-        const intersection = getSegmentIntersection(startPoint, endPoint, boundaryStart, boundaryEnd);
-
-        if (!intersection) {
-            continue;
-        }
-
-        if (!closestContact || intersection.pathT < closestContact.pathT) {
-            closestContact = {
-                point: intersection.point,
-                pathT: intersection.pathT,
-                segmentIndex,
-                segmentT: intersection.segmentT
-            };
-        }
-    }
-
-    return closestContact;
+    return findSegmentRingBoundaryContact(polygon && polygon[0], startPoint, endPoint);
 }
 
 function findClosestPolygonBoundaryContact(polygon, point) {
-    const ring = getOpenRing(polygon[0]);
-    let closestContact = null;
-
-    for (let segmentIndex = 0; segmentIndex < ring.length; segmentIndex++) {
-        const segmentStart = coordinatesToPoint(ring[segmentIndex]);
-        const segmentEnd = coordinatesToPoint(ring[(segmentIndex + 1) % ring.length]);
-        const projection = projectPointOnSegment(point, segmentStart, segmentEnd);
-
-        if (!closestContact || projection.distanceSquared < closestContact.distanceSquared) {
-            closestContact = {
-                point: projection.point,
-                segmentIndex,
-                segmentT: projection.segmentT,
-                distanceSquared: projection.distanceSquared
-            };
-        }
-    }
-
-    return closestContact;
+    return findClosestRingBoundaryContact(polygon && polygon[0], point);
 }
 
 function polygonToMultiPolygon(polygon) {
@@ -1181,28 +1146,6 @@ function createSortedCoordinateRingSegments(openRing) {
         .sort((first, second) => first.bounds.minX - second.bounds.minX);
 }
 
-function isPointInRing(ring, x, y) {
-    let isInside = false;
-
-    for (let currentIndex = 0, previousIndex = ring.length - 1; currentIndex < ring.length; previousIndex = currentIndex++) {
-        const current = ring[currentIndex];
-        const previous = ring[previousIndex];
-        const crossesHorizontalRay = (current[1] > y) !== (previous[1] > y);
-
-        if (!crossesHorizontalRay) {
-            continue;
-        }
-
-        const intersectionX = ((previous[0] - current[0]) * (y - current[1])) / (previous[1] - current[1]) + current[0];
-
-        if (x < intersectionX) {
-            isInside = !isInside;
-        }
-    }
-
-    return isInside;
-}
-
 function calculateRingArea(ring) {
     let area = 0;
 
@@ -1225,53 +1168,6 @@ function calculateAveragePoint(ring) {
     return {
         x: total.x / ring.length,
         y: total.y / ring.length
-    };
-}
-
-function getSegmentIntersection(firstStart, firstEnd, secondStart, secondEnd) {
-    const firstDirection = subtractPoints(firstEnd, firstStart);
-    const secondDirection = subtractPoints(secondEnd, secondStart);
-    const denominator = crossProduct(firstDirection, secondDirection);
-
-    if (Math.abs(denominator) <= geometryEpsilon) {
-        return null;
-    }
-
-    const startDelta = subtractPoints(secondStart, firstStart);
-    const pathT = crossProduct(startDelta, secondDirection) / denominator;
-    const segmentT = crossProduct(startDelta, firstDirection) / denominator;
-
-    if (!isUnitRange(pathT) || !isUnitRange(segmentT)) {
-        return null;
-    }
-
-    return {
-        point: {
-            x: firstStart.x + firstDirection.x * pathT,
-            y: firstStart.y + firstDirection.y * pathT
-        },
-        pathT,
-        segmentT
-    };
-}
-
-function projectPointOnSegment(point, segmentStart, segmentEnd) {
-    const direction = subtractPoints(segmentEnd, segmentStart);
-    const lengthSquared = direction.x * direction.x + direction.y * direction.y;
-    const segmentT = lengthSquared <= geometryEpsilon
-        ? 0
-        : clampUnitRange(dotProduct(subtractPoints(point, segmentStart), direction) / lengthSquared);
-    const projectedPoint = {
-        x: segmentStart.x + direction.x * segmentT,
-        y: segmentStart.y + direction.y * segmentT
-    };
-    const distanceX = point.x - projectedPoint.x;
-    const distanceY = point.y - projectedPoint.y;
-
-    return {
-        point: projectedPoint,
-        segmentT,
-        distanceSquared: distanceX * distanceX + distanceY * distanceY
     };
 }
 
@@ -1317,13 +1213,6 @@ function getCoordinateDistanceSquared(first, second) {
     return x * x + y * y;
 }
 
-function coordinatesToPoint(coordinates) {
-    return {
-        x: coordinates[0],
-        y: coordinates[1]
-    };
-}
-
 function subtractPoints(first, second) {
     return {
         x: first.x - second.x,
@@ -1337,14 +1226,6 @@ function dotProduct(first, second) {
 
 function crossProduct(first, second) {
     return first.x * second.y - first.y * second.x;
-}
-
-function isUnitRange(value) {
-    return value >= -geometryEpsilon && value <= 1 + geometryEpsilon;
-}
-
-function clampUnitRange(value) {
-    return Math.max(0, Math.min(1, value));
 }
 
 function areAdjacentSegments(firstIndex, secondIndex, segmentCount) {
