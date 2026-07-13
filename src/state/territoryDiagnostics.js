@@ -51,6 +51,7 @@ function createCaptureApplyMetrics() {
         overlapRepairQueuePendingCount: 0,
         overlapRepairQueueProcessedCount: 0,
         overlapRepairQueueQueuedCount: 0,
+        overlapRepairQueueRefreshCount: 0,
         overlapRepairWorkerBackpressureCount: 0,
         overlapRepairWorkerChangedCount: 0,
         overlapRepairWorkerCompletedCount: 0,

@@ -13,6 +13,7 @@ const { Player } = require("../src/entities/player");
 const {
     applyCapturedPolygon,
     createTerritories,
+    getTerritoryOverlapRepairQueueDiagnostics,
     initializePlayerTerritory,
     isPointOwnedByPlayer,
     processTerritoryOverlapRepairQueue
@@ -27,7 +28,8 @@ const {
 const {
     acknowledgeReliableSnapshot,
     assignSnapshotSequence,
-    sendSnapshot
+    sendSnapshot,
+    shouldDeferTerritoryGeometry
 } = require("../src/core/snapshotLoop");
 const { resetSocketSnapshotState } = require("../src/core/snapshotState");
 const {
@@ -930,6 +932,146 @@ test("stale territory repair worker results are discarded by version", async () 
     assert.equal(isPointOwnedByPlayer(territories, "victim", 350, 50), true);
     assert.equal(isPointOwnedByPlayer(territories, "victim", 90, 50), false);
     assert.equal(diagnostics.captureApply.overlapRepairWorkerChangedCount, 0);
+});
+
+test("pending dense overlap repair restarts after another owner mutation", async () => {
+    const initialOwnerPolygon = createDenseRectanglePolygon(-100, 0, -50, 100, 160);
+    const firstOwnerPolygon = createDenseRectanglePolygon(0, 0, 100, 100, 160);
+    const secondOwnerPolygon = createDenseRectanglePolygon(0, 0, 120, 100, 160);
+    const territories = new Map([
+        ["owner", createCutTerritoryState("owner", initialOwnerPolygon)],
+        ["first", createCutTerritoryState(
+            "first",
+            createDenseRectanglePolygon(80, 0, 180, 30, 160)
+        )],
+        ["second", createCutTerritoryState(
+            "second",
+            createDenseRectanglePolygon(80, 35, 180, 65, 160)
+        )],
+        ["third", createCutTerritoryState(
+            "third",
+            createDenseRectanglePolygon(80, 70, 180, 100, 160)
+        )]
+    ]);
+    const diagnostics = { phases: {} };
+
+    applyCapturedPolygon(
+        territories,
+        "owner",
+        createRectanglePolygon(-120, 0, -110, 10),
+        {
+            diagnostics,
+            ownerPolygon: firstOwnerPolygon
+        }
+    );
+    processTerritoryOverlapRepairQueue(territories, new Map(), {
+        diagnostics
+    });
+
+    assert.equal(diagnostics.captureApply.overlapRepairWorkerDispatchedCount, 2);
+    assert.ok(diagnostics.captureApply.overlapRepairWorkerBackpressureCount >= 1);
+    assert.deepEqual(getTerritoryOverlapRepairQueueDiagnostics(territories), {
+        completedJobs: 0,
+        inFlightPairs: 2,
+        pendingItems: 1,
+        refreshRequests: 0
+    });
+
+    applyCapturedPolygon(
+        territories,
+        "owner",
+        createRectanglePolygon(-140, 0, -130, 10),
+        {
+            diagnostics,
+            ownerPolygon: secondOwnerPolygon
+        }
+    );
+
+    await processTerritoryRepairsUntil(
+        territories,
+        new Map(),
+        diagnostics,
+        () => ["first", "second", "third"].every(id => (
+            calculatePolygonIntersectionArea(
+                territories.get("owner").polygon,
+                territories.get(id).polygon
+            ) <= 1
+        ))
+    );
+
+    assert.ok(diagnostics.captureApply.overlapRepairQueueRefreshCount >= 1);
+    assert.ok(diagnostics.captureApply.overlapRepairWorkerStaleCount >= 1);
+});
+
+test("snapshots defer reliable geometry while dense overlap repair is unsettled", async () => {
+    const owner = new Player("owner", { x: -75, y: 50 });
+    const first = new Player("first", { x: 150, y: 25 });
+    const second = new Player("second", { x: 150, y: 75 });
+    const players = new Map([
+        [owner.id, owner],
+        [first.id, first],
+        [second.id, second]
+    ]);
+    const territories = new Map([
+        [owner.id, createCutTerritoryState(
+            owner.id,
+            createDenseRectanglePolygon(-100, 0, -50, 100, 160)
+        )],
+        [first.id, createCutTerritoryState(
+            first.id,
+            createDenseRectanglePolygon(80, 0, 180, 45, 160)
+        )],
+        [second.id, createCutTerritoryState(
+            second.id,
+            createDenseRectanglePolygon(80, 55, 180, 100, 160)
+        )]
+    ]);
+    const socket = createSocket(owner.id, { roomCode: "ROOM" });
+    const io = { sockets: { sockets: new Map([[socket.id, socket]]) } };
+    const diagnostics = { phases: {} };
+
+    sendSnapshot(io, players, territories, "ROOM", null);
+    const confirmedOwnerVersion = socket.data.snapshotState.territories.get(owner.id).version;
+
+    applyCapturedPolygon(
+        territories,
+        owner.id,
+        createRectanglePolygon(-120, 0, -110, 10),
+        {
+            diagnostics,
+            ownerPolygon: createDenseRectanglePolygon(0, 0, 120, 100, 160),
+            players
+        }
+    );
+    processTerritoryOverlapRepairQueue(territories, players, {
+        diagnostics,
+        players
+    });
+
+    assert.equal(shouldDeferTerritoryGeometry(territories), true);
+    socket.emitted.length = 0;
+    sendSnapshot(io, players, territories, "ROOM", null);
+
+    const deferredSnapshot = socket.emitted.find(event => event.event === "gameState").payload;
+
+    assert.deepEqual(deferredSnapshot.territories, {});
+    assert.deepEqual(deferredSnapshot.territoryOps, {});
+    assert.deepEqual(deferredSnapshot.trails, {});
+    assert.equal(deferredSnapshot.preserveTrails, true);
+    assert.equal(
+        socket.data.snapshotState.territories.get(owner.id).version,
+        confirmedOwnerVersion
+    );
+
+    await processTerritoryRepairsUntil(
+        territories,
+        players,
+        diagnostics,
+        () => getMaximumTerritoryOverlapArea(territories) <= 1
+            && !shouldDeferTerritoryGeometry(territories)
+    );
+
+    assert.equal(shouldDeferTerritoryGeometry(territories), false);
 });
 
 test("positive-area overlap predicate distinguishes shared borders from aligned overlap", () => {

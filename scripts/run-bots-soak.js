@@ -5,7 +5,10 @@ const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const config = require("../src/config/gameConfig");
 const { createRoomRuntimeConfig } = require("../src/core/roomSettings");
-const { createTerritories } = require("../src/state/territories");
+const {
+    createTerritories,
+    getTerritoryOverlapRepairQueueDiagnostics
+} = require("../src/state/territories");
 const {
     createBotManager,
     getBotPlayerCount
@@ -21,9 +24,11 @@ const { updateTrails } = require("../src/systems/trailSystem");
 const {
     calculatePolygonArea,
     calculatePolygonIntersectionArea,
+    doBoundsOverlap,
     getPolygonPointCount
 } = require("../src/utils/geometry");
 const {
+    createTerritoryOverlapDetail,
     keepSlowestSamples,
     roundMetric,
     summarizeDistribution,
@@ -71,6 +76,7 @@ const captureCounterNames = [
     "overlapRepairQueueChangedCount",
     "overlapRepairQueueProcessedCount",
     "overlapRepairQueueQueuedCount",
+    "overlapRepairQueueRefreshCount",
     "overlapRepairWorkerBackpressureCount",
     "overlapRepairWorkerChangedCount",
     "overlapRepairWorkerCompletedCount",
@@ -187,7 +193,7 @@ async function runSoak(options, startedAt, realStartedAt) {
             }
 
             if (shouldSample(measuredTick, options.ticks, options.overlapEvery)) {
-                collectOverlapSample(scenario.territories, series, counters);
+                collectOverlapSample(scenario, measuredTick, series, counters);
             }
         }
 
@@ -236,6 +242,7 @@ async function runSoak(options, startedAt, realStartedAt) {
 
 function createScenario(options) {
     const runtimeConfig = createRoomRuntimeConfig(null, options.difficulty);
+
     const players = new Map();
     const territories = createTerritories();
     const numberSystem = createNumberSystem(
@@ -337,8 +344,12 @@ function createCounters() {
         captureApplyMaxima: {},
         numberCollisions: 0,
         overlapChecks: 0,
+        overlapIntersectionChecks: 0,
         positiveOverlapSamples: 0,
+        positiveOverlapDetails: [],
+        repairedOverlapDetails: [],
         maximumOverlapArea: 0,
+        maximumOverlapSample: null,
         trails: {}
     };
 }
@@ -374,6 +385,11 @@ function collectTickMetrics(result, tick, scenario, series, counters, slowestTic
         counters.captureApplyMaxima,
         result.trailDiagnostics && result.trailDiagnostics.captureApply,
         captureMaximumNames
+    );
+    recordRepairedOverlapDetail(
+        counters,
+        result.trailDiagnostics && result.trailDiagnostics.captureApply,
+        tick
     );
     addSelectedCounters(counters.bot, result.botDiagnostics, botCounterNames);
     addSelectedCounters(
@@ -438,31 +454,79 @@ function collectGeometrySample(scenario, tick, series, state) {
     state.lastGeometryTick = tick;
 }
 
-function collectOverlapSample(territories, series, counters) {
-    const entries = [...territories.values()];
+function collectOverlapSample(scenario, tick, series, counters) {
+    const entries = [...scenario.territories.entries()];
     let sampleMaximum = 0;
+    let sampleDetail = null;
 
     for (let firstIndex = 0; firstIndex < entries.length; firstIndex++) {
         for (let secondIndex = firstIndex + 1; secondIndex < entries.length; secondIndex++) {
-            const area = calculatePolygonIntersectionArea(
-                entries[firstIndex].polygon,
-                entries[secondIndex].polygon
-            );
+            const firstTerritory = entries[firstIndex][1];
+            const secondTerritory = entries[secondIndex][1];
 
             counters.overlapChecks++;
-            sampleMaximum = Math.max(sampleMaximum, area);
-            counters.maximumOverlapArea = Math.max(counters.maximumOverlapArea, area);
+
+            if (firstTerritory.bounds
+                && secondTerritory.bounds
+                && !doBoundsOverlap(firstTerritory.bounds, secondTerritory.bounds)) {
+                continue;
+            }
+
+            counters.overlapIntersectionChecks++;
+            const area = calculatePolygonIntersectionArea(
+                firstTerritory.polygon,
+                secondTerritory.polygon
+            );
+
+            if (area > sampleMaximum) {
+                sampleMaximum = area;
+                sampleDetail = createTerritoryOverlapDetail({
+                    area,
+                    calculateArea: calculatePolygonArea,
+                    firstEntry: entries[firstIndex],
+                    getPointCount: getPolygonPointCount,
+                    players: scenario.players,
+                    secondEntry: entries[secondIndex],
+                    tick
+                });
+            }
         }
+    }
+
+    if (sampleMaximum > counters.maximumOverlapArea) {
+        counters.maximumOverlapArea = sampleMaximum;
+        counters.maximumOverlapSample = sampleDetail;
     }
 
     if (sampleMaximum > 1) {
         counters.positiveOverlapSamples++;
+        sampleDetail.repair = {
+            backpressureCount: counters.captureApply.overlapRepairWorkerBackpressureCount || 0,
+            changedCount: counters.captureApply.overlapRepairWorkerChangedCount || 0,
+            completedCount: counters.captureApply.overlapRepairWorkerCompletedCount || 0,
+            dispatchedCount: counters.captureApply.overlapRepairWorkerDispatchedCount || 0,
+            refreshCount: counters.captureApply.overlapRepairQueueRefreshCount || 0,
+            staleCount: counters.captureApply.overlapRepairWorkerStaleCount || 0,
+            state: getTerritoryOverlapRepairQueueDiagnostics(scenario.territories)
+        };
+        counters.positiveOverlapDetails.push(sampleDetail);
     }
 
     if (!series.geometry.overlapArea) {
         series.geometry.overlapArea = [];
     }
     series.geometry.overlapArea.push(sampleMaximum);
+}
+
+function recordRepairedOverlapDetail(counters, captureApply, tick) {
+    if (!captureApply || !captureApply.postCaptureOverlapFirst) {
+        return;
+    }
+
+    counters.repairedOverlapDetails.push({
+        tick,
+        ...captureApply.postCaptureOverlapFirst
+    });
 }
 
 function createReport(context) {
@@ -518,8 +582,12 @@ function createReport(context) {
             restarts: context.measuredRestarts,
             numberCollisions: counters.numberCollisions,
             overlapChecks: counters.overlapChecks,
+            overlapIntersectionChecks: counters.overlapIntersectionChecks,
             positiveOverlapSamples: counters.positiveOverlapSamples,
+            positiveOverlapDetails: counters.positiveOverlapDetails,
+            repairedOverlapDetails: counters.repairedOverlapDetails,
             maximumOverlapArea: roundMetric(counters.maximumOverlapArea),
+            maximumOverlapSample: counters.maximumOverlapSample,
             trails: counters.trails,
             captureApply: counters.captureApply,
             captureApplyMaxima: counters.captureApplyMaxima,
@@ -544,6 +612,7 @@ function createMarkdownReport(report) {
     const tick = report.timing.tickDurationMs;
     const memory = report.memory;
     const geometry = report.geometry;
+    const captureApply = report.events.captureApply;
 
     return `# Baseline local da sala BOTS
 

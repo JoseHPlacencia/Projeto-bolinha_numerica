@@ -816,44 +816,200 @@ function simplifySimplePolygonForOperations(polygon, tolerance, minPointCount, t
 }
 
 function simplifyOpenRingByDistance(ring, tolerance, minPointCount, targetPointCount) {
-    const simplifiedRing = ring.map(point => [point[0], point[1]]);
+    const pointCount = ring.length;
+
+    if (pointCount <= minPointCount || pointCount <= targetPointCount) {
+        return ring.map(point => [point[0], point[1]]);
+    }
+
+    const previousIndexes = new Int32Array(pointCount);
+    const nextIndexes = new Int32Array(pointCount);
+    const revisions = new Uint32Array(pointCount);
+    const removed = new Uint8Array(pointCount);
+    const candidates = [];
     const toleranceSquared = tolerance * tolerance;
-    let index = 0;
+    let remainingPointCount = pointCount;
 
-    while (simplifiedRing.length > minPointCount
-        && simplifiedRing.length > targetPointCount
-        && index < simplifiedRing.length) {
-        const previous = simplifiedRing[(index - 1 + simplifiedRing.length) % simplifiedRing.length];
-        const current = simplifiedRing[index];
-        const next = simplifiedRing[(index + 1) % simplifiedRing.length];
+    for (let index = 0; index < pointCount; index++) {
+        previousIndexes[index] = (index - 1 + pointCount) % pointCount;
+        nextIndexes[index] = (index + 1) % pointCount;
+    }
 
-        if (isCoordinateRedundantWithinTolerance(previous, current, next, toleranceSquared)) {
-            simplifiedRing.splice(index, 1);
-            index = Math.max(0, index - 1);
+    for (let index = 0; index < pointCount; index++) {
+        pushSimplificationCandidate(
+            candidates,
+            ring,
+            index,
+            previousIndexes,
+            nextIndexes,
+            revisions
+        );
+    }
+
+    while (remainingPointCount > minPointCount
+        && remainingPointCount > targetPointCount
+        && candidates.length > 0) {
+        const candidate = popMinimumHeapEntry(candidates);
+
+        if (removed[candidate.index] || revisions[candidate.index] !== candidate.revision) {
             continue;
         }
 
-        index++;
+        if (candidate.distanceSquared > toleranceSquared) {
+            break;
+        }
+
+        const previousIndex = previousIndexes[candidate.index];
+        const nextIndex = nextIndexes[candidate.index];
+
+        removed[candidate.index] = 1;
+        nextIndexes[previousIndex] = nextIndex;
+        previousIndexes[nextIndex] = previousIndex;
+        remainingPointCount--;
+
+        revisions[previousIndex]++;
+        revisions[nextIndex]++;
+        pushSimplificationCandidate(
+            candidates,
+            ring,
+            previousIndex,
+            previousIndexes,
+            nextIndexes,
+            revisions
+        );
+        pushSimplificationCandidate(
+            candidates,
+            ring,
+            nextIndex,
+            previousIndexes,
+            nextIndexes,
+            revisions
+        );
     }
 
-    return simplifiedRing;
+    return compactLinkedCoordinateRing(ring, nextIndexes, removed, remainingPointCount);
 }
 
-function isCoordinateRedundantWithinTolerance(first, second, third, toleranceSquared) {
+function pushSimplificationCandidate(
+    heap,
+    ring,
+    index,
+    previousIndexes,
+    nextIndexes,
+    revisions
+) {
+    const distanceSquared = getCoordinateRedundancyDistanceSquared(
+        ring[previousIndexes[index]],
+        ring[index],
+        ring[nextIndexes[index]]
+    );
+
+    if (!Number.isFinite(distanceSquared)) {
+        return;
+    }
+
+    pushMinimumHeapEntry(heap, {
+        distanceSquared,
+        index,
+        revision: revisions[index]
+    });
+}
+
+function getCoordinateRedundancyDistanceSquared(first, second, third) {
     if (!isCoordinateBetween(first, second, third)) {
-        return false;
+        return Number.POSITIVE_INFINITY;
     }
 
     const segmentLengthSquared = getCoordinateDistanceSquared(first, third);
 
     if (segmentLengthSquared <= geometryEpsilon) {
-        return getCoordinateDistanceSquared(first, second) <= toleranceSquared;
+        return getCoordinateDistanceSquared(first, second);
     }
 
     const cross = crossCoordinates(first, second, third);
-    const distanceSquared = (cross * cross) / segmentLengthSquared;
 
-    return distanceSquared <= toleranceSquared;
+    return (cross * cross) / segmentLengthSquared;
+}
+
+function pushMinimumHeapEntry(heap, entry) {
+    let index = heap.length;
+
+    heap.push(entry);
+
+    while (index > 0) {
+        const parentIndex = Math.floor((index - 1) / 2);
+
+        if (!isHeapEntryBefore(entry, heap[parentIndex])) {
+            break;
+        }
+
+        heap[index] = heap[parentIndex];
+        index = parentIndex;
+    }
+
+    heap[index] = entry;
+}
+
+function popMinimumHeapEntry(heap) {
+    const first = heap[0];
+    const last = heap.pop();
+
+    if (heap.length === 0) {
+        return first;
+    }
+
+    let index = 0;
+
+    while (true) {
+        const leftIndex = index * 2 + 1;
+
+        if (leftIndex >= heap.length) {
+            break;
+        }
+
+        const rightIndex = leftIndex + 1;
+        const childIndex = rightIndex < heap.length
+            && isHeapEntryBefore(heap[rightIndex], heap[leftIndex])
+            ? rightIndex
+            : leftIndex;
+
+        if (!isHeapEntryBefore(heap[childIndex], last)) {
+            break;
+        }
+
+        heap[index] = heap[childIndex];
+        index = childIndex;
+    }
+
+    heap[index] = last;
+    return first;
+}
+
+function isHeapEntryBefore(first, second) {
+    return first.distanceSquared < second.distanceSquared
+        || (first.distanceSquared === second.distanceSquared && first.index < second.index);
+}
+
+function compactLinkedCoordinateRing(ring, nextIndexes, removed, remainingPointCount) {
+    const compacted = [];
+    let startIndex = 0;
+
+    while (startIndex < ring.length && removed[startIndex]) {
+        startIndex++;
+    }
+
+    if (startIndex >= ring.length) {
+        return compacted;
+    }
+
+    let index = startIndex;
+
+    do {
+        compacted.push([ring[index][0], ring[index][1]]);
+        index = nextIndexes[index];
+    } while (index !== startIndex && compacted.length < remainingPointCount);
+
+    return compacted;
 }
 
 function createOperationalPolygonResult(

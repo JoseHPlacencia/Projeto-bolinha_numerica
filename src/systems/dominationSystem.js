@@ -51,7 +51,8 @@ function captureClosedTrail(player, territories, players, context = {}) {
             captureOverlapAudit: shouldAuditCaptureOverlaps(context),
             diagnostics,
             ownerPolygon,
-            players
+            players,
+            runtimeConfig: context.runtimeConfig
         })
     ));
 

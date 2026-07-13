@@ -349,6 +349,7 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
             if (!item || !territories.has(item.changedPlayerId)) {
                 if (item) {
                     state.pendingIds.delete(item.changedPlayerId);
+                    state.refreshRequests.delete(item.changedPlayerId);
                 }
                 continue;
             }
@@ -462,7 +463,18 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
                 }
             }
 
-            if (itemCompleted && item.cursor >= item.candidateIds.length) {
+            const refreshRequest = state.refreshRequests.get(item.changedPlayerId);
+
+            if (refreshRequest) {
+                state.refreshRequests.delete(item.changedPlayerId);
+                refreshOverlapRepairItem(
+                    item,
+                    territories,
+                    item.changedPlayerId,
+                    refreshRequest
+                );
+                state.pending.push(item);
+            } else if (itemCompleted && item.cursor >= item.candidateIds.length) {
                 state.pendingIds.delete(item.changedPlayerId);
             } else {
                 state.pending.push(item);
@@ -786,7 +798,23 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
         const state = getTerritoryOverlapRepairQueueState(territories, true);
 
         if (state.pendingIds.has(changedPlayerId)) {
-            return false;
+            const pendingItem = findPendingOverlapRepairItem(state, item => (
+                item && item.changedPlayerId === changedPlayerId
+            ));
+
+            if (pendingItem) {
+                refreshOverlapRepairItem(
+                    pendingItem,
+                    territories,
+                    changedPlayerId,
+                    options
+                );
+            } else {
+                mergeOverlapRepairRefreshRequest(state, changedPlayerId, options);
+            }
+
+            addCaptureApplyCount(options.metrics, "overlapRepairQueueRefreshCount", 1);
+            return true;
         }
 
         const candidateIds = createOverlapRepairQueueCandidateIds(
@@ -831,12 +859,33 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
                 inFlightPairKeys: new Set(),
                 pending: [],
                 pendingHead: 0,
-                pendingIds: new Set()
+                pendingIds: new Set(),
+                refreshRequests: new Map()
             };
             overlapRepairQueueStates.set(territories, state);
         }
 
         return state;
+    }
+
+    function getTerritoryOverlapRepairQueueDiagnostics(territories) {
+        const state = getTerritoryOverlapRepairQueueState(territories, false);
+
+        if (!state) {
+            return {
+                completedJobs: 0,
+                inFlightPairs: 0,
+                pendingItems: 0,
+                refreshRequests: 0
+            };
+        }
+
+        return {
+            completedJobs: state.completedJobs.length,
+            inFlightPairs: state.inFlightPairKeys.size,
+            pendingItems: getPendingOverlapRepairCount(state),
+            refreshRequests: state.refreshRequests.size
+        };
     }
 
     function createOverlapRepairQueueCandidateIds(territories, changedPlayerId, priorityCandidateIds) {
@@ -860,6 +909,30 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
         }
     }
 
+    function refreshOverlapRepairItem(item, territories, changedPlayerId, options = {}) {
+        item.candidateIds = createOverlapRepairQueueCandidateIds(
+            territories,
+            changedPlayerId,
+            options.priorityCandidateIds
+        );
+        item.cursor = 0;
+        item.ownerId = options.ownerId || item.ownerId || changedPlayerId;
+    }
+
+    function mergeOverlapRepairRefreshRequest(state, changedPlayerId, options = {}) {
+        const previous = state.refreshRequests.get(changedPlayerId);
+        const priorityCandidateIds = new Set(previous && previous.priorityCandidateIds || []);
+
+        for (const candidateId of options.priorityCandidateIds || []) {
+            priorityCandidateIds.add(candidateId);
+        }
+
+        state.refreshRequests.set(changedPlayerId, {
+            ownerId: options.ownerId || previous && previous.ownerId || changedPlayerId,
+            priorityCandidateIds: [...priorityCandidateIds]
+        });
+    }
+
     function trimOverlapRepairQueue(state) {
         const maxItems = getOverlapRepairQueueMaxItems();
 
@@ -868,6 +941,7 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
 
             if (removed) {
                 state.pendingIds.delete(removed.changedPlayerId);
+                state.refreshRequests.delete(removed.changedPlayerId);
             }
         }
 
@@ -1177,6 +1251,7 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
     return {
         auditChangedTerritoryOverlaps,
         getBoundsArea,
+        getTerritoryOverlapRepairQueueDiagnostics,
         processTerritoryOverlapRepairQueue,
         repairChangedTerritoryOverlaps,
         scheduleTerritoryOverlapRepairQueue

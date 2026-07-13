@@ -133,6 +133,85 @@ function keepSlowestSamples(samples, sample, limit = 10) {
     }
 }
 
+function createTerritoryOverlapDetail(options) {
+    const {
+        area,
+        calculateArea,
+        firstEntry,
+        getPointCount,
+        players,
+        secondEntry,
+        tick
+    } = options || {};
+
+    return {
+        tick: Number.isFinite(tick) ? tick : null,
+        area: roundMetric(area),
+        first: createTerritoryOverlapSubject(
+            firstEntry,
+            players,
+            calculateArea,
+            getPointCount
+        ),
+        second: createTerritoryOverlapSubject(
+            secondEntry,
+            players,
+            calculateArea,
+            getPointCount
+        )
+    };
+}
+
+function createTerritoryOverlapSubject(entry, players, calculateArea, getPointCount) {
+    const [id, territory] = Array.isArray(entry) ? entry : [null, null];
+    const polygon = territory && territory.polygon;
+    const player = players && typeof players.get === "function" ? players.get(id) : null;
+    const cachedArea = territory && territory.area;
+
+    return {
+        id,
+        version: Number.isFinite(territory && territory.version)
+            ? territory.version
+            : null,
+        pointCount: typeof getPointCount === "function"
+            ? getPointCount(polygon)
+            : null,
+        area: roundMetric(Number.isFinite(cachedArea)
+            ? cachedArea
+            : typeof calculateArea === "function" ? calculateArea(polygon) : null),
+        bounds: copyRoundedBounds(territory && territory.bounds),
+        base: copyRoundedPoint(territory && territory.baseX, territory && territory.baseY),
+        owner: player
+            ? {
+                x: roundMetric(player.x),
+                y: roundMetric(player.y),
+                lives: Number.isFinite(player.lives) ? player.lives : null
+            }
+            : null
+    };
+}
+
+function copyRoundedBounds(bounds) {
+    if (!bounds) {
+        return null;
+    }
+
+    const copy = {
+        minX: roundMetric(bounds.minX),
+        minY: roundMetric(bounds.minY),
+        maxX: roundMetric(bounds.maxX),
+        maxY: roundMetric(bounds.maxY)
+    };
+
+    return Object.values(copy).every(Number.isFinite) ? copy : null;
+}
+
+function copyRoundedPoint(x, y) {
+    return Number.isFinite(x) && Number.isFinite(y)
+        ? { x: roundMetric(x), y: roundMetric(y) }
+        : null;
+}
+
 function roundMetric(value) {
     return Number.isFinite(value)
         ? Math.round(value * 1000) / 1000
@@ -141,6 +220,7 @@ function roundMetric(value) {
 
 module.exports = {
     calculateLinearSlope,
+    createTerritoryOverlapDetail,
     getPercentile,
     keepSlowestSamples,
     roundMetric,

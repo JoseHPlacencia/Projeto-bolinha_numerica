@@ -236,26 +236,55 @@ function updateTrails(players, territories, context = {}) {
         ownerTrailCollisionSummaryCache: new Map(),
         trailDiagnostics: diagnostics
     };
-    const repairedPlayerIds = measureTrailPhase(diagnostics, "overlapRepairQueue", () => (
-        processTerritoryOverlapRepairQueue(territories, players, {
-            diagnostics,
-            players
-        })
-    ));
-
-    if (repairedPlayerIds.size > 0) {
-        addTrailDiagnosticCount(diagnostics, "captureChangedPlayerCount", repairedPlayerIds.size);
-        measureTrailPhase(diagnostics, "overlapRepairQueueRelocatePlayers", () => {
-            relocatePlayersAfterTerritoryChange(players, territories, repairedPlayerIds);
-        });
-    }
+    processQueuedTerritoryOverlapRepairs(
+        players,
+        territories,
+        context,
+        diagnostics,
+        "overlapRepairQueue"
+    );
 
     for (const player of players.values()) {
         updatePlayerTrail(player, territories, players, nextContext);
     }
 
+    if (diagnostics.captures > 0) {
+        processQueuedTerritoryOverlapRepairs(
+            players,
+            territories,
+            context,
+            diagnostics,
+            "postCaptureOverlapRepairQueue"
+        );
+    }
+
     diagnostics.slowestPhase = getSlowestTrailPhase(diagnostics.phases);
     return diagnostics;
+}
+
+function processQueuedTerritoryOverlapRepairs(
+    players,
+    territories,
+    context,
+    diagnostics,
+    phaseName
+) {
+    const repairedPlayerIds = measureTrailPhase(diagnostics, phaseName, () => (
+        processTerritoryOverlapRepairQueue(territories, players, {
+            diagnostics,
+            players,
+            runtimeConfig: context.runtimeConfig
+        })
+    ));
+
+    if (repairedPlayerIds.size <= 0) {
+        return;
+    }
+
+    addTrailDiagnosticCount(diagnostics, "captureChangedPlayerCount", repairedPlayerIds.size);
+    measureTrailPhase(diagnostics, `${phaseName}RelocatePlayers`, () => {
+        relocatePlayersAfterTerritoryChange(players, territories, repairedPlayerIds);
+    });
 }
 
 function updatePlayerTrail(player, territories, players = new Map([[player.id, player]]), context = {}) {

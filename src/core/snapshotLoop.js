@@ -22,6 +22,9 @@ const {
     normalizeGameLoopDiagnostics
 } = require("./snapshotGameLoopDiagnostics");
 const { resolveSpectatorFollowId } = require("../systems/spectatorSystem");
+const {
+    getTerritoryOverlapRepairQueueDiagnostics
+} = require("../state/territories");
 
 function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null, roomDiagnostics = null) {
     const intervalMs = 1000 / config.loop.snapshotRate;
@@ -49,6 +52,8 @@ function startSnapshotLoop(io, players, territories, roomCode, numberSystem, run
 }
 
 function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
+    const deferTerritoryGeometry = shouldDeferTerritoryGeometry(territories);
+
     for (const socket of io.sockets.sockets.values()) {
         const isPlayerSocket = roomCode && socket.data.roomCode === roomCode && players.has(socket.id);
         const isSpectatorSocket = roomCode && socket.data.spectatorRoomCode === roomCode;
@@ -71,6 +76,21 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
 
         if (retryPendingReliableSnapshot(socket)) {
             sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig, loopDiagnostics, roomDiagnostics);
+            continue;
+        }
+
+        if (deferTerritoryGeometry) {
+            sendVolatileSnapshotWithoutReliableGeometry(
+                socket,
+                players,
+                territories,
+                numberSystem,
+                viewerId,
+                runtimeConfig,
+                loopDiagnostics,
+                roomDiagnostics,
+                "volatile-territory-repair"
+            );
             continue;
         }
 
@@ -113,6 +133,32 @@ function retryPendingReliableSnapshot(socket) {
 
 function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
     if (config.network.volatileSnapshotsWhileReliablePendingEnabled === false) return;
+    sendVolatileSnapshotWithoutReliableGeometry(
+        socket,
+        players,
+        territories,
+        numberSystem,
+        viewerId,
+        runtimeConfig,
+        loopDiagnostics,
+        roomDiagnostics,
+        "volatile-pending",
+        socket.data.pendingReliableSnapshot
+    );
+}
+
+function sendVolatileSnapshotWithoutReliableGeometry(
+    socket,
+    players,
+    territories,
+    numberSystem,
+    viewerId,
+    runtimeConfig,
+    loopDiagnostics,
+    roomDiagnostics,
+    sendType,
+    pending = null
+) {
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
     const measuredSnapshot = createMeasuredSnapshot(
@@ -132,7 +178,16 @@ function sendVolatileSnapshotWhileReliablePending(socket, players, territories, 
         snapshot.spectator = { followId: viewerId };
     }
     const volatileSnapshot = createVolatileSnapshotForPendingReliableState(snapshot, clientState);
-    emitVolatileSnapshot(socket, volatileSnapshot, "volatile-pending", socket.data.pendingReliableSnapshot, sendDiagnostics);
+    emitVolatileSnapshot(socket, volatileSnapshot, sendType, pending, sendDiagnostics);
+}
+
+function shouldDeferTerritoryGeometry(territories) {
+    const diagnostics = getTerritoryOverlapRepairQueueDiagnostics(territories);
+
+    return diagnostics.pendingItems > 0
+        || diagnostics.inFlightPairs > 0
+        || diagnostics.completedJobs > 0
+        || diagnostics.refreshRequests > 0;
 }
 
 function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
@@ -479,4 +534,5 @@ module.exports.assignSnapshotSequence = assignSnapshotSequence;
 module.exports.invalidateSnapshotCache = invalidateSnapshotCache;
 module.exports.queueReliableSnapshot = queueReliableSnapshot;
 module.exports.sendSnapshot = sendSnapshot;
+module.exports.shouldDeferTerritoryGeometry = shouldDeferTerritoryGeometry;
 module.exports.shouldSendReliably = shouldSendReliably;

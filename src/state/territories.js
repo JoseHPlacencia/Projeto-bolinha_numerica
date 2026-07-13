@@ -32,13 +32,14 @@ const { createTerritoryOverlapRepair } = require("./territoryOverlapRepair");
 
 const territoryChangeAreaEpsilon = 1;
 
+const territoryOverlapRepair = createTerritoryOverlapRepair({ updateTerritoryPolygon });
 const {
     auditChangedTerritoryOverlaps,
     getBoundsArea,
-    processTerritoryOverlapRepairQueue,
+    getTerritoryOverlapRepairQueueDiagnostics,
     repairChangedTerritoryOverlaps,
     scheduleTerritoryOverlapRepairQueue
-} = createTerritoryOverlapRepair({ updateTerritoryPolygon });
+} = territoryOverlapRepair;
 
 /**
  * Authoritative territory state.
@@ -290,6 +291,14 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
     return changedPlayerIds;
 }
 
+function processTerritoryOverlapRepairQueue(territories, players = new Map(), options = {}) {
+    return territoryOverlapRepair.processTerritoryOverlapRepairQueue(
+        territories,
+        players,
+        options
+    );
+}
+
 function createTerritoryState(territory) {
     return updateTerritoryMetrics({
         ...territory
@@ -361,6 +370,7 @@ module.exports = {
     createTerritories,
     deletePlayerTerritory,
     getPlayerTerritoryPolygon,
+    getTerritoryOverlapRepairQueueDiagnostics,
     initializePlayerTerritory,
     isPointOwnedByPlayer,
     processTerritoryOverlapRepairQueue,

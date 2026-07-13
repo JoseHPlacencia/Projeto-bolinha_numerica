@@ -272,12 +272,18 @@ const security = Object.freeze({
     })
 });
 
+const clientTerritory = Object.freeze({
+    baseBorderInset: territory.baseBorderInset,
+    baseBorderWidth: territory.baseBorderWidth,
+    fillAlpha: territory.fillAlpha
+});
+
 const client = Object.freeze({
     socket: Object.freeze({
         transports: socketTransports
     }),
     world,
-    territory,
+    territory: clientTerritory,
     numbers,
     player,
     gameMode,
