@@ -32,26 +32,25 @@ const {
     getTrailPointsCached,
     segmentsCross
 } = require("./botTrailGeometry");
+const {
+    clampPointToMap,
+    getAngleDelta,
+    getBotAi,
+    getSelfTrailClearanceRecentPointSkip
+} = require("./botNavigation");
 
 const geometryEpsilon = 1e-7;
 
 /**
  * Builds the route-safety service used by the bot policy.
  *
- * The return-target resolver is injected because territory return policy remains
- * in botSystem. Trail caches stay in the caller-owned decision context, so target
+ * The return-target resolver is injected because territory return policy belongs
+ * to botTargeting. Trail caches stay in the caller-owned decision context, so target
  * selection and route safety share the same per-tick geometry.
  */
 function createBotRouteSafety({ getReturnTarget }) {
     if (typeof getReturnTarget !== "function") {
         throw new TypeError("bot route safety requires a return-target resolver");
-    }
-
-    function getAngleDelta(fromAngle, toAngle) {
-        return Math.atan2(
-            Math.sin(toAngle - fromAngle),
-            Math.cos(toAngle - fromAngle)
-        );
     }
 
     function normalizeAngle(angle) {
@@ -1044,50 +1043,12 @@ function createBotRouteSafety({ getReturnTarget }) {
         return Math.max(6, Math.ceil(distance / config.world.playerSize));
     }
 
-    function getSelfTrailClearanceRecentPointSkip() {
-        return Math.max(10, Math.ceil((config.world.playerSize * 4) / config.territory.trailPointSpacing));
-    }
-
     function getSelfTrailCollisionRecentPointSkip() {
         return Math.max(4, Math.ceil((config.world.playerSize * 1.2) / config.territory.trailPointSpacing));
     }
 
-    function clampPointToMap(point) {
-        const radius = Math.hypot(point.x, point.y);
-        const limit = config.world.mapRadius - config.world.playerSize;
-
-        if (radius <= limit) {
-            return point;
-        }
-
-        const scale = limit / radius;
-
-        return {
-            x: point.x * scale,
-            y: point.y * scale
-        };
-    }
-
-    function getBotAi(bot) {
-        if (!bot.botAi) {
-            bot.botAi = {
-                expansionPlan: null,
-                orbitDirection: Math.random() < 0.5 ? -1 : 1,
-                orbitPhase: Math.random() * Math.PI * 2,
-                selfTrailEscapeAngle: null,
-                selfTrailEscapeUntilMs: 0
-            };
-        }
-
-        return bot.botAi;
-    }
-
     return {
-        chooseSelfTrailSafeAngle,
-        clampPointToMap,
-        getAngleDelta,
-        getBotAi,
-        getSelfTrailClearanceRecentPointSkip
+        chooseSelfTrailSafeAngle
     };
 }
 

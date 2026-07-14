@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test --test-concurrency=1 test/botsSoakMetrics.test.js test/lifeLoss.test.js test/pathSegments.test.js test/polygonSpatialIndex.test.js test/snapshotInterpolator.test.mjs test/workerJobPool.test.js",
+    "test": "node --test --test-concurrency=1 test/botTargeting.test.js test/botsSoakMetrics.test.js test/lifeLoss.test.js test/pathSegments.test.js test/polygonSpatialIndex.test.js test/snapshotInterpolator.test.mjs test/workerJobPool.test.js",
     "benchmark:bots": "node --expose-gc scripts/run-bots-soak.js",
     "check": "node scripts/check-syntax.js",
     "check:server": "node scripts/check-syntax.js server",
