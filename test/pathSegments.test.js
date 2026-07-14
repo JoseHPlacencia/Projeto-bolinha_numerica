@@ -8,6 +8,11 @@ const {
     doesLineCrossPathPrimitive,
     updatePathPrimitiveIndexFromPoints
 } = require("../src/utils/pathSegments");
+const {
+    getPathPrimitiveCacheEntry,
+    getPathPrimitiveUpdateBase,
+    storePathPrimitiveCacheEntry
+} = require("../src/utils/pathPrimitiveCache");
 
 test("polygon normalization rejects non-adjacent self intersections", () => {
     const polygon = createPolygonFromPoints([
@@ -349,6 +354,71 @@ test("incremental path index also seals long straight trail prefixes", () => {
         assert.deepEqual(state.index, expected);
         assert.ok(state.rebuiltPointCount <= options.maxLinePointSpan + 1);
     }
+});
+
+test("two limited cache slots prevent alternating trail prefixes from rebuilding", () => {
+    const points = Array.from({ length: 160 }, (_, index) => ({
+        x: index * 15,
+        y: Math.sin(index * 0.08) * 0.2
+    }));
+    const options = {
+        blockSize: 4,
+        maxLinePointSpan: 16,
+        mode: "line"
+    };
+    const cache = {};
+    let cacheHitCount = 0;
+    let fullBuildCount = 0;
+    let incrementalUpdateCount = 0;
+    let rebuiltPointCount = 0;
+    let inputPointCount = 0;
+
+    for (let activePointCount = 5; activePointCount <= points.length; activePointCount++) {
+        for (const sourcePointCount of [activePointCount - 2, activePointCount - 1]) {
+            const lastPoint = points[sourcePointCount - 1];
+            let entry = getPathPrimitiveCacheEntry(
+                cache,
+                "limited",
+                sourcePointCount,
+                lastPoint
+            );
+
+            inputPointCount += sourcePointCount;
+
+            if (entry) {
+                cacheHitCount++;
+            } else {
+                entry = updatePathPrimitiveIndexFromPoints(
+                    points,
+                    getPathPrimitiveUpdateBase(cache, "limited", sourcePointCount),
+                    {
+                        ...options,
+                        pointCount: sourcePointCount
+                    }
+                );
+                rebuiltPointCount += entry.rebuiltPointCount;
+                fullBuildCount += entry.updatedIncrementally ? 0 : 1;
+                incrementalUpdateCount += entry.updatedIncrementally ? 1 : 0;
+                storePathPrimitiveCacheEntry(cache, "limited", entry);
+            }
+
+            const source = points.slice(0, sourcePointCount);
+            const expected = createPathPrimitiveIndex(
+                createLinePrimitivesFromPoints(source, options),
+                options
+            );
+
+            assert.deepEqual(entry.index, expected);
+        }
+    }
+
+    assert.equal(cacheHitCount, 155);
+    assert.equal(fullBuildCount, 1);
+    assert.equal(incrementalUpdateCount, 156);
+    assert.ok(rebuiltPointCount < inputPointCount * 0.12);
+    assert.deepEqual(Object.keys(cache).sort(), ["limitedPrimary", "limitedSecondary"]);
+    assert.equal(cache.limitedPrimary.sourcePointCount, 159);
+    assert.equal(cache.limitedSecondary.sourcePointCount, 158);
 });
 
 test("incremental path index falls back after prefix mutation", () => {
