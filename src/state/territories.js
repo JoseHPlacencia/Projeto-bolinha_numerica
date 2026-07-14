@@ -1,6 +1,7 @@
 const config = require("../config/gameConfig");
 const {
     calculatePolygonArea,
+    createPolygonMetrics,
     createCirclePolygon,
     doBoundsContainBounds,
     doBoundsOverlap,
@@ -104,10 +105,13 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
 
     addCaptureApplyCount(captureApply, "calls", 1);
     recordCaptureApplyMax(captureApply, "maxTerritoryCount", territories.size);
-    recordCaptureApplyMax(captureApply, "maxCapturedPointCount", getPolygonPointCount(capturedPolygon));
-    recordCaptureApplyMax(captureApply, "maxCapturedArea", measureCaptureApplyPhase(diagnostics, "captureApplyCapturedArea", () => (
-        calculatePolygonArea(capturedPolygon)
-    )));
+    const capturedMetrics = measureCaptureApplyPhase(diagnostics, "captureApplyCapturedMetrics", () => (
+        resolvePolygonMetrics(capturedPolygon, options.capturedMetrics)
+    ));
+    const capturedPointCount = capturedMetrics.pointCount;
+
+    recordCaptureApplyMax(captureApply, "maxCapturedPointCount", capturedPointCount);
+    recordCaptureApplyMax(captureApply, "maxCapturedArea", capturedMetrics.area);
 
     if (!territory) {
         addCaptureApplyCount(captureApply, "missingOwnerTerritoryCount", 1);
@@ -115,23 +119,32 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
     }
 
     const ownerPolygon = measureCaptureApplyPhase(diagnostics, "captureApplyOwnerPolygon", () => (
-        getOwnerCapturedPolygon(territory.polygon, capturedPolygon, options.ownerPolygon)
+        getOwnerCapturedPolygon(
+            territory.polygon,
+            capturedPolygon,
+            options.ownerPolygon,
+            options.ownerPolygonMetrics && options.ownerPolygonMetrics.area
+        )
+    ));
+    const ownerMetrics = measureCaptureApplyPhase(diagnostics, "captureApplyOwnerMetrics", () => (
+        resolvePolygonMetrics(ownerPolygon, options.ownerPolygonMetrics)
     ));
 
-    recordCaptureApplyMax(captureApply, "maxOwnerPointCount", getPolygonPointCount(ownerPolygon));
-    recordCaptureApplyMax(captureApply, "maxOwnerArea", calculatePolygonArea(ownerPolygon));
+    recordCaptureApplyMax(captureApply, "maxOwnerPointCount", ownerMetrics.pointCount);
+    recordCaptureApplyMax(captureApply, "maxOwnerArea", ownerMetrics.area);
 
     if (measureCaptureApplyPhase(diagnostics, "captureApplyUpdateTerritory", () => (
-        updateTerritoryPolygon(territory, ownerPolygon, { preserveCaptureOperationLog: true })
+        updateTerritoryPolygon(territory, ownerPolygon, {
+            metrics: ownerMetrics,
+            preserveCaptureOperationLog: true
+        })
     ))) {
         addCaptureApplyCount(captureApply, "ownerChangedCount", 1);
         addCaptureApplyCount(captureApply, "changedTerritoryCount", 1);
         changedPlayerIds.add(ownerId);
     }
 
-    const capturedBounds = measureCaptureApplyPhase(diagnostics, "captureApplyBounds", () => (
-        getPolygonBounds(capturedPolygon)
-    ));
+    const capturedBounds = capturedMetrics.bounds;
     recordCaptureApplyMax(captureApply, "maxCapturedBoundsArea", getBoundsArea(capturedBounds));
 
     if (!capturedBounds) {
@@ -220,7 +233,7 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         addCaptureApplyCount(
             captureApply,
             "subtractOperationClippingPointCount",
-            getPolygonPointCount(capturedPolygon)
+            capturedPointCount
         );
         addCaptureApplyCount(captureApply, "subtractResultPointCount", resultPointCount);
         const changed = operationAreaDelta > territoryChangeAreaEpsilon
@@ -230,9 +243,9 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
 
         recordSlowestCaptureApplySubtract(captureApply, {
             changed,
-            clippingPointCount: getPolygonPointCount(capturedPolygon),
+            clippingPointCount: capturedPointCount,
             durationMs: subtract.durationMs,
-            operationClippingPointCount: getPolygonPointCount(capturedPolygon),
+            operationClippingPointCount: capturedPointCount,
             operationResultArea,
             operationSubjectArea,
             operationSubjectPointCount: subjectPointCount,
@@ -292,8 +305,10 @@ function createTerritoryState(territory) {
 }
 
 function updateTerritoryMetrics(territory) {
-    territory.area = calculatePolygonArea(territory.polygon);
-    territory.bounds = getPolygonBounds(territory.polygon);
+    const metrics = createPolygonMetrics(territory.polygon);
+
+    territory.area = metrics.area;
+    territory.bounds = metrics.bounds;
     return territory;
 }
 
@@ -311,7 +326,8 @@ function getTerritoryBounds(territory) {
 
 function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     const previousArea = getTerritoryArea(territory);
-    const nextArea = calculatePolygonArea(nextPolygon);
+    const metrics = resolvePolygonMetrics(nextPolygon, options.metrics);
+    const nextArea = metrics.area;
 
     if (Math.abs(previousArea - nextArea) <= territoryChangeAreaEpsilon) {
         return false;
@@ -326,10 +342,19 @@ function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
 
     territory.polygon = nextPolygon;
     territory.area = nextArea;
-    territory.bounds = getPolygonBounds(nextPolygon);
+    territory.bounds = metrics.bounds;
     territory.version = (territory.version || 0) + 1;
 
     return true;
+}
+
+function resolvePolygonMetrics(polygon, metrics) {
+    return metrics
+        && metrics.polygon === polygon
+        && Number.isFinite(metrics.area)
+        && Number.isInteger(metrics.pointCount)
+        ? metrics
+        : createPolygonMetrics(polygon);
 }
 
 function serializeTerritories(territories, players = new Map()) {

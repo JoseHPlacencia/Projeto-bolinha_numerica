@@ -2,9 +2,13 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+    calculatePolygonArea,
     createCirclePolygon,
+    createPolygonMetrics,
     findClosestPolygonBoundaryContact,
     findSegmentPolygonBoundaryContact,
+    getPolygonBounds,
+    getPolygonPointCount,
     isPointInPolygon
 } = require("../src/utils/geometry");
 const {
@@ -13,6 +17,23 @@ const {
 } = require("../src/utils/polygonSpatialIndex");
 
 const epsilon = 1e-7;
+
+test("combined polygon metrics match the standalone geometry queries", () => {
+    const polygons = [
+        [],
+        createCirclePolygon(15, -25, 130, 96),
+        createConcavePolygon()
+    ];
+
+    for (const polygon of polygons) {
+        const metrics = createPolygonMetrics(polygon);
+
+        assert.strictEqual(metrics.polygon, polygon);
+        assert.equal(metrics.area, calculatePolygonArea(polygon));
+        assert.deepEqual(metrics.bounds, getPolygonBounds(polygon));
+        assert.equal(metrics.pointCount, getPolygonPointCount(polygon));
+    }
+});
 
 test("scanline index preserves point-in-polygon parity", () => {
     const polygons = [

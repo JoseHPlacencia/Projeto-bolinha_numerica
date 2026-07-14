@@ -124,6 +124,32 @@ test("line-only simplification preserves visible bends", () => {
     assert.equal(primitives.length, 3);
 });
 
+test("long linear runs are split into bounded immutable primitives", () => {
+    const points = Array.from({ length: 130 }, (_, index) => ({
+        x: index * 10,
+        y: 0
+    }));
+    const primitives = createLinePrimitivesFromPoints(points, {
+        maxLinePointSpan: 16
+    });
+
+    assert.equal(primitives.length, 9);
+    assert.deepEqual(
+        primitives.map(primitive => [primitive.startIndex, primitive.endIndex]),
+        [
+            [0, 16],
+            [16, 32],
+            [32, 48],
+            [48, 64],
+            [64, 80],
+            [80, 96],
+            [96, 112],
+            [112, 128],
+            [128, 129]
+        ]
+    );
+});
+
 test("path primitive index groups primitives into bounded blocks", () => {
     const primitives = createPathPrimitivesFromPoints([
         { x: 0, y: 0 },
@@ -267,6 +293,62 @@ test("incremental line index stays equivalent across sharp turns", () => {
     }
 
     assert.ok(firstReusedBlock);
+});
+
+test("incremental line index bounds rebuild work on long straight trails", () => {
+    const points = Array.from({ length: 130 }, (_, index) => ({
+        x: index * 15,
+        y: 0
+    }));
+    const options = {
+        blockSize: 2,
+        maxLinePointSpan: 16,
+        mode: "line"
+    };
+    let state = null;
+
+    for (let pointCount = 2; pointCount <= points.length; pointCount++) {
+        state = updatePathPrimitiveIndexFromPoints(points, state, {
+            ...options,
+            pointCount
+        });
+        const source = points.slice(0, pointCount);
+        const expected = createPathPrimitiveIndex(
+            createLinePrimitivesFromPoints(source, options),
+            options
+        );
+
+        assert.deepEqual(state.index, expected);
+        assert.ok(state.rebuiltPointCount <= options.maxLinePointSpan + 1);
+    }
+});
+
+test("incremental path index also seals long straight trail prefixes", () => {
+    const points = Array.from({ length: 100 }, (_, index) => ({
+        x: index * 15,
+        y: 0
+    }));
+    const options = {
+        blockSize: 2,
+        maxLinePointSpan: 12,
+        mode: "path"
+    };
+    let state = null;
+
+    for (let pointCount = 2; pointCount <= points.length; pointCount++) {
+        state = updatePathPrimitiveIndexFromPoints(points, state, {
+            ...options,
+            pointCount
+        });
+        const source = points.slice(0, pointCount);
+        const expected = createPathPrimitiveIndex(
+            createPathPrimitivesFromPoints(source, options),
+            options
+        );
+
+        assert.deepEqual(state.index, expected);
+        assert.ok(state.rebuiltPointCount <= options.maxLinePointSpan + 1);
+    }
 });
 
 test("incremental path index falls back after prefix mutation", () => {

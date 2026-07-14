@@ -6,6 +6,7 @@ const {
 const { getHighResolutionTime } = require("../utils/time");
 const {
     calculatePolygonArea,
+    createPolygonMetrics,
     createKnownSimplePolygonFromPoints,
     doBoundsContainPoint,
     doBoundsOverlap,
@@ -43,14 +44,18 @@ function captureClosedTrail(player, territories, players, context = {}) {
     const ownerPolygon = measureTrailPhase(diagnostics, "captureOwnerPolygon", () => (
         getCaptureOwnerPolygon(capture)
     ));
-    const newlyCapturedPolygon = measureTrailPhase(diagnostics, "captureNewPolygon", () => (
-        createNewlyCapturedPolygon(capture, territory)
+    const newlyCapturedMetrics = measureTrailPhase(diagnostics, "captureNewPolygon", () => (
+        createNewlyCapturedMetrics(capture, territory)
     ));
+    const newlyCapturedPolygon = newlyCapturedMetrics.polygon;
+    const ownerPolygonMetrics = createOwnerPolygonMetrics(capture, ownerPolygon);
     const changedPlayerIds = measureTrailPhase(diagnostics, "captureApplyTerritory", () => (
         applyCapturedPolygon(territories, player.id, newlyCapturedPolygon, {
             captureOverlapAudit: shouldAuditCaptureOverlaps(context),
+            capturedMetrics: newlyCapturedMetrics,
             diagnostics,
             ownerPolygon,
+            ownerPolygonMetrics,
             players,
             runtimeConfig: context.runtimeConfig
         })
@@ -70,7 +75,13 @@ function captureClosedTrail(player, territories, players, context = {}) {
         );
     });
     measureTrailPhase(diagnostics, "captureDamagePlayers", () => {
-        damagePlayersInsideCapturedPolygon(players, territories, player, newlyCapturedPolygon, context);
+        damagePlayersInsideCapturedPolygon(
+            players,
+            territories,
+            player,
+            newlyCapturedMetrics,
+            context
+        );
     });
     measureTrailPhase(diagnostics, "captureCounterattack", () => {
         handleSuccessfulTrailCapture(players, territories, player, context);
@@ -150,31 +161,45 @@ function shouldAuditCaptureOverlaps(context) {
 function getCaptureOwnerPolygon(capture) {
     const previewPolygon = capture && capture.operation && capture.operation.previewPolygon;
 
-    return getPolygonArea(previewPolygon) > geometryEpsilon
+    return previewPolygon && previewPolygon[0]
         ? previewPolygon
         : capture.polygon;
 }
 
-function createNewlyCapturedPolygon(capture, previousTerritory) {
-    if (getPolygonArea(capture.damagePolygon) > geometryEpsilon) {
-        return capture.damagePolygon;
+function createNewlyCapturedMetrics(capture, previousTerritory) {
+    const damageMetrics = createPolygonMetrics(capture.damagePolygon);
+
+    if (damageMetrics.area > geometryEpsilon) {
+        return damageMetrics;
     }
 
     if (!previousTerritory) {
-        return [];
+        return createPolygonMetrics([]);
     }
 
     const differencePolygon = subtractPolygon(getCaptureOwnerPolygon(capture), previousTerritory.polygon);
+    const differenceMetrics = createPolygonMetrics(differencePolygon);
 
-    return getPolygonArea(differencePolygon) > geometryEpsilon
-        ? differencePolygon
-        : [];
+    return differenceMetrics.area > geometryEpsilon
+        ? differenceMetrics
+        : createPolygonMetrics([]);
 }
 
-function damagePlayersInsideCapturedPolygon(players, territories, attacker, capturedPolygon, context) {
-    const capturedBounds = getPolygonBounds(capturedPolygon);
+function createOwnerPolygonMetrics(capture, ownerPolygon) {
+    const metrics = createPolygonMetrics(ownerPolygon);
 
-    if (!capturedBounds || getPolygonArea(capturedPolygon) <= geometryEpsilon) {
+    if (capture && capture.polygon === ownerPolygon && Number.isFinite(capture.area)) {
+        metrics.area = capture.area;
+    }
+
+    return metrics;
+}
+
+function damagePlayersInsideCapturedPolygon(players, territories, attacker, capturedMetrics, context) {
+    const capturedPolygon = capturedMetrics.polygon;
+    const capturedBounds = capturedMetrics.bounds;
+
+    if (!capturedBounds || capturedMetrics.area <= geometryEpsilon) {
         return;
     }
 
@@ -368,7 +393,13 @@ function hasPlayerDominatedMap(territories, player) {
 
     return territory
         && totalMapArea > 0
-        && calculatePolygonArea(territory.polygon) >= totalMapArea * victoryRatio;
+        && getTerritoryArea(territory) >= totalMapArea * victoryRatio;
+}
+
+function getTerritoryArea(territory) {
+    return Number.isFinite(territory && territory.area)
+        ? territory.area
+        : calculatePolygonArea(territory && territory.polygon);
 }
 
 function createExternalTrailCapturePolygon(player, territories) {

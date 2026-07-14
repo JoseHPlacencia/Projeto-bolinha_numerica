@@ -152,6 +152,47 @@ function calculatePolygonArea(polygon) {
     return Math.abs(calculateRingArea(polygon[0]));
 }
 
+function createPolygonMetrics(polygon) {
+    const rings = Array.isArray(polygon) ? polygon : [];
+    const ring = Array.isArray(rings[0]) ? rings[0] : [];
+    const pointCount = rings.reduce((sum, candidateRing) => (
+        sum + (Array.isArray(candidateRing) ? candidateRing.length : 0)
+    ), 0);
+    const isClosed = ring.length > 1 && areCoordinatesEqual(ring[0], ring[ring.length - 1]);
+    const boundsPointCount = isClosed ? ring.length - 1 : ring.length;
+    let doubleArea = 0;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (let index = 0; index < ring.length; index++) {
+        const point = ring[index];
+
+        if (index < ring.length - 1) {
+            const next = ring[index + 1];
+
+            doubleArea += point[0] * next[1] - next[0] * point[1];
+        }
+
+        if (index < boundsPointCount) {
+            minX = Math.min(minX, point[0]);
+            minY = Math.min(minY, point[1]);
+            maxX = Math.max(maxX, point[0]);
+            maxY = Math.max(maxY, point[1]);
+        }
+    }
+
+    return {
+        area: Math.abs(doubleArea / 2),
+        bounds: Number.isFinite(minX)
+            ? { minX, minY, maxX, maxY }
+            : null,
+        pointCount,
+        polygon
+    };
+}
+
 function calculatePolygonCentroid(polygon) {
     const ring = getOpenRing(polygon[0]);
 
@@ -982,6 +1023,7 @@ module.exports = {
     calculatePolygonCentroid,
     createCirclePolygon,
     createKnownSimplePolygonFromPoints,
+    createPolygonMetrics,
     createPolygonFromPoints,
     doBoundsContainBounds,
     doBoundsContainPoint,

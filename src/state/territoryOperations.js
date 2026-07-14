@@ -17,8 +17,12 @@ const territoryChangeAreaEpsilon = 1;
  * the authoritative result.
  */
 
-function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolygon) {
-    return calculatePolygonArea(operationPolygon) > 0
+function getOwnerCapturedPolygon(currentPolygon, capturedPolygon, operationPolygon, operationArea = null) {
+    const resolvedOperationArea = Number.isFinite(operationArea)
+        ? operationArea
+        : calculatePolygonArea(operationPolygon);
+
+    return resolvedOperationArea > 0
         ? operationPolygon
         : unionPolygons(currentPolygon, capturedPolygon);
 }

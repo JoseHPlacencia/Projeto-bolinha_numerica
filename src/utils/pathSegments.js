@@ -3,6 +3,7 @@ const defaultAngleThresholdRadians = Math.PI / 180;
 const defaultMaxArcSweepRadians = Math.PI * 0.75;
 const defaultMaxArcRadialDrift = 2;
 const defaultLineDeviationTolerance = 1.5;
+const defaultMaxLinePointSpan = 48;
 const defaultPrimitiveBlockSize = 48;
 
 function createPathPrimitivesFromPoints(points, options = {}) {
@@ -25,6 +26,14 @@ function createPathPrimitivesFromValidPoints(validPoints, options) {
     let index = 1;
 
     while (index < validPoints.length - 1) {
+        if (index - runStartIndex >= options.maxLinePointSpan) {
+            pushLinePrimitive(primitives, validPoints, runStartIndex, index);
+            runStartIndex = index;
+            runAngle = getSegmentAngle(validPoints[index], validPoints[index + 1]);
+            index++;
+            continue;
+        }
+
         const nextAngle = getSegmentAngle(validPoints[index], validPoints[index + 1]);
         const angleDelta = Math.abs(getAngleDelta(runAngle, nextAngle));
 
@@ -97,6 +106,13 @@ function createLinePrimitivesFromValidPoints(validPoints, options) {
     let index = 2;
 
     while (index < validPoints.length) {
+        if (index - runStartIndex > options.maxLinePointSpan) {
+            pushLinePrimitive(primitives, validPoints, runStartIndex, index - 1);
+            runStartIndex = index - 1;
+            index = runStartIndex + 2;
+            continue;
+        }
+
         if (canUseLinePrimitiveRun(validPoints, runStartIndex, index, {
             angleThresholdRadians: options.angleThresholdRadians,
             maxDeviation: options.maxDeviation
@@ -194,10 +210,13 @@ function createFullPrimitiveIndexState(points, sourcePointCount, options, signat
 function extendPrimitiveIndexState(points, sourcePointCount, previousState, options, signature) {
     const previousPrimitives = previousState.index.primitives;
     const lastPrimitive = previousPrimitives[previousPrimitives.length - 1];
-    const stablePrimitiveCount = lastPrimitive && lastPrimitive.type === "line"
+    const lastLineIsMutable = lastPrimitive
+        && lastPrimitive.type === "line"
+        && lastPrimitive.endIndex - lastPrimitive.startIndex < options.maxLinePointSpan;
+    const stablePrimitiveCount = lastLineIsMutable
         ? previousPrimitives.length - 1
         : previousPrimitives.length;
-    const rebuildStartIndex = lastPrimitive && lastPrimitive.type === "line"
+    const rebuildStartIndex = lastLineIsMutable
         ? lastPrimitive.startIndex
         : previousState.sourcePointCount - 1;
     const tailPoints = getValidPoints(points, rebuildStartIndex, sourcePointCount);
@@ -375,6 +394,10 @@ function normalizePrimitiveOptions(options = {}, requestedMode = "path") {
             options.maxArcSweepRadians,
             defaultMaxArcSweepRadians
         ),
+        maxLinePointSpan: getPositiveIntegerOption(
+            options.maxLinePointSpan,
+            defaultMaxLinePointSpan
+        ),
         maxDeviation: getNonNegativeNumberOption(
             options.maxDeviation,
             defaultLineDeviationTolerance
@@ -389,6 +412,7 @@ function createPrimitiveOptionsSignature(options) {
         options.angleThresholdRadians,
         options.maxArcSweepRadians,
         options.maxArcRadialDrift,
+        options.maxLinePointSpan,
         options.maxDeviation,
         options.blockSize
     ].join(":");

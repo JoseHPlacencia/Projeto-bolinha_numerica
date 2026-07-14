@@ -68,8 +68,6 @@ function createEmptySelfTrailSafetyDiagnostics() {
         pointBlockCount: 0,
         pointDistanceCheckCount: 0,
         sampleCount: 0,
-        safetyCacheHitCount: 0,
-        safetyCacheMissCount: 0,
         selectedRefineCandidateCount: 0,
         segmentBlockBoundsRejected: 0,
         segmentBlockChecks: 0,

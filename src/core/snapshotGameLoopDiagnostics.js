@@ -458,8 +458,6 @@ function normalizeSelfTrailSafetyDiagnostics(diagnostics) {
         pointBlockCount: finiteOrNull(diagnostics.pointBlockCount),
         pointDistanceCheckCount: finiteOrNull(diagnostics.pointDistanceCheckCount),
         sampleCount: finiteOrNull(diagnostics.sampleCount),
-        safetyCacheHitCount: finiteOrNull(diagnostics.safetyCacheHitCount),
-        safetyCacheMissCount: finiteOrNull(diagnostics.safetyCacheMissCount),
         selectedRefineCandidateCount: finiteOrNull(diagnostics.selectedRefineCandidateCount),
         segmentBlockBoundsRejected: finiteOrNull(diagnostics.segmentBlockBoundsRejected),
         segmentBlockChecks: finiteOrNull(diagnostics.segmentBlockChecks),

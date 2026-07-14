@@ -1166,25 +1166,32 @@ function getTrailCollisionIndex(segment, maxPointCount = null, diagnostics = nul
     const cached = pathPrimitiveCache.get(segment);
     const cacheKey = Number.isInteger(maxPointCount) ? "limited" : "all";
     const lastPoint = segment[sourcePointCount - 1];
-    const cacheEntry = cached && cached[cacheKey];
+    const cacheEntry = getPrimitiveIndexCacheEntry(
+        cached,
+        cacheKey,
+        sourcePointCount,
+        lastPoint
+    );
 
-    if (isPrimitiveIndexCacheEntryCurrent(cacheEntry, sourcePointCount, lastPoint)) {
+    if (cacheEntry) {
         addTrailDiagnosticCount(diagnostics, "pathPrimitiveCacheHits", 1);
         recordPrimitiveIndexDiagnostics(diagnostics, "path", cacheEntry, sourcePointCount, false);
         return cacheEntry.index;
     }
 
-    const nextEntry = updatePathPrimitiveIndexFromPoints(segment, cacheEntry, {
+    const updateBase = getPrimitiveIndexUpdateBase(cached, cacheKey, sourcePointCount);
+    const nextEntry = updatePathPrimitiveIndexFromPoints(segment, updateBase, {
         angleThresholdRadians: getPathSegmentAngleThresholdRadians(),
         blockSize: getTrailSpatialBlockPrimitiveCount(),
         maxArcSweepRadians: getPathSegmentArcMaxSweepRadians(),
         maxArcRadialDrift: getPathSegmentArcMaxRadialDrift(),
+        maxLinePointSpan: getPathSegmentMaxLinePointSpan(),
         mode: "path",
         pointCount: sourcePointCount
     });
     const nextCache = cached || {};
 
-    nextCache[cacheKey] = nextEntry;
+    storePrimitiveIndexCacheEntry(nextCache, cacheKey, nextEntry);
     pathPrimitiveCache.set(segment, nextCache);
 
     addTrailDiagnosticCount(
@@ -1215,24 +1222,31 @@ function getSelfTrailCollisionIndex(segment, maxPointCount = null, diagnostics =
     const cached = selfTrailLinePrimitiveCache.get(segment);
     const cacheKey = Number.isInteger(maxPointCount) ? "limited" : "all";
     const lastPoint = segment[sourcePointCount - 1];
-    const cacheEntry = cached && cached[cacheKey];
+    const cacheEntry = getPrimitiveIndexCacheEntry(
+        cached,
+        cacheKey,
+        sourcePointCount,
+        lastPoint
+    );
 
-    if (isPrimitiveIndexCacheEntryCurrent(cacheEntry, sourcePointCount, lastPoint)) {
+    if (cacheEntry) {
         addTrailDiagnosticCount(diagnostics, "selfPathPrimitiveCacheHits", 1);
         recordPrimitiveIndexDiagnostics(diagnostics, "selfPath", cacheEntry, sourcePointCount, false);
         return cacheEntry.index;
     }
 
-    const nextEntry = updatePathPrimitiveIndexFromPoints(segment, cacheEntry, {
+    const updateBase = getPrimitiveIndexUpdateBase(cached, cacheKey, sourcePointCount);
+    const nextEntry = updatePathPrimitiveIndexFromPoints(segment, updateBase, {
         angleThresholdRadians: getPathSegmentAngleThresholdRadians(),
         blockSize: getTrailSpatialBlockPrimitiveCount(),
         maxDeviation: getSelfTrailLineSimplifyTolerance(),
+        maxLinePointSpan: getPathSegmentMaxLinePointSpan(),
         mode: "line",
         pointCount: sourcePointCount
     });
     const nextCache = cached || {};
 
-    nextCache[cacheKey] = nextEntry;
+    storePrimitiveIndexCacheEntry(nextCache, cacheKey, nextEntry);
     selfTrailLinePrimitiveCache.set(segment, nextCache);
 
     addTrailDiagnosticCount(
@@ -1252,6 +1266,70 @@ function isPrimitiveIndexCacheEntryCurrent(entry, sourcePointCount, lastPoint) {
         && entry.sourcePointCount === sourcePointCount
         && entry.lastX === lastPoint.x
         && entry.lastY === lastPoint.y;
+}
+
+function getPrimitiveIndexCacheEntry(cache, cacheKey, sourcePointCount, lastPoint) {
+    if (!cache) {
+        return null;
+    }
+
+    if (cacheKey === "all") {
+        return isPrimitiveIndexCacheEntryCurrent(cache.all, sourcePointCount, lastPoint)
+            ? cache.all
+            : null;
+    }
+
+    if (isPrimitiveIndexCacheEntryCurrent(cache.limitedPrimary, sourcePointCount, lastPoint)) {
+        return cache.limitedPrimary;
+    }
+
+    return isPrimitiveIndexCacheEntryCurrent(cache.limitedSecondary, sourcePointCount, lastPoint)
+        ? cache.limitedSecondary
+        : null;
+}
+
+function getPrimitiveIndexUpdateBase(cache, cacheKey, sourcePointCount) {
+    if (!cache) {
+        return null;
+    }
+
+    if (cacheKey === "all") {
+        return cache.all || null;
+    }
+
+    let bestEntry = null;
+
+    for (const entry of [cache.limitedPrimary, cache.limitedSecondary]) {
+        if (!entry
+            || entry.sourcePointCount >= sourcePointCount
+            || bestEntry && entry.sourcePointCount <= bestEntry.sourcePointCount) {
+            continue;
+        }
+
+        bestEntry = entry;
+    }
+
+    return bestEntry;
+}
+
+function storePrimitiveIndexCacheEntry(cache, cacheKey, entry) {
+    if (cacheKey === "all") {
+        cache.all = entry;
+        return;
+    }
+
+    if (cache.limitedPrimary && cache.limitedPrimary.sourcePointCount === entry.sourcePointCount) {
+        cache.limitedPrimary = entry;
+        return;
+    }
+
+    if (cache.limitedSecondary && cache.limitedSecondary.sourcePointCount === entry.sourcePointCount) {
+        cache.limitedSecondary = entry;
+        return;
+    }
+
+    cache.limitedSecondary = cache.limitedPrimary || null;
+    cache.limitedPrimary = entry;
 }
 
 function recordPrimitiveIndexDiagnostics(
@@ -1297,6 +1375,12 @@ function getSelfTrailLineSimplifyTolerance() {
     const value = Number(config.territory.selfTrailLineSimplifyTolerance);
 
     return Number.isFinite(value) && value >= 0 ? value : 1.5;
+}
+
+function getPathSegmentMaxLinePointSpan() {
+    const value = Number(config.territory.pathSegmentMaxLinePointSpan);
+
+    return Number.isInteger(value) && value > 0 ? value : 48;
 }
 
 function getTrailSpatialBlockPrimitiveCount() {

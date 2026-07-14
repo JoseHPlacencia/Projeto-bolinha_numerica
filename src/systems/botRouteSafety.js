@@ -59,7 +59,6 @@ function createBotRouteSafety({ getReturnTarget }) {
 
     function chooseSelfTrailSafeAngle(bot, targetAngle, options = {}, context = null) {
         const diagnostics = getSelfTrailSafetyDiagnostics(context);
-        const safetyCache = createSelfTrailSafetyCache();
 
         addSelfTrailSafetyDiagnosticValue(diagnostics, "decisionCount", 1);
 
@@ -104,14 +103,13 @@ function createBotRouteSafety({ getReturnTarget }) {
         }
 
         const budget = createSelfTrailSafetyBudget(diagnostics);
-        const targetSafety = getCachedSelfTrailPathSafety(
+        const targetSafety = getSelfTrailPathSafety(
             bot,
             targetAngle,
             trailGeometry,
             options,
             budget,
-            diagnostics,
-            safetyCache
+            diagnostics
         );
 
         if (!isSelfTrailPathUnsafe(targetSafety)) {
@@ -130,14 +128,13 @@ function createBotRouteSafety({ getReturnTarget }) {
             ? createSelfTrailSafetyGeometry(bot, trailPoints, trailSegments, riskOptions, diagnostics)
             : trailGeometry;
         const activeTargetSafety = riskOptions.trapMode
-            ? getCachedSelfTrailPathSafety(
+            ? getSelfTrailPathSafety(
                 bot,
                 targetAngle,
                 activeTrailGeometry,
                 riskOptions,
                 budget,
-                diagnostics,
-                safetyCache
+                diagnostics
             )
             : targetSafety;
         const rememberedCandidate = chooseRememberedSelfTrailEscapeCandidate(
@@ -147,8 +144,7 @@ function createBotRouteSafety({ getReturnTarget }) {
             riskOptions,
             context,
             budget,
-            diagnostics,
-            safetyCache
+            diagnostics
         );
 
         if (rememberedCandidate) {
@@ -174,8 +170,7 @@ function createBotRouteSafety({ getReturnTarget }) {
             candidates,
             candidateEvaluationOptions,
             budget,
-            diagnostics,
-            safetyCache
+            diagnostics
         );
         const refinementCandidates = selectSelfTrailRefinementCandidates(coarseCandidateEvaluations, riskOptions);
 
@@ -209,14 +204,13 @@ function createBotRouteSafety({ getReturnTarget }) {
             addSelfTrailSafetyDiagnosticValue(diagnostics, "evaluatedCandidateCount", 1);
             addSelfTrailSafetyDiagnosticValue(diagnostics, "fullEvaluationCount", 1);
 
-            const safety = getCachedSelfTrailPathSafety(
+            const safety = getSelfTrailPathSafety(
                 bot,
                 coarseCandidate.angle,
                 activeTrailGeometry,
                 riskOptions,
                 budget,
-                diagnostics,
-                safetyCache
+                diagnostics
             );
             const score = scoreSelfTrailCandidate(coarseCandidate.angle, targetAngle, safety, riskOptions);
 
@@ -254,8 +248,7 @@ function createBotRouteSafety({ getReturnTarget }) {
                     candidates,
                     riskOptions,
                     budget,
-                    diagnostics,
-                    safetyCache
+                    diagnostics
                 )
                 : null)
             || bestNonCrossingCandidate
@@ -300,8 +293,7 @@ function createBotRouteSafety({ getReturnTarget }) {
         options = {},
         context = null,
         budget = null,
-        diagnostics = null,
-        safetyCache = null
+        diagnostics = null
     ) {
         const ai = getBotAi(bot);
         const nowMs = getSelfTrailDecisionNowMs(context);
@@ -312,14 +304,13 @@ function createBotRouteSafety({ getReturnTarget }) {
             return null;
         }
 
-        const safety = getCachedSelfTrailPathSafety(
+        const safety = getSelfTrailPathSafety(
             bot,
             ai.selfTrailEscapeAngle,
             trailGeometry,
             options,
             budget,
-            diagnostics,
-            safetyCache
+            diagnostics
         );
 
         if (isSelfTrailPathUnsafe(safety)) {
@@ -332,51 +323,6 @@ function createBotRouteSafety({ getReturnTarget }) {
             safety,
             score: scoreSelfTrailCandidate(ai.selfTrailEscapeAngle, targetAngle, safety, options)
         };
-    }
-
-    function createSelfTrailSafetyCache() {
-        return new Map();
-    }
-
-    function getCachedSelfTrailPathSafety(
-        bot,
-        targetAngle,
-        trailGeometry,
-        options = {},
-        budget = null,
-        diagnostics = null,
-        safetyCache = null
-    ) {
-        const cacheKey = safetyCache && createSelfTrailSafetyCacheKey(targetAngle, trailGeometry, options);
-
-        if (cacheKey && safetyCache.has(cacheKey)) {
-            addSelfTrailSafetyDiagnosticValue(diagnostics, "safetyCacheHitCount", 1);
-            return safetyCache.get(cacheKey);
-        }
-
-        if (cacheKey) {
-            addSelfTrailSafetyDiagnosticValue(diagnostics, "safetyCacheMissCount", 1);
-        }
-
-        const safety = getSelfTrailPathSafety(bot, targetAngle, trailGeometry, options, budget, diagnostics);
-
-        if (cacheKey) {
-            safetyCache.set(cacheKey, safety);
-        }
-
-        return safety;
-    }
-
-    function createSelfTrailSafetyCacheKey(targetAngle, trailGeometry, options = {}) {
-        return [
-            Math.round(normalizeAngle(targetAngle) * 1000),
-            options.selfTrailSafetyMode || "full",
-            options.centerOnly ? "center" : "wide",
-            options.stopOnUnsafe ? "stop" : "scan",
-            Math.round(getSelfTrailLookaheadDistance(options)),
-            Math.round((trailGeometry && trailGeometry.lookaheadDistance || 0) * 10),
-            options.trapMode ? 1 : 0
-        ].join(":");
     }
 
     function createCoarseSelfTrailSafetyOptions(options = {}) {
@@ -401,8 +347,7 @@ function createBotRouteSafety({ getReturnTarget }) {
         candidates,
         options = {},
         budget = null,
-        diagnostics = null,
-        safetyCache = null
+        diagnostics = null
     ) {
         const evaluations = [];
 
@@ -417,14 +362,13 @@ function createBotRouteSafety({ getReturnTarget }) {
 
             addSelfTrailSafetyDiagnosticValue(diagnostics, "coarseEvaluationCount", 1);
 
-            const safety = getCachedSelfTrailPathSafety(
+            const safety = getSelfTrailPathSafety(
                 bot,
                 angle,
                 trailGeometry,
                 options,
                 budget,
-                diagnostics,
-                safetyCache
+                diagnostics
             );
 
             evaluations.push({
@@ -684,8 +628,7 @@ function createBotRouteSafety({ getReturnTarget }) {
         candidates,
         options = {},
         budget = null,
-        diagnostics = null,
-        safetyCache = null
+        diagnostics = null
     ) {
         const localOptions = {
             ...options,
@@ -704,14 +647,13 @@ function createBotRouteSafety({ getReturnTarget }) {
             addSelfTrailSafetyDiagnosticValue(diagnostics, "evaluatedLocalCandidateCount", 1);
             addSelfTrailSafetyDiagnosticValue(diagnostics, "fullEvaluationCount", 1);
 
-            const safety = getCachedSelfTrailPathSafety(
+            const safety = getSelfTrailPathSafety(
                 bot,
                 angle,
                 trailGeometry,
                 localOptions,
                 budget,
-                diagnostics,
-                safetyCache
+                diagnostics
             );
 
             if (isSelfTrailPathUnsafe(safety)) {
