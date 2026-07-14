@@ -10,7 +10,7 @@ test("worker pool executes jobs sequentially and applies backpressure", async ()
         idleTimeoutMs: 100,
         workerPath: path.join(__dirname, "fixtures", "workerJobPoolEchoWorker.js")
     });
-    const firstJob = submit(pool, "first");
+    const firstJob = submit(pool, "first", 20);
     const rejectedJobId = pool.submit({ value: "rejected" }, () => {}, 1);
     const first = await firstJob;
     const second = await submit(pool, "second");
@@ -20,9 +20,9 @@ test("worker pool executes jobs sequentially and applies backpressure", async ()
     assert.equal(second.value, "second");
 });
 
-function submit(pool, value) {
+function submit(pool, value, delayMs = 0) {
     return new Promise((resolve, reject) => {
-        const jobId = pool.submit({ value }, response => {
+        const jobId = pool.submit({ delayMs, value }, response => {
             if (response.error) {
                 reject(new Error(response.error.message));
                 return;

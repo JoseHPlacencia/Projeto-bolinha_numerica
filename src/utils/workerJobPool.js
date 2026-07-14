@@ -41,6 +41,8 @@ function createWorkerJobPool(options) {
         }
 
         pendingJobs.set(jobId, onComplete);
+        // A pending callback must keep the process alive until the worker replies.
+        activeWorker.ref();
 
         try {
             activeWorker.postMessage({
@@ -49,6 +51,7 @@ function createWorkerJobPool(options) {
             });
         } catch (error) {
             pendingJobs.delete(jobId);
+            scheduleWorkerIdleTermination();
             queueMicrotask(() => onComplete({
                 error: serializeError(error),
                 jobId
@@ -72,20 +75,22 @@ function createWorkerJobPool(options) {
                 return;
             }
 
-            failPendingJobs(error);
             worker = null;
+            clearWorkerIdleTimer();
+            failPendingJobs(error);
         });
         createdWorker.on("exit", code => {
             if (worker !== createdWorker) {
                 return;
             }
 
-            if (code !== 0) {
+            worker = null;
+            clearWorkerIdleTimer();
+
+            if (code !== 0 || pendingJobs.size > 0) {
                 failPendingJobs(new Error(`${workerName} exited with code ${code}.`));
             }
-            worker = null;
         });
-        createdWorker.unref();
         return createdWorker;
     }
 
@@ -98,8 +103,12 @@ function createWorkerJobPool(options) {
         }
 
         pendingJobs.delete(jobId);
-        onComplete(message);
-        scheduleWorkerIdleTermination();
+
+        try {
+            onComplete(message);
+        } finally {
+            scheduleWorkerIdleTermination();
+        }
     }
 
     function failPendingJobs(error) {
@@ -120,6 +129,8 @@ function createWorkerJobPool(options) {
             return;
         }
 
+        // An idle worker may remain cached without delaying normal process exit.
+        worker.unref();
         workerIdleTimer = setTimeout(() => {
             workerIdleTimer = null;
 
