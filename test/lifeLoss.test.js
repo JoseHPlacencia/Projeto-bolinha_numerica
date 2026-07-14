@@ -23,7 +23,9 @@ const {
     calculatePolygonArea,
     doPolygonsHavePositiveAreaOverlap,
     getPolygonBounds,
+    subtractKnownSimplePolygonComponents,
     subtractPolygon,
+    subtractPolygonComponents,
     unionPolygons
 } = require("../src/utils/geometry");
 const {
@@ -1192,6 +1194,30 @@ test("capture subtraction keeps dense operands exact", () => {
         diagnostics.captureApply.slowestSubtract.operationSubjectPointCount,
         diagnostics.captureApply.slowestSubtract.subjectPointCount
     );
+});
+
+test("known-simple territory subtraction matches the validated geometry path", () => {
+    const cases = [
+        {
+            clipping: createCircleLikePolygon(100, 0, 30, 320),
+            subject: createCircleLikePolygon(0, 0, 100, 640)
+        },
+        {
+            clipping: createRectanglePolygon(-10, -60, 10, 60),
+            subject: createRectanglePolygon(-50, -50, 50, 50)
+        },
+        {
+            clipping: createRectanglePolygon(50, -20, 80, 20),
+            subject: createRectanglePolygon(-50, -50, 50, 50)
+        }
+    ];
+
+    for (const { subject, clipping } of cases) {
+        assert.deepEqual(
+            subtractKnownSimplePolygonComponents(subject, clipping),
+            subtractPolygonComponents(subject, clipping)
+        );
+    }
 });
 
 test("ending a trail emits a generation tombstone", () => {

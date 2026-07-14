@@ -4,7 +4,7 @@ const { performance } = require("node:perf_hooks");
 const {
     calculatePolygonArea,
     calculatePolygonIntersectionArea,
-    subtractPolygonComponents
+    subtractKnownSimplePolygonComponents
 } = require("../utils/geometry");
 const { selectRetainedTerritoryPolygon } = require("../state/territoryRetention");
 
@@ -65,7 +65,7 @@ function processTerritoryRepairJob(job) {
     const previousArea = calculatePolygonArea(loser.polygon);
     const subtractStartedAt = performance.now();
     const retainedPolygon = selectRetainedTerritoryPolygon(
-        subtractPolygonComponents(loser.polygon, winner.polygon),
+        subtractKnownSimplePolygonComponents(loser.polygon, winner.polygon),
         job.loserPlayer
     );
     const subtractMs = performance.now() - subtractStartedAt;

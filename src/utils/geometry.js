@@ -97,6 +97,33 @@ function subtractPolygonComponents(subject, clipping) {
     }
 }
 
+/**
+ * Exact subtraction for polygons whose rings are already known to be simple.
+ *
+ * Territory state and capture candidates satisfy this invariant before they
+ * reach the boolean kernel. They still pass through coordinate rounding and
+ * redundant-point removal, but skipping another self-intersection sweep avoids
+ * rebuilding and sorting every boundary segment on each capture.
+ */
+function subtractKnownSimplePolygonComponents(subject, clipping) {
+    if (!hasPolygon(subject)) {
+        return [];
+    }
+
+    if (!hasPolygon(clipping)) {
+        return subtractPolygonComponents(subject, clipping);
+    }
+
+    try {
+        return normalizeKnownSimpleMultiPolygon(polygonClipping.difference(
+            knownSimplePolygonToMultiPolygon(subject),
+            knownSimplePolygonToMultiPolygon(clipping)
+        ));
+    } catch (_error) {
+        return subtractPolygonComponents(subject, clipping);
+    }
+}
+
 function calculatePolygonIntersectionArea(first, second) {
     if (!hasPolygon(first) || !hasPolygon(second)) {
         return 0;
@@ -673,6 +700,22 @@ function normalizeMultiPolygon(multiPolygon) {
         .filter(hasPolygon);
 }
 
+function normalizeKnownSimpleMultiPolygon(multiPolygon) {
+    if (!Array.isArray(multiPolygon)) {
+        return [];
+    }
+
+    return multiPolygon
+        .map(normalizeKnownSimplePolygon)
+        .filter(hasPolygon);
+}
+
+function knownSimplePolygonToMultiPolygon(polygon) {
+    const normalizedPolygon = normalizeKnownSimplePolygon(polygon);
+
+    return normalizedPolygon.length > 0 ? [normalizedPolygon] : [];
+}
+
 function normalizeSimplePolygon(polygon) {
     if (!Array.isArray(polygon)) {
         return [];
@@ -1039,6 +1082,7 @@ module.exports = {
     isPointInPolygon,
     isPolygonInsidePolygon,
     serializePolygon,
+    subtractKnownSimplePolygonComponents,
     subtractPolygon,
     subtractPolygonComponents,
     unionPolygons

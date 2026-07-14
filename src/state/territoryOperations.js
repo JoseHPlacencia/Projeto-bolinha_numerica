@@ -1,6 +1,6 @@
 const {
     calculatePolygonArea,
-    subtractPolygonComponents,
+    subtractKnownSimplePolygonComponents,
     unionPolygons
 } = require("../utils/geometry");
 const { selectRetainedTerritoryPolygon } = require("./territoryRetention");
@@ -39,7 +39,7 @@ function subtractTerritoryPolygon(
     const operationSubtract = measureCaptureApplyOperation(
         options.diagnostics,
         `${phasePrefix}Subtract`,
-        () => subtractPolygonComponents(subjectPolygon, clippingPolygon)
+        () => subtractKnownSimplePolygonComponents(subjectPolygon, clippingPolygon)
     );
     let retainedPolygon = selectRetainedTerritoryPolygon(
         operationSubtract.value,
