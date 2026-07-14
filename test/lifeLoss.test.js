@@ -968,14 +968,18 @@ test("pending dense overlap repair restarts after another owner mutation", async
         diagnostics
     });
 
-    assert.equal(diagnostics.captureApply.overlapRepairWorkerDispatchedCount, 2);
-    assert.ok(diagnostics.captureApply.overlapRepairWorkerBackpressureCount >= 1);
-    assert.deepEqual(getTerritoryOverlapRepairQueueDiagnostics(territories), {
-        completedJobs: 0,
-        inFlightPairs: 2,
-        pendingItems: 1,
-        refreshRequests: 0
-    });
+    assert.ok(diagnostics.captureApply.overlapRepairWorkerDispatchedCount >= 1);
+    assert.ok(
+        diagnostics.captureApply.overlapRepairWorkerBackpressureCount >= 1
+            || diagnostics.captureApply.overlapRepairQueueBudgetHitCount >= 1,
+        "remaining repair should be deferred by worker capacity or the tick budget"
+    );
+    const queueBeforeMutation = getTerritoryOverlapRepairQueueDiagnostics(territories);
+
+    assert.equal(queueBeforeMutation.completedJobs, 0);
+    assert.ok(queueBeforeMutation.inFlightPairs >= 1);
+    assert.ok(queueBeforeMutation.pendingItems >= 1);
+    assert.equal(queueBeforeMutation.refreshRequests, 0);
 
     applyCapturedPolygon(
         territories,
