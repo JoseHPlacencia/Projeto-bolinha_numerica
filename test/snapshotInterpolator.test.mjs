@@ -38,6 +38,12 @@ const snapshotGeometryApplicationPath = new URL(
     "../public/js/snapshotGeometryApplication.js",
     import.meta.url
 );
+const copyOnWriteTransactionPath = new URL(
+    "../public/js/copyOnWriteTransaction.js",
+    import.meta.url
+);
+const copyOnWriteTransactionSource = (await readFile(copyOnWriteTransactionPath, "utf8"))
+    .replaceAll("export function ", "function ");
 const rawSnapshotGeometryApplicationSource = await readFile(
     snapshotGeometryApplicationPath,
     "utf8"
@@ -70,6 +76,10 @@ const snapshotDiagnosticsSource = (await readFile(snapshotDiagnosticsPath, "utf8
     .replaceAll("getFiniteConfigNumber", "getDiagnosticsFiniteConfigNumber");
 const snapshotGeometryApplicationSource = rawSnapshotGeometryApplicationSource
     .replace(/import\s*\{[^}]*\}\s*from\s*"\.\/snapshotDiagnostics\.js";/, "")
+    .replace(
+        /import\s*\{[^}]*\}\s*from\s*"\.\/copyOnWriteTransaction\.js";/,
+        copyOnWriteTransactionSource
+    )
     .replace(/import\s*\{[^}]*\}\s*from\s*"\.\/snapshotGeometry\.js";/, "");
 const testableSource = source.replace(
     'import { clamp, lerp, lerpAngle } from "./sharedMath.js";',
@@ -208,6 +218,18 @@ function createTrailPatch(start, points, options = {}) {
     };
 }
 
+function createReferencedTerritory(version, points, ring) {
+    return {
+        version,
+        color: "#00ffff",
+        base: [0, 0],
+        polygon: {
+            points,
+            rings: [ring]
+        }
+    };
+}
+
 test("snapshot geometry imports are part of the module's public exports", () => {
     const importMatch = source.match(
         /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
@@ -284,6 +306,99 @@ test("geometry application rolls back a staged trail patch after another section
     assert.equal(recoveredResult.applied, true);
     assert.equal(recoveredGeometry.trails.player.leftSegments[0].length, 3);
     assert.equal(recoveredGeometry.trails.player.leftSegments[0][2].x, 2);
+});
+
+test("geometry application rolls back referenced point definitions", () => {
+    const application = createSnapshotGeometryApplication();
+    const firstResult = createSnapshotApplyResult();
+
+    application.applySnapshotGeometry(createGeometryPayload(1, {
+        territoryIds: ["first"],
+        territoryVersions: { first: 1 },
+        territories: {
+            first: createReferencedTerritory(1, [[900, 0, 0]], [900, 901, 902])
+        }
+    }), firstResult);
+
+    assert.equal(firstResult.applied, false);
+
+    const secondResult = createSnapshotApplyResult();
+
+    application.applySnapshotGeometry(createGeometryPayload(2, {
+        territoryIds: ["second"],
+        territoryVersions: { second: 1 },
+        territories: {
+            second: createReferencedTerritory(1, [
+                [901, 10, 0],
+                [902, 0, 10]
+            ], [900, 901, 902])
+        }
+    }), secondResult);
+
+    assert.equal(secondResult.applied, false);
+    assert.deepEqual(secondResult.invalidations.territories, ["second"]);
+
+    const completeResult = createSnapshotApplyResult();
+    const completeGeometry = application.applySnapshotGeometry(createGeometryPayload(3, {
+        territoryIds: ["complete"],
+        territoryVersions: { complete: 1 },
+        territories: {
+            complete: createReferencedTerritory(1, [
+                [900, 0, 0],
+                [901, 10, 0],
+                [902, 0, 10]
+            ], [900, 901, 902])
+        }
+    }), completeResult);
+
+    assert.equal(completeResult.applied, true);
+    assert.equal(completeGeometry.territories.complete.polygon.rings[0].length, 3);
+});
+
+test("geometry application rolls back when a transaction callback throws", () => {
+    const callbackError = new Error("expected resync callback failure");
+    const application = createSnapshotGeometryApplication({}, {
+        requestResync() {
+            throw callbackError;
+        }
+    });
+    const initialResult = createSnapshotApplyResult();
+    const initialGeometry = application.applySnapshotGeometry(createGeometryPayload(1, {
+        trailIds: ["player"],
+        trails: {
+            player: createFullTrail([[0, 0], [1, 0]])
+        }
+    }), initialResult);
+    const failingResult = createSnapshotApplyResult();
+
+    assert.throws(() => application.applySnapshotGeometry(createGeometryPayload(2, {
+        territoryOps: {
+            missing: {
+                type: "trailCapture",
+                baseVersion: 1,
+                version: 2
+            }
+        },
+        trailIds: ["player"],
+        trails: {
+            player: createTrailPatch(2, [[2, 0], [3, 0]])
+        }
+    }), failingResult, initialGeometry), callbackError);
+
+    const recoveredResult = createSnapshotApplyResult();
+    const recoveredGeometry = application.applySnapshotGeometry(createGeometryPayload(3, {
+        trailIds: ["player"],
+        trails: {
+            player: createTrailPatch(2, [[2, 0]])
+        }
+    }), recoveredResult, initialGeometry);
+
+    assert.equal(recoveredResult.applied, true);
+    assert.deepEqual(
+        recoveredGeometry.trails.player.leftSegments[0].map(point => [point.x, point.y]),
+        [[0, 0], [1, 0], [2, 0]]
+    );
+    assert.equal(initialGeometry.trails.player.leftSegments[0].length, 2);
 });
 
 test("adaptive buffer shares one sorted sample set for trimming and percentile", () => {

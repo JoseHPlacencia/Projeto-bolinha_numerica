@@ -1,4 +1,5 @@
 import { finiteOrNull } from "./snapshotDiagnostics.js";
+import { createCopyOnWriteTransaction } from "./copyOnWriteTransaction.js";
 import {
     arePointsEqual,
     calculateRingArea,
@@ -32,9 +33,12 @@ const captureAreaRegressionRatioTolerance = 0.001;
  */
 export function createSnapshotGeometryApplication(networkConfig = {}, callbacks = {}) {
     const entityCache = createEmptyGeometryCache();
-    const pendingTerritoryOperations = new Map();
-    const suppressedCaptureOperationResyncIds = new Set();
-    const failedTerritoryOperationKeys = new Map();
+    const transactionalCollections = {
+        failedTerritoryOperationKeys: new Map(),
+        pendingTerritoryOperations: new Map(),
+        suppressedCaptureOperationResyncIds: new Set()
+    };
+    let activeTransaction = null;
 
     return {
         applySnapshotGeometry,
@@ -43,13 +47,43 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
     function reset() {
         Object.assign(entityCache, createEmptyGeometryCache());
-        pendingTerritoryOperations.clear();
-        suppressedCaptureOperationResyncIds.clear();
-        failedTerritoryOperationKeys.clear();
+        transactionalCollections.pendingTerritoryOperations.clear();
+        transactionalCollections.suppressedCaptureOperationResyncIds.clear();
+        transactionalCollections.failedTerritoryOperationKeys.clear();
     }
 
     function applySnapshotGeometry(rawSnapshot, applyResult, previousGeometry = {}) {
-        const checkpoint = createCheckpoint();
+        if (activeTransaction) {
+            throw new Error("Snapshot geometry transactions cannot be nested.");
+        }
+
+        const transaction = createCopyOnWriteTransaction();
+
+        activeTransaction = transaction;
+
+        try {
+            const geometry = applySnapshotGeometryTransaction(
+                rawSnapshot,
+                applyResult,
+                previousGeometry
+            );
+
+            if (!applyResult.applied) {
+                transaction.rollback();
+            } else {
+                transaction.commit();
+            }
+
+            return geometry;
+        } catch (error) {
+            transaction.rollback();
+            throw error;
+        } finally {
+            activeTransaction = null;
+        }
+    }
+
+    function applySnapshotGeometryTransaction(rawSnapshot, applyResult, previousGeometry) {
         const removedTerritoryIds = normalizeEntityIds(rawSnapshot.removedTerritoryIds);
         const trailRemovals = normalizeTrailRemovals(
             rawSnapshot.trailRemovals,
@@ -121,10 +155,6 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
             );
         }
 
-        if (!applyResult.applied) {
-            restoreCheckpoint(checkpoint);
-        }
-
         return {
             territories,
             trails,
@@ -132,32 +162,89 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
         };
     }
 
-    function createCheckpoint() {
-        return {
-            entityCache: {
-                territories: { ...entityCache.territories },
-                territoryPoints: { ...entityCache.territoryPoints },
-                trails: { ...entityCache.trails },
-                trailAssemblies: { ...entityCache.trailAssemblies },
-                trailTombstones: { ...entityCache.trailTombstones }
-            },
-            failedTerritoryOperationKeys: new Map(failedTerritoryOperationKeys),
-            pendingTerritoryOperations: new Map(pendingTerritoryOperations),
-            suppressedCaptureOperationResyncIds: new Set(suppressedCaptureOperationResyncIds)
-        };
+    function setObjectEntry(cacheName, key, value) {
+        const collection = ensureEntityCacheCopy(cacheName);
+
+        collection[key] = value;
     }
 
-    function restoreCheckpoint(checkpoint) {
-        entityCache.territories = checkpoint.entityCache.territories;
-        entityCache.territoryPoints = checkpoint.entityCache.territoryPoints;
-        entityCache.trails = checkpoint.entityCache.trails;
-        entityCache.trailAssemblies = checkpoint.entityCache.trailAssemblies;
-        entityCache.trailTombstones = checkpoint.entityCache.trailTombstones;
-        replaceMapEntries(pendingTerritoryOperations, checkpoint.pendingTerritoryOperations);
-        replaceMapEntries(failedTerritoryOperationKeys, checkpoint.failedTerritoryOperationKeys);
-        replaceSetEntries(
-            suppressedCaptureOperationResyncIds,
-            checkpoint.suppressedCaptureOperationResyncIds
+    function deleteObjectEntry(cacheName, key) {
+        const collection = entityCache[cacheName];
+
+        if (!Object.prototype.hasOwnProperty.call(collection, key)) {
+            return;
+        }
+
+        delete ensureEntityCacheCopy(cacheName)[key];
+    }
+
+    function setMapEntry(collectionName, key, value) {
+        ensureMapCopy(collectionName).set(key, value);
+    }
+
+    function deleteMapEntry(collectionName, key) {
+        const collection = transactionalCollections[collectionName];
+
+        if (!collection.has(key)) {
+            return;
+        }
+
+        ensureMapCopy(collectionName).delete(key);
+    }
+
+    function addSetEntry(collectionName, key) {
+        const collection = transactionalCollections[collectionName];
+
+        if (collection.has(key)) {
+            return;
+        }
+
+        ensureSetCopy(collectionName).add(key);
+    }
+
+    function deleteSetEntry(collectionName, key) {
+        const collection = transactionalCollections[collectionName];
+
+        if (!collection.has(key)) {
+            return;
+        }
+
+        ensureSetCopy(collectionName).delete(key);
+    }
+
+    function ensureEntityCacheCopy(cacheName) {
+        if (!activeTransaction) {
+            return entityCache[cacheName];
+        }
+
+        return activeTransaction.getWritable(entityCache, cacheName, cloneObjectCollection);
+    }
+
+    function ensureMapCopy(collectionName) {
+        const collection = transactionalCollections[collectionName];
+
+        if (!activeTransaction) {
+            return collection;
+        }
+
+        return activeTransaction.getWritable(
+            transactionalCollections,
+            collectionName,
+            cloneMapCollection
+        );
+    }
+
+    function ensureSetCopy(collectionName) {
+        const collection = transactionalCollections[collectionName];
+
+        if (!activeTransaction) {
+            return collection;
+        }
+
+        return activeTransaction.getWritable(
+            transactionalCollections,
+            collectionName,
+            cloneSetCollection
         );
     }
 
@@ -182,7 +269,7 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
                 continue;
             }
 
-            entityCache.territories[id] = {
+            setObjectEntry("territories", id, {
                 id,
                 color: territory.color,
                 version: territory.version,
@@ -190,8 +277,8 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
                 baseX: base[0],
                 baseY: base[1],
                 polygon
-            };
-            suppressedCaptureOperationResyncIds.delete(id);
+            });
+            deleteSetEntry("suppressedCaptureOperationResyncIds", id);
             clearFailedTerritoryOperationKeys(id);
         }
     }
@@ -204,14 +291,14 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
             if (duplicateFailure) {
                 failedIds.add(id);
-                pendingTerritoryOperations.delete(id);
+                deleteMapEntry("pendingTerritoryOperations", id);
                 markCacheInvalid(applyResult, "territories", id);
                 handleDuplicateCaptureOperationFailure(id, operation, duplicateFailure);
                 continue;
             }
 
             if (shouldDeferTerritoryOperation(id, operation, activeTrailIds)) {
-                pendingTerritoryOperations.set(id, operation);
+                setMapEntry("pendingTerritoryOperations", id, operation);
                 continue;
             }
 
@@ -219,15 +306,15 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
             if (!operationResult.applied) {
                 failedIds.add(id);
-                pendingTerritoryOperations.delete(id);
+                deleteMapEntry("pendingTerritoryOperations", id);
                 markCacheInvalid(applyResult, "territories", id);
                 markFailedTerritoryOperation(id, operation, operationResult);
                 handleCaptureOperationFailure(id, operationResult, operation);
                 continue;
             }
 
-            pendingTerritoryOperations.delete(id);
-            suppressedCaptureOperationResyncIds.delete(id);
+            deleteMapEntry("pendingTerritoryOperations", id);
+            deleteSetEntry("suppressedCaptureOperationResyncIds", id);
             clearFailedTerritoryOperationKeys(id);
         }
 
@@ -244,7 +331,8 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
     }
 
     function applyPendingTerritoryOperations(activeTrailIds, applyResult, failedIds) {
-        for (const [id, operation] of pendingTerritoryOperations.entries()) {
+        for (const [id, operation] of transactionalCollections
+            .pendingTerritoryOperations.entries()) {
             if (activeTrailIds.has(id)) {
                 continue;
             }
@@ -253,7 +341,7 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
             if (duplicateFailure) {
                 failedIds.add(id);
-                pendingTerritoryOperations.delete(id);
+                deleteMapEntry("pendingTerritoryOperations", id);
                 markCacheInvalid(applyResult, "territories", id);
                 handleDuplicateCaptureOperationFailure(id, operation, duplicateFailure);
                 continue;
@@ -263,15 +351,15 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
             if (!operationResult.applied) {
                 failedIds.add(id);
-                pendingTerritoryOperations.delete(id);
+                deleteMapEntry("pendingTerritoryOperations", id);
                 markCacheInvalid(applyResult, "territories", id);
                 markFailedTerritoryOperation(id, operation, operationResult);
                 handleCaptureOperationFailure(id, operationResult, operation);
                 continue;
             }
 
-            pendingTerritoryOperations.delete(id);
-            suppressedCaptureOperationResyncIds.delete(id);
+            deleteMapEntry("pendingTerritoryOperations", id);
+            deleteSetEntry("suppressedCaptureOperationResyncIds", id);
             clearFailedTerritoryOperationKeys(id);
         }
     }
@@ -395,13 +483,13 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
             });
         }
 
-        entityCache.territories[id] = {
+        setObjectEntry("territories", id, {
             ...territory,
             version: operation.version,
             polygon: {
                 rings: [nextRing]
             }
-        };
+        });
 
         return {
             applied: true
@@ -741,7 +829,7 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
             return;
         }
 
-        failedTerritoryOperationKeys.set(key, {
+        setMapEntry("failedTerritoryOperationKeys", key, {
             reason: operationResult && operationResult.reason || null,
             details: operationResult && operationResult.details || null
         });
@@ -750,15 +838,15 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
     function getFailedTerritoryOperation(id, operation) {
         const key = createTerritoryOperationKey(id, operation);
 
-        return key ? failedTerritoryOperationKeys.get(key) : null;
+        return key ? transactionalCollections.failedTerritoryOperationKeys.get(key) : null;
     }
 
     function clearFailedTerritoryOperationKeys(id) {
         const prefix = `${id}:`;
 
-        for (const key of failedTerritoryOperationKeys.keys()) {
+        for (const key of transactionalCollections.failedTerritoryOperationKeys.keys()) {
             if (key.startsWith(prefix)) {
-                failedTerritoryOperationKeys.delete(key);
+                deleteMapEntry("failedTerritoryOperationKeys", key);
             }
         }
     }
@@ -876,6 +964,10 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
     }
 
     function updateTerritoryPointCache(points) {
+        const pointCache = Array.isArray(points) && points.length > 0
+            ? ensureEntityCacheCopy("territoryPoints")
+            : entityCache.territoryPoints;
+
         for (const point of points || []) {
             if (!Array.isArray(point) || point.length < 3) {
                 continue;
@@ -889,7 +981,7 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
                 continue;
             }
 
-            entityCache.territoryPoints[pointId] = { x, y };
+            pointCache[pointId] = { x, y };
         }
     }
 
@@ -907,7 +999,7 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
                 continue;
             }
 
-            delete entityCache.trailTombstones[id];
+            deleteObjectEntry("trailTombstones", id);
 
             if (update.full) {
                 const fullTrail = createFullTrail(id, update, snapshotSequence);
@@ -915,16 +1007,16 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
                 if (shouldStage) {
                     if (cachedTrail && !cachedTrail.isPartial) {
-                        entityCache.trailAssemblies[id] = fullTrail;
+                        setObjectEntry("trailAssemblies", id, fullTrail);
                     } else {
-                        entityCache.trails[id] = fullTrail;
-                        delete entityCache.trailAssemblies[id];
+                        setObjectEntry("trails", id, fullTrail);
+                        deleteObjectEntry("trailAssemblies", id);
                     }
                     continue;
                 }
 
-                entityCache.trails[id] = fullTrail;
-                delete entityCache.trailAssemblies[id];
+                setObjectEntry("trails", id, fullTrail);
+                deleteObjectEntry("trailAssemblies", id);
                 continue;
             }
 
@@ -932,18 +1024,18 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
             const patchedTrail = trail && createPatchedTrail(trail, update, snapshotSequence);
 
             if (!patchedTrail) {
-                delete entityCache.trailAssemblies[id];
+                deleteObjectEntry("trailAssemblies", id);
                 markCacheInvalid(applyResult, "trails", id);
                 continue;
             }
 
             if (assembly && update.partial) {
-                entityCache.trailAssemblies[id] = patchedTrail;
+                setObjectEntry("trailAssemblies", id, patchedTrail);
                 continue;
             }
 
-            entityCache.trails[id] = patchedTrail;
-            delete entityCache.trailAssemblies[id];
+            setObjectEntry("trails", id, patchedTrail);
+            deleteObjectEntry("trailAssemblies", id);
         }
     }
 
@@ -1106,21 +1198,21 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
     function applyTerritoryRemovals(removedIds) {
         for (const id of removedIds || []) {
-            delete entityCache.territories[id];
-            pendingTerritoryOperations.delete(id);
-            suppressedCaptureOperationResyncIds.delete(id);
+            deleteObjectEntry("territories", id);
+            deleteMapEntry("pendingTerritoryOperations", id);
+            deleteSetEntry("suppressedCaptureOperationResyncIds", id);
             clearFailedTerritoryOperationKeys(id);
         }
     }
 
     function applyTrailRemovals(removals, snapshotSequence) {
         for (const [id, generation] of Object.entries(removals || {})) {
-            delete entityCache.trails[id];
-            delete entityCache.trailAssemblies[id];
-            entityCache.trailTombstones[id] = {
+            deleteObjectEntry("trails", id);
+            deleteObjectEntry("trailAssemblies", id);
+            setObjectEntry("trailTombstones", id, {
                 generation,
                 snapshotSequence
-            };
+            });
         }
     }
 
@@ -1287,8 +1379,8 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
 
     function createIgnoredTerritoryResyncIds(failedTerritoryOperationIds) {
         return new Set([
-            ...suppressedCaptureOperationResyncIds,
-            ...pendingTerritoryOperations.keys(),
+            ...transactionalCollections.suppressedCaptureOperationResyncIds,
+            ...transactionalCollections.pendingTerritoryOperations.keys(),
             ...failedTerritoryOperationIds
         ]);
     }
@@ -1326,7 +1418,7 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
         };
 
         if (networkConfig.captureOperationResyncEnabled === false) {
-            suppressedCaptureOperationResyncIds.add(id);
+            addSetEntry("suppressedCaptureOperationResyncIds", id);
 
             if (typeof callbacks.recordResyncSuppressed === "function") {
                 callbacks.recordResyncSuppressed("capture_operation_resync_disabled", {
@@ -1385,18 +1477,14 @@ function createEmptyGeometryCache() {
     };
 }
 
-function replaceMapEntries(target, source) {
-    target.clear();
-
-    for (const [key, value] of source || []) {
-        target.set(key, value);
-    }
+function cloneObjectCollection(collection) {
+    return { ...collection };
 }
 
-function replaceSetEntries(target, source) {
-    target.clear();
+function cloneMapCollection(collection) {
+    return new Map(collection);
+}
 
-    for (const value of source || []) {
-        target.add(value);
-    }
+function cloneSetCollection(collection) {
+    return new Set(collection);
 }
