@@ -66,12 +66,6 @@ const trailCounterNames = [
 const captureCounterNames = [
     "calls",
     "changedTerritoryCount",
-    "operationSimplifyAttemptCount",
-    "operationSimplifyCacheHitCount",
-    "operationSimplifyHitCount",
-    "operationSubtractFallbackCount",
-    "operationSubtractValidationCount",
-    "operationSubtractValidationRejectedCount",
     "overlapRepairQueueBudgetHitCount",
     "overlapRepairQueueChangedCount",
     "overlapRepairQueueProcessedCount",
@@ -94,9 +88,6 @@ const captureMaximumNames = [
     "maxCapturedPointCount",
     "maxOwnerArea",
     "maxOwnerPointCount",
-    "operationSimplifyMaxAreaDrift",
-    "operationSimplifyMaxAreaDriftRatio",
-    "operationSubtractMaxResidualOverlapArea",
     "overlapRepairQueuePendingCount",
     "overlapRepairWorkerInFlightCount"
 ];
@@ -657,7 +648,6 @@ Tempo real do diagnóstico: ${report.scenario.realDurationMs} ms
 - colisões com o próprio rastro: ${report.events.trails.selfCollisions || 0}
 - reparações alteradas: ${report.events.captureApply.overlapRepairQueueChangedCount || 0}
 - jobs de reparação enviados/concluídos: ${report.events.captureApply.overlapRepairWorkerDispatchedCount || 0} / ${report.events.captureApply.overlapRepairWorkerCompletedCount || 0}
-- fallbacks de subtração: ${report.events.captureApply.operationSubtractFallbackCount || 0}
 - reinícios da sala: ${report.events.restarts}
 
 O JSON ao lado contém distribuições por fase, contadores detalhados e os ticks mais lentos.

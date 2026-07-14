@@ -260,19 +260,6 @@ function normalizeCaptureApplyDiagnostics(diagnostics) {
         missingOwnerTerritoryCount: finiteOrNull(diagnostics.missingOwnerTerritoryCount),
         overlapCount: finiteOrNull(diagnostics.overlapCount),
         overlapRejectedCount: finiteOrNull(diagnostics.overlapRejectedCount),
-        operationSimplifyAttemptCount: finiteOrNull(diagnostics.operationSimplifyAttemptCount),
-        operationSimplifyCacheHitCount: finiteOrNull(diagnostics.operationSimplifyCacheHitCount),
-        operationSimplifyCapturedCount: finiteOrNull(diagnostics.operationSimplifyCapturedCount),
-        operationSimplifyHitCount: finiteOrNull(diagnostics.operationSimplifyHitCount),
-        operationSimplifyInputPointCount: finiteOrNull(diagnostics.operationSimplifyInputPointCount),
-        operationSimplifyMaxAreaDrift: finiteOrNull(diagnostics.operationSimplifyMaxAreaDrift),
-        operationSimplifyMaxAreaDriftRatio: finiteOrNull(diagnostics.operationSimplifyMaxAreaDriftRatio),
-        operationSimplifyOutputPointCount: finiteOrNull(diagnostics.operationSimplifyOutputPointCount),
-        operationSimplifySubjectCount: finiteOrNull(diagnostics.operationSimplifySubjectCount),
-        operationSubtractFallbackCount: finiteOrNull(diagnostics.operationSubtractFallbackCount),
-        operationSubtractMaxResidualOverlapArea: finiteOrNull(diagnostics.operationSubtractMaxResidualOverlapArea),
-        operationSubtractValidationCount: finiteOrNull(diagnostics.operationSubtractValidationCount),
-        operationSubtractValidationRejectedCount: finiteOrNull(diagnostics.operationSubtractValidationRejectedCount),
         overlapRepairQueueBudgetHitCount: finiteOrNull(diagnostics.overlapRepairQueueBudgetHitCount),
         overlapRepairQueueChangedCount: finiteOrNull(diagnostics.overlapRepairQueueChangedCount),
         overlapRepairQueuePendingCount: finiteOrNull(diagnostics.overlapRepairQueuePendingCount),
@@ -354,9 +341,7 @@ function normalizeCaptureApplySubtract(detail) {
         resultArea: finiteOrNull(detail.resultArea),
         resultPointCount: finiteOrNull(detail.resultPointCount),
         subjectArea: finiteOrNull(detail.subjectArea),
-        subjectPointCount: finiteOrNull(detail.subjectPointCount),
-        usedFallback: Boolean(detail.usedFallback),
-        usedSimplified: Boolean(detail.usedSimplified)
+        subjectPointCount: finiteOrNull(detail.subjectPointCount)
     };
 }
 

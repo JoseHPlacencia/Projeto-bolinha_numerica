@@ -22,10 +22,7 @@ const {
     recordSlowestCaptureApplySubtract
 } = require("./territoryDiagnostics");
 const {
-    clearTerritoryOperationPolygonCache,
-    getCapturedOperationPolygon,
     getOwnerCapturedPolygon,
-    getTerritoryOperationPolygon,
     subtractTerritoryPolygon
 } = require("./territoryOperations");
 const { createTerritoryOverlapRepair } = require("./territoryOverlapRepair");
@@ -141,8 +138,6 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         addCaptureApplyCount(captureApply, "emptyCapturedBoundsCount", 1);
     }
 
-    let capturedOperation = null;
-
     for (const [playerId, otherTerritory] of territories.entries()) {
         if (playerId === ownerId) {
             continue;
@@ -205,25 +200,14 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         addCaptureApplyCount(captureApply, "subtractCount", 1);
         addCaptureApplyCount(captureApply, "subtractPointCount", subjectPointCount);
         const previousArea = getTerritoryArea(otherTerritory);
-        const subjectOperation = getTerritoryOperationPolygon(
-            otherTerritory,
-            captureApply,
-            diagnostics,
-            "subject",
-            "captureApplySimplifySubject"
-        );
-        capturedOperation = capturedOperation || getCapturedOperationPolygon(capturedPolygon, captureApply, diagnostics);
         const subtract = measureCaptureApplyOperation(diagnostics, "captureApplySubtractTotal", () => (
             subtractTerritoryPolygon(
                 otherTerritory,
                 capturedPolygon,
-                capturedOperation,
                 options.players && options.players.get(playerId),
                 {
                     diagnostics,
-                    metrics: captureApply,
-                    phasePrefix: "captureApply",
-                    subjectOperation
+                    phasePrefix: "captureApply"
                 }
             )
         ));
@@ -232,8 +216,12 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
         const operationSubjectArea = subtract.value.operationSubjectArea;
         const operationResultArea = subtract.value.operationResultArea;
         const operationAreaDelta = Math.abs(operationSubjectArea - operationResultArea);
-        addCaptureApplyCount(captureApply, "subtractOperationPointCount", subjectOperation.outputPointCount);
-        addCaptureApplyCount(captureApply, "subtractOperationClippingPointCount", capturedOperation.outputPointCount);
+        addCaptureApplyCount(captureApply, "subtractOperationPointCount", subjectPointCount);
+        addCaptureApplyCount(
+            captureApply,
+            "subtractOperationClippingPointCount",
+            getPolygonPointCount(capturedPolygon)
+        );
         addCaptureApplyCount(captureApply, "subtractResultPointCount", resultPointCount);
         const changed = operationAreaDelta > territoryChangeAreaEpsilon
             && measureCaptureApplyPhase(diagnostics, "captureApplyUpdateTerritory", () => (
@@ -244,17 +232,15 @@ function applyCapturedPolygon(territories, ownerId, capturedPolygon, options = {
             changed,
             clippingPointCount: getPolygonPointCount(capturedPolygon),
             durationMs: subtract.durationMs,
-            operationClippingPointCount: capturedOperation.outputPointCount,
+            operationClippingPointCount: getPolygonPointCount(capturedPolygon),
             operationResultArea,
             operationSubjectArea,
-            operationSubjectPointCount: subjectOperation.outputPointCount,
+            operationSubjectPointCount: subjectPointCount,
             playerId,
             resultArea: getTerritoryArea(otherTerritory),
             resultPointCount,
             subjectArea: previousArea,
-            subjectPointCount,
-            usedFallback: subtract.value.usedFallback,
-            usedSimplified: subtract.value.usedSimplified
+            subjectPointCount
         });
 
         if (changed) {
@@ -342,7 +328,6 @@ function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     territory.area = nextArea;
     territory.bounds = getPolygonBounds(nextPolygon);
     territory.version = (territory.version || 0) + 1;
-    clearTerritoryOperationPolygonCache(territory);
 
     return true;
 }

@@ -17,7 +17,6 @@ const {
     roundToMilliseconds
 } = require("./territoryDiagnostics");
 const {
-    createIdentityOperationPolygon,
     subtractTerritoryPolygon
 } = require("./territoryOperations");
 const {
@@ -1084,23 +1083,12 @@ function createTerritoryOverlapRepair({ updateTerritoryPolygon }) {
             return createTerritoryTrimResult(false);
         }
 
-        const loserPolygon = loserTerritory.polygon;
         const winnerPolygon = winnerTerritory.polygon;
         const subtract = subtractTerritoryPolygon(
             loserTerritory,
             winnerPolygon,
-            createIdentityOperationPolygon(
-                winnerPolygon,
-                getPolygonPointCount(winnerPolygon)
-            ),
             loserPlayer,
-            {
-                ...options,
-                subjectOperation: createIdentityOperationPolygon(
-                    loserPolygon,
-                    getPolygonPointCount(loserPolygon)
-                )
-            }
+            options
         );
 
         return createTerritoryTrimResult(

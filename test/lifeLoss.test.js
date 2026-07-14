@@ -23,6 +23,7 @@ const {
     calculatePolygonArea,
     doPolygonsHavePositiveAreaOverlap,
     getPolygonBounds,
+    subtractPolygon,
     unionPolygons
 } = require("../src/utils/geometry");
 const {
@@ -886,7 +887,6 @@ test("dense territories touching at the edge are not changed by overlap repair",
     );
     assert.equal(territories.get("neighbor").version, neighborVersion);
     assert.equal(diagnostics.captureApply.postCaptureOverlapCount, 0);
-    assert.equal(diagnostics.captureApply.operationSubtractFallbackCount, 0);
     assert.equal(diagnostics.phases.overlapRepairQueuePairIntersection, undefined);
     assert.equal(diagnostics.phases.overlapRepairQueuePairAreaConfirmation, undefined);
     assert.equal(diagnostics.phases.overlapRepairQueuePairSubtract, undefined);
@@ -1166,28 +1166,32 @@ test("deterministic capture soak preserves territory geometry invariants", async
     assert.equal(getMaximumTerritoryOverlapArea(territories) <= 1, true);
 });
 
-test("capture subtraction reuses a dense territory operation polygon while its version is unchanged", () => {
+test("capture subtraction keeps dense operands exact", () => {
     const attackerPolygon = createRectanglePolygon(-100, -100, -90, -90);
     const victimPolygon = createCircleLikePolygon(0, 0, 100, 640);
-    const tinyCapture = createRectanglePolygon(-0.25, -0.25, 0.25, 0.25);
+    const denseCapture = createCircleLikePolygon(100, 0, 30, 320);
     const territories = new Map([
         ["attacker", createCutTerritoryState("attacker", attackerPolygon)],
         ["victim", createCutTerritoryState("victim", victimPolygon)]
     ]);
     const diagnostics = { phases: {} };
-    const victimVersion = territories.get("victim").version;
+    const expectedVictimPolygon = subtractPolygon(victimPolygon, denseCapture);
 
-    for (let index = 0; index < 2; index++) {
-        applyCapturedPolygon(territories, "attacker", tinyCapture, {
-            diagnostics,
-            ownerPolygon: attackerPolygon
-        });
-    }
+    applyCapturedPolygon(territories, "attacker", denseCapture, {
+        diagnostics,
+        ownerPolygon: attackerPolygon
+    });
 
-    assert.equal(territories.get("victim").version, victimVersion);
-    assert.ok(diagnostics.captureApply.operationSimplifyCacheHitCount >= 1);
-    assert.ok(diagnostics.captureApply.operationSubtractValidationCount >= 2);
-    assert.equal(diagnostics.captureApply.operationSubtractFallbackCount, 0);
+    assert.equal(diagnostics.captureApply.subtractCount, 1);
+    assert.deepEqual(territories.get("victim").polygon, expectedVictimPolygon);
+    assert.equal(
+        diagnostics.captureApply.slowestSubtract.operationClippingPointCount,
+        diagnostics.captureApply.slowestSubtract.clippingPointCount
+    );
+    assert.equal(
+        diagnostics.captureApply.slowestSubtract.operationSubjectPointCount,
+        diagnostics.captureApply.slowestSubtract.subjectPointCount
+    );
 });
 
 test("ending a trail emits a generation tombstone", () => {

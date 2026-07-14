@@ -33,19 +33,6 @@ function createCaptureApplyMetrics() {
         missingOwnerTerritoryCount: 0,
         overlapCount: 0,
         overlapRejectedCount: 0,
-        operationSimplifyAttemptCount: 0,
-        operationSimplifyCacheHitCount: 0,
-        operationSimplifyCapturedCount: 0,
-        operationSimplifyHitCount: 0,
-        operationSimplifyInputPointCount: 0,
-        operationSimplifyMaxAreaDrift: 0,
-        operationSimplifyMaxAreaDriftRatio: 0,
-        operationSimplifyOutputPointCount: 0,
-        operationSimplifySubjectCount: 0,
-        operationSubtractFallbackCount: 0,
-        operationSubtractMaxResidualOverlapArea: 0,
-        operationSubtractValidationCount: 0,
-        operationSubtractValidationRejectedCount: 0,
         overlapRepairQueueBudgetHitCount: 0,
         overlapRepairQueueChangedCount: 0,
         overlapRepairQueuePendingCount: 0,
@@ -185,9 +172,7 @@ function recordSlowestCaptureApplySubtract(metrics, detail) {
         resultArea: roundToMilliseconds(detail.resultArea),
         resultPointCount: detail.resultPointCount,
         subjectArea: roundToMilliseconds(detail.subjectArea),
-        subjectPointCount: detail.subjectPointCount,
-        usedFallback: Boolean(detail.usedFallback),
-        usedSimplified: Boolean(detail.usedSimplified)
+        subjectPointCount: detail.subjectPointCount
     };
 }
 
