@@ -8,22 +8,17 @@ const defaultPrimitiveBlockSize = 48;
 function createPathPrimitivesFromPoints(points, options = {}) {
     const validPoints = getValidPoints(points);
 
+    return createPathPrimitivesFromValidPoints(
+        validPoints,
+        normalizePrimitiveOptions(options, "path")
+    );
+}
+
+function createPathPrimitivesFromValidPoints(validPoints, options) {
     if (validPoints.length < 2) {
         return [];
     }
 
-    const angleThresholdRadians = getPositiveNumberOption(
-        options.angleThresholdRadians,
-        defaultAngleThresholdRadians
-    );
-    const maxArcSweepRadians = getPositiveNumberOption(
-        options.maxArcSweepRadians,
-        defaultMaxArcSweepRadians
-    );
-    const maxArcRadialDrift = getNonNegativeNumberOption(
-        options.maxArcRadialDrift,
-        defaultMaxArcRadialDrift
-    );
     const primitives = [];
     let runStartIndex = 0;
     let runAngle = getSegmentAngle(validPoints[0], validPoints[1]);
@@ -33,14 +28,14 @@ function createPathPrimitivesFromPoints(points, options = {}) {
         const nextAngle = getSegmentAngle(validPoints[index], validPoints[index + 1]);
         const angleDelta = Math.abs(getAngleDelta(runAngle, nextAngle));
 
-        if (!Number.isFinite(angleDelta) || angleDelta < angleThresholdRadians) {
+        if (!Number.isFinite(angleDelta) || angleDelta < options.angleThresholdRadians) {
             index++;
             continue;
         }
 
         const arc = createArcPrimitive(validPoints, runStartIndex, index, index + 1, {
-            maxArcRadialDrift,
-            maxArcSweepRadians
+            maxArcRadialDrift: options.maxArcRadialDrift,
+            maxArcSweepRadians: options.maxArcSweepRadians
         });
 
         if (arc) {
@@ -86,26 +81,25 @@ function doesLineCrossPathPrimitive(startPoint, endPoint, primitive) {
 function createLinePrimitivesFromPoints(points, options = {}) {
     const validPoints = getValidPoints(points);
 
+    return createLinePrimitivesFromValidPoints(
+        validPoints,
+        normalizePrimitiveOptions(options, "line")
+    );
+}
+
+function createLinePrimitivesFromValidPoints(validPoints, options) {
     if (validPoints.length < 2) {
         return [];
     }
 
-    const angleThresholdRadians = getPositiveNumberOption(
-        options.angleThresholdRadians,
-        defaultAngleThresholdRadians
-    );
-    const maxDeviation = getNonNegativeNumberOption(
-        options.maxDeviation,
-        defaultLineDeviationTolerance
-    );
     const primitives = [];
     let runStartIndex = 0;
     let index = 2;
 
     while (index < validPoints.length) {
         if (canUseLinePrimitiveRun(validPoints, runStartIndex, index, {
-            angleThresholdRadians,
-            maxDeviation
+            angleThresholdRadians: options.angleThresholdRadians,
+            maxDeviation: options.maxDeviation
         })) {
             index++;
             continue;
@@ -122,45 +116,282 @@ function createLinePrimitivesFromPoints(points, options = {}) {
 }
 
 function createPathPrimitiveIndex(primitives, options = {}) {
-    const validPrimitives = (primitives || []).filter(primitive => (
-        primitive && isValidBounds(primitive.bounds)
-    ));
+    const validPrimitives = [];
+
+    for (const primitive of primitives || []) {
+        if (primitive && isValidBounds(primitive.bounds)) {
+            validPrimitives.push(primitive);
+        }
+    }
 
     if (validPrimitives.length <= 0) {
-        return {
-            blocks: [],
-            bounds: null,
-            primitives: []
-        };
+        return createEmptyPathPrimitiveIndex();
     }
 
     const blockSize = getPositiveIntegerOption(
         options.blockSize,
         defaultPrimitiveBlockSize
     );
+
+    return createPathPrimitiveIndexFrom(validPrimitives, blockSize);
+}
+
+/**
+ * Extends a point-derived primitive index without rebuilding its immutable
+ * prefix. The result is byte-for-byte equivalent to a full build as long as
+ * the same point array only grew at the end. Any incompatible change falls
+ * back to a complete rebuild.
+ */
+function updatePathPrimitiveIndexFromPoints(points, previousState = null, options = {}) {
+    const sourcePoints = Array.isArray(points) ? points : [];
+    const sourcePointCount = getSourcePointCount(sourcePoints, options.pointCount);
+    const normalizedOptions = normalizePrimitiveOptions(options, options.mode);
+    const signature = createPrimitiveOptionsSignature(normalizedOptions);
+    const previousCanExtend = canExtendPrimitiveIndexState(
+        sourcePoints,
+        sourcePointCount,
+        previousState,
+        signature
+    );
+
+    if (!previousCanExtend) {
+        return createFullPrimitiveIndexState(
+            sourcePoints,
+            sourcePointCount,
+            normalizedOptions,
+            signature
+        );
+    }
+
+    return extendPrimitiveIndexState(
+        sourcePoints,
+        sourcePointCount,
+        previousState,
+        normalizedOptions,
+        signature
+    );
+}
+
+function createFullPrimitiveIndexState(points, sourcePointCount, options, signature) {
+    const validPoints = getValidPoints(points, 0, sourcePointCount);
+    const primitives = createPrimitivesFromValidPoints(validPoints, options);
+    const index = createPathPrimitiveIndexFrom(primitives, options.blockSize);
+    const lastPoint = sourcePointCount > 0 ? points[sourcePointCount - 1] : null;
+
+    return {
+        allPointsValid: validPoints.length === sourcePointCount,
+        index,
+        lastX: lastPoint && lastPoint.x,
+        lastY: lastPoint && lastPoint.y,
+        rebuiltPointCount: sourcePointCount,
+        reusedBlockCount: 0,
+        signature,
+        sourcePointCount,
+        updatedIncrementally: false
+    };
+}
+
+function extendPrimitiveIndexState(points, sourcePointCount, previousState, options, signature) {
+    const previousPrimitives = previousState.index.primitives;
+    const lastPrimitive = previousPrimitives[previousPrimitives.length - 1];
+    const stablePrimitiveCount = lastPrimitive && lastPrimitive.type === "line"
+        ? previousPrimitives.length - 1
+        : previousPrimitives.length;
+    const rebuildStartIndex = lastPrimitive && lastPrimitive.type === "line"
+        ? lastPrimitive.startIndex
+        : previousState.sourcePointCount - 1;
+    const tailPoints = getValidPoints(points, rebuildStartIndex, sourcePointCount);
+    const tailPrimitives = createPrimitivesFromValidPoints(tailPoints, options);
+
+    offsetPrimitiveIndexes(tailPrimitives, rebuildStartIndex);
+
+    const primitives = previousPrimitives
+        .slice(0, stablePrimitiveCount)
+        .concat(tailPrimitives);
+    const indexed = extendPathPrimitiveIndex(
+        primitives,
+        previousState.index,
+        stablePrimitiveCount,
+        options.blockSize
+    );
+    const lastPoint = points[sourcePointCount - 1];
+
+    return {
+        allPointsValid: true,
+        index: indexed.index,
+        lastX: lastPoint.x,
+        lastY: lastPoint.y,
+        rebuiltPointCount: tailPoints.length,
+        reusedBlockCount: indexed.reusedBlockCount,
+        signature,
+        sourcePointCount,
+        updatedIncrementally: true
+    };
+}
+
+function createPrimitivesFromValidPoints(validPoints, options) {
+    return options.mode === "line"
+        ? createLinePrimitivesFromValidPoints(validPoints, options)
+        : createPathPrimitivesFromValidPoints(validPoints, options);
+}
+
+function createPathPrimitiveIndexFrom(primitives, blockSize) {
     const blocks = [];
     let bounds = null;
 
-    for (let startIndex = 0; startIndex < validPrimitives.length; startIndex += blockSize) {
-        const blockPrimitives = validPrimitives.slice(startIndex, startIndex + blockSize);
-        const blockBounds = getBoundsUnion(blockPrimitives.map(primitive => primitive.bounds));
+    for (let startIndex = 0; startIndex < primitives.length; startIndex += blockSize) {
+        const block = createPathPrimitiveBlock(primitives, startIndex, blockSize);
 
-        if (!blockBounds) {
+        if (!block) {
             continue;
         }
 
-        blocks.push({
-            bounds: blockBounds,
-            primitives: blockPrimitives
-        });
-        bounds = mergeBounds(bounds, blockBounds);
+        blocks.push(block);
+        bounds = mergeBounds(bounds, block.bounds);
     }
 
     return {
         blocks,
         bounds,
-        primitives: validPrimitives
+        primitives
     };
+}
+
+function extendPathPrimitiveIndex(primitives, previousIndex, stablePrimitiveCount, blockSize) {
+    const reusableBlockCount = Math.min(
+        Math.floor(stablePrimitiveCount / blockSize),
+        previousIndex.blocks.length
+    );
+    const blocks = previousIndex.blocks.slice(0, reusableBlockCount);
+    let bounds = null;
+
+    for (const block of blocks) {
+        bounds = mergeBounds(bounds, block.bounds);
+    }
+
+    for (
+        let startIndex = reusableBlockCount * blockSize;
+        startIndex < primitives.length;
+        startIndex += blockSize
+    ) {
+        const block = createPathPrimitiveBlock(primitives, startIndex, blockSize);
+
+        if (!block) {
+            continue;
+        }
+
+        blocks.push(block);
+        bounds = mergeBounds(bounds, block.bounds);
+    }
+
+    return {
+        index: {
+            blocks,
+            bounds,
+            primitives
+        },
+        reusedBlockCount: reusableBlockCount
+    };
+}
+
+function createPathPrimitiveBlock(primitives, startIndex, blockSize) {
+    const blockPrimitives = primitives.slice(startIndex, startIndex + blockSize);
+    let bounds = null;
+
+    for (const primitive of blockPrimitives) {
+        bounds = mergeBounds(bounds, primitive.bounds);
+    }
+
+    return bounds
+        ? {
+            bounds,
+            primitives: blockPrimitives
+        }
+        : null;
+}
+
+function createEmptyPathPrimitiveIndex() {
+    return {
+        blocks: [],
+        bounds: null,
+        primitives: []
+    };
+}
+
+function canExtendPrimitiveIndexState(points, sourcePointCount, previousState, signature) {
+    if (!previousState
+        || previousState.signature !== signature
+        || previousState.allPointsValid !== true
+        || !previousState.index
+        || !Array.isArray(previousState.index.primitives)
+        || previousState.sourcePointCount < 2
+        || previousState.sourcePointCount >= sourcePointCount) {
+        return false;
+    }
+
+    const previousLastPoint = points[previousState.sourcePointCount - 1];
+
+    return isValidPoint(previousLastPoint)
+        && previousLastPoint.x === previousState.lastX
+        && previousLastPoint.y === previousState.lastY
+        && areValidPoints(points, previousState.sourcePointCount, sourcePointCount);
+}
+
+function areValidPoints(points, startIndex, endIndex) {
+    for (let index = startIndex; index < endIndex; index++) {
+        if (!isValidPoint(points[index])) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function offsetPrimitiveIndexes(primitives, offset) {
+    for (const primitive of primitives) {
+        primitive.startIndex += offset;
+        primitive.endIndex += offset;
+    }
+}
+
+function getSourcePointCount(points, requestedPointCount) {
+    return Number.isInteger(requestedPointCount)
+        ? Math.min(points.length, Math.max(0, requestedPointCount))
+        : points.length;
+}
+
+function normalizePrimitiveOptions(options = {}, requestedMode = "path") {
+    return {
+        angleThresholdRadians: getPositiveNumberOption(
+            options.angleThresholdRadians,
+            defaultAngleThresholdRadians
+        ),
+        blockSize: getPositiveIntegerOption(options.blockSize, defaultPrimitiveBlockSize),
+        maxArcRadialDrift: getNonNegativeNumberOption(
+            options.maxArcRadialDrift,
+            defaultMaxArcRadialDrift
+        ),
+        maxArcSweepRadians: getPositiveNumberOption(
+            options.maxArcSweepRadians,
+            defaultMaxArcSweepRadians
+        ),
+        maxDeviation: getNonNegativeNumberOption(
+            options.maxDeviation,
+            defaultLineDeviationTolerance
+        ),
+        mode: requestedMode === "line" ? "line" : "path"
+    };
+}
+
+function createPrimitiveOptionsSignature(options) {
+    return [
+        options.mode,
+        options.angleThresholdRadians,
+        options.maxArcSweepRadians,
+        options.maxArcRadialDrift,
+        options.maxDeviation,
+        options.blockSize
+    ].join(":");
 }
 
 function canUseLinePrimitiveRun(points, startIndex, endIndex, options) {
@@ -572,8 +803,20 @@ function getSegmentAngle(startPoint, endPoint) {
     return Math.atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x);
 }
 
-function getValidPoints(points) {
-    return (points || []).filter(isValidPoint);
+function getValidPoints(points, startIndex = 0, endIndex = null) {
+    const source = Array.isArray(points) ? points : [];
+    const limit = Number.isInteger(endIndex)
+        ? Math.min(source.length, Math.max(startIndex, endIndex))
+        : source.length;
+    const validPoints = [];
+
+    for (let index = Math.max(0, startIndex); index < limit; index++) {
+        if (isValidPoint(source[index])) {
+            validPoints.push(source[index]);
+        }
+    }
+
+    return validPoints;
 }
 
 function isValidPoint(point) {
@@ -635,5 +878,6 @@ module.exports = {
     createLinePrimitivesFromPoints,
     createPathPrimitiveIndex,
     createPathPrimitivesFromPoints,
-    doesLineCrossPathPrimitive
+    doesLineCrossPathPrimitive,
+    updatePathPrimitiveIndexFromPoints
 };

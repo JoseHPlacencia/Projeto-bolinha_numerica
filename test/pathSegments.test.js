@@ -5,7 +5,8 @@ const {
     createLinePrimitivesFromPoints,
     createPathPrimitiveIndex,
     createPathPrimitivesFromPoints,
-    doesLineCrossPathPrimitive
+    doesLineCrossPathPrimitive,
+    updatePathPrimitiveIndexFromPoints
 } = require("../src/utils/pathSegments");
 
 test("polygon normalization rejects non-adjacent self intersections", () => {
@@ -173,4 +174,195 @@ test("path primitive index ignores invalid primitives safely", () => {
         maxX: 3,
         maxY: 4
     });
+});
+
+test("incremental path index stays equivalent while curved points are appended", () => {
+    const points = Array.from({ length: 12 }, (_value, index) => {
+        const angle = index * 6 * Math.PI / 180;
+
+        return {
+            x: Math.cos(angle) * 120,
+            y: Math.sin(angle) * 120
+        };
+    });
+    const options = {
+        angleThresholdRadians: Math.PI / 180,
+        blockSize: 2,
+        maxArcRadialDrift: 0.01,
+        maxArcSweepRadians: Math.PI / 2,
+        mode: "path"
+    };
+    let state = null;
+    let reusedBlock = false;
+    let rebuiltLessThanFull = false;
+
+    for (let pointCount = 2; pointCount <= points.length; pointCount++) {
+        const previousState = state;
+
+        state = updatePathPrimitiveIndexFromPoints(points, state, {
+            ...options,
+            pointCount
+        });
+
+        const expectedPrimitives = createPathPrimitivesFromPoints(
+            points.slice(0, pointCount),
+            options
+        );
+        const expectedIndex = createPathPrimitiveIndex(expectedPrimitives, options);
+
+        assert.deepEqual(state.index, expectedIndex);
+
+        if (previousState) {
+            assert.equal(state.updatedIncrementally, true);
+        }
+
+        rebuiltLessThanFull ||= state.rebuiltPointCount < pointCount;
+        reusedBlock ||= state.reusedBlockCount > 0;
+    }
+
+    assert.equal(rebuiltLessThanFull, true);
+    assert.equal(reusedBlock, true);
+});
+
+test("incremental line index stays equivalent across sharp turns", () => {
+    const points = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 20, y: 20 },
+        { x: 40, y: 20 },
+        { x: 40, y: 40 },
+        { x: 60, y: 40 },
+        { x: 60, y: 60 },
+        { x: 80, y: 60 }
+    ];
+    const options = {
+        angleThresholdRadians: Math.PI / 180,
+        blockSize: 2,
+        maxDeviation: 0.1,
+        mode: "line"
+    };
+    let state = null;
+    let firstReusedBlock = null;
+
+    for (let pointCount = 2; pointCount <= points.length; pointCount++) {
+        const previousState = state;
+
+        state = updatePathPrimitiveIndexFromPoints(points, state, {
+            ...options,
+            pointCount
+        });
+
+        const expectedPrimitives = createLinePrimitivesFromPoints(
+            points.slice(0, pointCount),
+            options
+        );
+        const expectedIndex = createPathPrimitiveIndex(expectedPrimitives, options);
+
+        assert.deepEqual(state.index, expectedIndex);
+
+        if (previousState && state.reusedBlockCount > 0) {
+            assert.equal(state.index.blocks[0], previousState.index.blocks[0]);
+            firstReusedBlock = state.index.blocks[0];
+        }
+    }
+
+    assert.ok(firstReusedBlock);
+});
+
+test("incremental path index falls back after prefix mutation", () => {
+    const points = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: 40, y: 10 }
+    ];
+    const options = {
+        blockSize: 2,
+        mode: "line"
+    };
+    const previousState = updatePathPrimitiveIndexFromPoints(points, null, {
+        ...options,
+        pointCount: 2
+    });
+
+    points[1].y = 5;
+
+    const nextState = updatePathPrimitiveIndexFromPoints(points, previousState, {
+        ...options,
+        pointCount: 3
+    });
+    const expected = createPathPrimitiveIndex(
+        createLinePrimitivesFromPoints(points, options),
+        options
+    );
+
+    assert.equal(nextState.updatedIncrementally, false);
+    assert.deepEqual(nextState.index, expected);
+});
+
+test("incremental path index falls back when appended points are invalid", () => {
+    const points = [
+        { x: 0, y: 0 },
+        { x: 20, y: 0 },
+        { x: Number.NaN, y: 10 },
+        { x: 40, y: 20 }
+    ];
+    const options = {
+        mode: "path"
+    };
+    const previousState = updatePathPrimitiveIndexFromPoints(points, null, {
+        ...options,
+        pointCount: 2
+    });
+    const nextState = updatePathPrimitiveIndexFromPoints(points, previousState, {
+        ...options,
+        pointCount: 4
+    });
+    const expected = createPathPrimitiveIndex(
+        createPathPrimitivesFromPoints(points, options),
+        options
+    );
+
+    assert.equal(nextState.updatedIncrementally, false);
+    assert.equal(nextState.allPointsValid, false);
+    assert.deepEqual(nextState.index, expected);
+});
+
+test("incremental indexes match full builds across deterministic mixed trajectories", () => {
+    const points = [{ x: 0, y: 0 }];
+    let angle = 0;
+
+    for (let index = 1; index < 90; index++) {
+        angle += Math.sin(index * 0.73) * 0.09 + (index % 11 === 0 ? Math.PI / 3 : 0);
+        points.push({
+            x: points[index - 1].x + Math.cos(angle) * 15,
+            y: points[index - 1].y + Math.sin(angle) * 15
+        });
+    }
+
+    for (const mode of ["path", "line"]) {
+        const options = {
+            angleThresholdRadians: Math.PI / 180,
+            blockSize: 4,
+            maxArcRadialDrift: 2,
+            maxArcSweepRadians: Math.PI * 0.75,
+            maxDeviation: 1.5,
+            mode
+        };
+        let state = null;
+
+        for (let pointCount = 2; pointCount <= points.length; pointCount++) {
+            state = updatePathPrimitiveIndexFromPoints(points, state, {
+                ...options,
+                pointCount
+            });
+
+            const source = points.slice(0, pointCount);
+            const expectedPrimitives = mode === "line"
+                ? createLinePrimitivesFromPoints(source, options)
+                : createPathPrimitivesFromPoints(source, options);
+            const expectedIndex = createPathPrimitiveIndex(expectedPrimitives, options);
+
+            assert.deepEqual(state.index, expectedIndex);
+        }
+    }
 });

@@ -6,6 +6,49 @@ const {
     getReturnTarget,
     isReturnTarget
 } = require("../src/systems/botTargeting");
+const {
+    createPointBlockIndex,
+    getNearestDistanceSquared
+} = require("../src/systems/botTrailGeometry");
+
+test("nearest trail-point index remains equivalent to an exhaustive search", () => {
+    const points = Array.from({ length: 97 }, (_, index) => ({
+        x: index * 13 - 480,
+        y: Math.sin(index * 0.37) * 260 + index * 2
+    }));
+    const pointIndex = createPointBlockIndex(points, 8);
+    const origins = [
+        { x: 0, y: 0 },
+        { x: -700, y: 190 },
+        { x: 830, y: -410 },
+        { x: 121.25, y: 87.75 }
+    ];
+
+    for (const origin of origins) {
+        assert.equal(
+            getNearestDistanceSquared(origin, pointIndex),
+            getNearestDistanceSquared(origin, points)
+        );
+    }
+});
+
+test("nearest trail-point index evaluates the closest block first without relying on block order", () => {
+    const points = [
+        { x: 900, y: 900 },
+        { x: 920, y: 920 },
+        { x: -800, y: -800 },
+        { x: -820, y: -820 },
+        { x: 2, y: 0 },
+        { x: 3, y: 0 }
+    ];
+    const diagnostics = {};
+    const pointIndex = createPointBlockIndex(points, 2);
+
+    assert.equal(getNearestDistanceSquared({ x: 0, y: 0 }, pointIndex, diagnostics), 4);
+    assert.equal(diagnostics.pointBlockChecks, 3);
+    assert.equal(diagnostics.pointBlockBoundsRejected, 2);
+    assert.equal(diagnostics.pointDistanceCheckCount, 2);
+});
 
 test("targeting context filters correct numbers and indexes eligible bots once per cycle", () => {
     const correctNumber = { id: "correct", x: 100, y: 0, valid: true };

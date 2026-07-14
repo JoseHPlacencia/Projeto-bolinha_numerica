@@ -27,31 +27,57 @@ function getNearestDistanceSquared(origin, pointIndexOrPoints, diagnostics = nul
     let nearestDistanceSquared = Infinity;
 
     if (pointIndex && pointIndex.blocks.length > 0) {
-        const orderedBlocks = pointIndex.blocks.map(block => ({
-            block,
-            distanceSquared: getPointBoundsDistanceSquared(origin, block.bounds)
-        })).sort((first, second) => first.distanceSquared - second.distanceSquared);
+        const blocks = pointIndex.blocks;
+        let nearestBlockBoundsDistanceSquared = getPointBoundsDistanceSquared(
+            origin,
+            blocks[0].bounds
+        );
+        let nearestBlockIndex = 0;
         let blockBoundsRejected = 0;
         let checkedPointCount = 0;
 
-        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockChecks", orderedBlocks.length);
+        for (let index = 1; index < blocks.length; index++) {
+            const boundsDistanceSquared = getPointBoundsDistanceSquared(origin, blocks[index].bounds);
 
-        for (const item of orderedBlocks) {
-            if (item.distanceSquared > nearestDistanceSquared + geometryEpsilon) {
+            if (boundsDistanceSquared < nearestBlockBoundsDistanceSquared) {
+                nearestBlockBoundsDistanceSquared = boundsDistanceSquared;
+                nearestBlockIndex = index;
+            }
+        }
+
+        addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockChecks", blocks.length);
+
+        const nearestBlock = blocks[nearestBlockIndex];
+
+        checkedPointCount += nearestBlock.points.length;
+        nearestDistanceSquared = getNearestPointDistanceSquared(
+            origin,
+            nearestBlock.points,
+            nearestDistanceSquared
+        );
+
+        // The closest bounds are evaluated first to establish a useful upper
+        // bound. A second linear pass then prunes the other blocks without the
+        // temporary objects and O(blocks log blocks) sort used previously.
+        for (let index = 0; index < blocks.length; index++) {
+            if (index === nearestBlockIndex) {
+                continue;
+            }
+
+            const block = blocks[index];
+            const boundsDistanceSquared = getPointBoundsDistanceSquared(origin, block.bounds);
+
+            if (boundsDistanceSquared > nearestDistanceSquared + geometryEpsilon) {
                 blockBoundsRejected++;
                 continue;
             }
 
-            for (const point of item.block.points) {
-                checkedPointCount++;
-                const deltaX = origin.x - point.x;
-                const deltaY = origin.y - point.y;
-                const distanceSquared = deltaX * deltaX + deltaY * deltaY;
-
-                if (distanceSquared < nearestDistanceSquared) {
-                    nearestDistanceSquared = distanceSquared;
-                }
-            }
+            checkedPointCount += block.points.length;
+            nearestDistanceSquared = getNearestPointDistanceSquared(
+                origin,
+                block.points,
+                nearestDistanceSquared
+            );
         }
 
         addSelfTrailSafetyDiagnosticValue(diagnostics, "pointBlockBoundsRejected", blockBoundsRejected);
@@ -63,6 +89,22 @@ function getNearestDistanceSquared(origin, pointIndexOrPoints, diagnostics = nul
     addSelfTrailSafetyDiagnosticValue(diagnostics, "pointDistanceCheckCount", sourcePoints.length);
 
     for (const point of sourcePoints) {
+        const deltaX = origin.x - point.x;
+        const deltaY = origin.y - point.y;
+        const distanceSquared = deltaX * deltaX + deltaY * deltaY;
+
+        if (distanceSquared < nearestDistanceSquared) {
+            nearestDistanceSquared = distanceSquared;
+        }
+    }
+
+    return nearestDistanceSquared;
+}
+
+function getNearestPointDistanceSquared(origin, points, currentNearestDistanceSquared) {
+    let nearestDistanceSquared = currentNearestDistanceSquared;
+
+    for (const point of points) {
         const deltaX = origin.x - point.x;
         const deltaY = origin.y - point.y;
         const distanceSquared = deltaX * deltaX + deltaY * deltaY;
