@@ -28,6 +28,10 @@ const {
     getPolygonPointCount
 } = require("../src/utils/geometry");
 const {
+    getTerritoryDifferenceKernelDiagnostics,
+    initializeTerritoryDifferenceKernel
+} = require("../src/utils/territoryDifferenceKernel");
+const {
     createTerritoryOverlapDetail,
     keepSlowestSamples,
     roundMetric,
@@ -143,6 +147,7 @@ main().catch(error => {
 async function main() {
     const options = parseArguments(process.argv.slice(2));
     const originalRandom = Math.random;
+    await initializeTerritoryDifferenceKernel(config.territory.differenceKernel);
     const startedAt = new Date();
     const realStartedAt = performance.now();
 
@@ -552,7 +557,8 @@ function createReport(context) {
         environment: {
             node: process.version,
             platform: process.platform,
-            architecture: process.arch
+            architecture: process.arch,
+            territoryDifferenceKernel: getTerritoryDifferenceKernelDiagnostics()
         },
         scenario: {
             roomCode: options.roomCode,
@@ -625,6 +631,7 @@ function createMarkdownReport(report) {
 
 Gerado em: ${report.generatedAt}  
 Node: ${report.environment.node}  
+Kernel de diferença: ${report.environment.territoryDifferenceKernel.activeKernel} (${report.environment.territoryDifferenceKernel.status})<br>
 Seed: ${report.scenario.seed}  
 Bots: ${report.scenario.botCount} (${report.scenario.difficulty})  
 Ticks medidos: ${report.scenario.measuredTicks} (${report.scenario.simulatedDurationSec} s simulados)  

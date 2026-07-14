@@ -6,16 +6,26 @@ const {
     calculatePolygonIntersectionArea,
     subtractKnownSimplePolygonComponents
 } = require("../utils/geometry");
+const config = require("../config/gameConfig");
 const { selectRetainedTerritoryPolygon } = require("../state/territoryRetention");
+const {
+    initializeTerritoryDifferenceKernel,
+    subtractTerritoryPolygonComponents
+} = require("../utils/territoryDifferenceKernel");
 
 if (!parentPort) {
     throw new Error("Territory repair worker requires a parent port.");
 }
 
-parentPort.on("message", job => {
+const kernelInitialization = initializeTerritoryDifferenceKernel(
+    config.territory.differenceKernel
+);
+
+parentPort.on("message", async job => {
     const startedAt = performance.now();
 
     try {
+        await kernelInitialization;
         const result = processTerritoryRepairJob(job);
 
         parentPort.postMessage({
@@ -65,7 +75,11 @@ function processTerritoryRepairJob(job) {
     const previousArea = calculatePolygonArea(loser.polygon);
     const subtractStartedAt = performance.now();
     const retainedPolygon = selectRetainedTerritoryPolygon(
-        subtractKnownSimplePolygonComponents(loser.polygon, winner.polygon),
+        subtractTerritoryPolygonComponents(
+            loser.polygon,
+            winner.polygon,
+            subtractKnownSimplePolygonComponents
+        ),
         job.loserPlayer
     );
     const subtractMs = performance.now() - subtractStartedAt;

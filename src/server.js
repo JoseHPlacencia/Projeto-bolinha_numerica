@@ -6,6 +6,10 @@ const { Server } = require("socket.io");
 const config = require("./config/gameConfig");
 const registerSocket = require("./core/socketHandler");
 const roomManager = require("./core/roomManager");
+const {
+    getTerritoryDifferenceKernelDiagnostics,
+    initializeTerritoryDifferenceKernel
+} = require("./utils/territoryDifferenceKernel");
 
 const app = express();
 const server = http.createServer(app);
@@ -29,15 +33,7 @@ app.get("/", (_request, response) => {
 app.use(express.static(publicPath));
 
 registerSocket(io, roomManager);
-roomManager.createBackgroundRoom(io);
-
-const host = process.env.HOST;
-
-if (host) {
-    server.listen(config.server.port, host, logServerStart);
-} else {
-    server.listen(config.server.port, logServerStart);
-}
+startServer().catch(handleServerStartFailure);
 
 module.exports = {
     app,
@@ -50,6 +46,39 @@ function createSocketOptions() {
         ...config.socket,
         transports: [...config.socket.transports]
     };
+}
+
+async function startServer() {
+    await initializeTerritoryDifferenceKernel(config.territory.differenceKernel);
+    logTerritoryDifferenceKernel();
+    roomManager.createBackgroundRoom(io);
+
+    const host = process.env.HOST;
+
+    if (host) {
+        server.listen(config.server.port, host, logServerStart);
+    } else {
+        server.listen(config.server.port, logServerStart);
+    }
+}
+
+function logTerritoryDifferenceKernel() {
+    const kernel = getTerritoryDifferenceKernelDiagnostics();
+
+    if (kernel.status === "ready") {
+        console.log(`Territory difference kernel: ${kernel.activeKernel}`);
+        return;
+    }
+
+    const reason = kernel.initializationError && kernel.initializationError.message
+        || `configured as ${kernel.configuredKernel}`;
+
+    console.warn(`Territory difference kernel fallback: polygon-clipping (${reason})`);
+}
+
+function handleServerStartFailure(error) {
+    console.error("Failed to start server:", error);
+    process.exitCode = 1;
 }
 
 function logServerStart() {

@@ -51,6 +51,7 @@ const territory = Object.freeze({
     baseBorderInset: 3,
     baseBorderWidth: 4,
     circleSegments: 96,
+    differenceKernel: process.env.VENNPERIO_TERRITORY_DIFFERENCE_KERNEL || "clipper2-wasm",
     fillAlpha: 0.36,
     minCaptureArea: 800,
     minCaptureTrailPoints: 4,

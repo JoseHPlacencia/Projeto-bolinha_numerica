@@ -3,6 +3,9 @@ const {
     subtractKnownSimplePolygonComponents,
     unionPolygons
 } = require("../utils/geometry");
+const {
+    subtractTerritoryPolygonComponents
+} = require("../utils/territoryDifferenceKernel");
 const { selectRetainedTerritoryPolygon } = require("./territoryRetention");
 const { measureCaptureApplyOperation } = require("./territoryDiagnostics");
 
@@ -39,7 +42,11 @@ function subtractTerritoryPolygon(
     const operationSubtract = measureCaptureApplyOperation(
         options.diagnostics,
         `${phasePrefix}Subtract`,
-        () => subtractKnownSimplePolygonComponents(subjectPolygon, clippingPolygon)
+        () => subtractTerritoryPolygonComponents(
+            subjectPolygon,
+            clippingPolygon,
+            subtractKnownSimplePolygonComponents
+        )
     );
     let retainedPolygon = selectRetainedTerritoryPolygon(
         operationSubtract.value,
