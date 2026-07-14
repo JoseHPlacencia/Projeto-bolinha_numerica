@@ -34,12 +34,24 @@ const snapshotGeometrySource = (await readFile(snapshotGeometryPath, "utf8")).re
         "indexedBoundaryMaxDistanceSquared",
         "snapshotGeometryIndexedBoundaryMaxDistanceSquared"
     );
+const snapshotGeometryApplicationPath = new URL(
+    "../public/js/snapshotGeometryApplication.js",
+    import.meta.url
+);
+const rawSnapshotGeometryApplicationSource = await readFile(
+    snapshotGeometryApplicationPath,
+    "utf8"
+);
 const snapshotGeometryImportMatch = source.match(
     /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
 );
-const snapshotGeometryImportedNames = snapshotGeometryImportMatch
-    ? snapshotGeometryImportMatch[1].split(",").map(name => name.trim()).filter(Boolean)
-    : [];
+const snapshotApplicationGeometryImportMatch = rawSnapshotGeometryApplicationSource.match(
+    /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
+);
+const snapshotGeometryImportedNames = [...new Set([
+    ...getImportedNames(snapshotGeometryImportMatch),
+    ...getImportedNames(snapshotApplicationGeometryImportMatch)
+])];
 const snapshotGeometryExportedNames = [
     ...snapshotGeometrySource.matchAll(
         /export\s+(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/g
@@ -56,6 +68,9 @@ const snapshotDiagnosticsPath = new URL("../public/js/snapshotDiagnostics.js", i
 const snapshotDiagnosticsSource = (await readFile(snapshotDiagnosticsPath, "utf8"))
     .replaceAll("export function ", "function ")
     .replaceAll("getFiniteConfigNumber", "getDiagnosticsFiniteConfigNumber");
+const snapshotGeometryApplicationSource = rawSnapshotGeometryApplicationSource
+    .replace(/import\s*\{[^}]*\}\s*from\s*"\.\/snapshotDiagnostics\.js";/, "")
+    .replace(/import\s*\{[^}]*\}\s*from\s*"\.\/snapshotGeometry\.js";/, "");
 const testableSource = source.replace(
     'import { clamp, lerp, lerpAngle } from "./sharedMath.js";',
     [
@@ -67,8 +82,11 @@ const testableSource = source.replace(
     'import { calculateAdaptiveBufferMetrics } from "./adaptiveBuffer.js";',
     adaptiveBufferSource
 ).replace(
-    /import \{\s*createSnapshotDiagnostics,\s*finiteOrNull\s*\} from "\.\/snapshotDiagnostics\.js";/,
+    /import \{\s*createSnapshotDiagnostics\s*\} from "\.\/snapshotDiagnostics\.js";/,
     snapshotDiagnosticsSource
+).replace(
+    /import \{[\s\S]*?\} from "\.\/snapshotGeometryApplication\.js";/,
+    snapshotGeometryApplicationSource
 ).replace(
     /import \{[\s\S]*?\} from "\.\/snapshotGeometry\.js";/,
     scopedSnapshotGeometrySource
@@ -76,12 +94,20 @@ const testableSource = source.replace(
 const moduleUrl = `data:text/javascript;base64,${Buffer.from(testableSource).toString("base64")}`;
 const {
     calculateAdaptiveBufferMetrics,
+    createSnapshotApplyResult,
+    createSnapshotGeometryApplication,
     createSnapshotInterpolator
 } = await import(moduleUrl);
 const viewportClippingPath = new URL("../public/js/renderers/viewportClipping.js", import.meta.url);
 const viewportClippingSource = await readFile(viewportClippingPath, "utf8");
 const viewportClippingUrl = `data:text/javascript;base64,${Buffer.from(viewportClippingSource).toString("base64")}`;
 const { clipPolylineToBounds } = await import(viewportClippingUrl);
+
+function getImportedNames(importMatch) {
+    return importMatch
+        ? importMatch[1].split(",").map(name => name.trim()).filter(Boolean)
+        : [];
+}
 
 function createInterpolator(overrides = {}) {
     return createSnapshotInterpolator({
@@ -113,6 +139,22 @@ function createSnapshot(sequence, time, overrides = {}) {
         removedTrailIds: [],
         trailRemovals: {},
         leaderboard: [],
+        ...overrides
+    };
+}
+
+function createGeometryPayload(sequence, overrides = {}) {
+    return {
+        sequence,
+        territories: {},
+        territoryIds: [],
+        territoryOps: {},
+        territoryVersions: {},
+        removedTerritoryIds: [],
+        trails: {},
+        trailIds: [],
+        trailRemovals: {},
+        removedTrailIds: [],
         ...overrides
     };
 }
@@ -170,9 +212,13 @@ test("snapshot geometry imports are part of the module's public exports", () => 
     const importMatch = source.match(
         /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
     );
-    const importedNames = importMatch
-        ? importMatch[1].split(",").map(name => name.trim()).filter(Boolean)
-        : [];
+    const applicationImportMatch = rawSnapshotGeometryApplicationSource.match(
+        /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
+    );
+    const importedNames = [...new Set([
+        ...getImportedNames(importMatch),
+        ...getImportedNames(applicationImportMatch)
+    ])];
     const exportedNames = new Set(
         [...snapshotGeometrySource.matchAll(
             /export\s+(?:async\s+)?(?:function|const|let|class)\s+([A-Za-z_$][\w$]*)/g
@@ -180,8 +226,64 @@ test("snapshot geometry imports are part of the module's public exports", () => 
     );
     const missingExports = importedNames.filter(name => !exportedNames.has(name));
 
-    assert.ok(importMatch, "snapshotGeometry import block exists");
+    assert.ok(importMatch, "interpolator snapshotGeometry import block exists");
+    assert.ok(applicationImportMatch, "application snapshotGeometry import block exists");
     assert.deepEqual(missingExports, []);
+});
+
+test("geometry application rolls back a staged trail patch after another section fails", () => {
+    const application = createSnapshotGeometryApplication();
+    const initialResult = createSnapshotApplyResult();
+    const initialGeometry = application.applySnapshotGeometry(
+        createGeometryPayload(1, {
+            trailIds: ["player"],
+            trails: {
+                player: createFullTrail([
+                    [0, 0],
+                    [1, 0]
+                ])
+            }
+        }),
+        initialResult
+    );
+    const invalidResult = createSnapshotApplyResult();
+    const patch = createTrailPatch(2, [[2, 0]]);
+
+    application.applySnapshotGeometry(
+        createGeometryPayload(2, {
+            territories: {
+                invalid: {
+                    version: 1,
+                    base: [0, 0],
+                    polygon: {
+                        points: [],
+                        rings: [[999]]
+                    }
+                }
+            },
+            trailIds: ["player"],
+            trails: { player: patch }
+        }),
+        invalidResult,
+        initialGeometry
+    );
+
+    assert.equal(invalidResult.applied, false);
+    assert.deepEqual(invalidResult.invalidations.territories, ["invalid"]);
+
+    const recoveredResult = createSnapshotApplyResult();
+    const recoveredGeometry = application.applySnapshotGeometry(
+        createGeometryPayload(3, {
+            trailIds: ["player"],
+            trails: { player: patch }
+        }),
+        recoveredResult,
+        initialGeometry
+    );
+
+    assert.equal(recoveredResult.applied, true);
+    assert.equal(recoveredGeometry.trails.player.leftSegments[0].length, 3);
+    assert.equal(recoveredGeometry.trails.player.leftSegments[0][2].x, 2);
 });
 
 test("adaptive buffer shares one sorted sample set for trimming and percentile", () => {
