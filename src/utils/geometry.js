@@ -74,6 +74,20 @@ function subtractPolygon(subject, clipping) {
     return getLargestSimplePolygon(subtractPolygonComponents(subject, clipping));
 }
 
+function repairPolygonTopology(polygon) {
+    const normalizedPolygon = normalizeKnownSimplePolygon(polygon);
+
+    if (!hasPolygon(normalizedPolygon)) {
+        return [];
+    }
+
+    try {
+        return getLargestSimplePolygon(polygonClipping.union([normalizedPolygon]));
+    } catch (_error) {
+        return [];
+    }
+}
+
 function subtractPolygonComponents(subject, clipping) {
     if (!hasPolygon(subject)) {
         return [];
@@ -1081,6 +1095,7 @@ module.exports = {
     isCircleInsidePolygon,
     isPointInPolygon,
     isPolygonInsidePolygon,
+    repairPolygonTopology,
     serializePolygon,
     subtractKnownSimplePolygonComponents,
     subtractPolygon,

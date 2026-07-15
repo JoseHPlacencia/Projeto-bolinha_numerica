@@ -1,5 +1,8 @@
 import { clamp, lerp, lerpAngle } from "./sharedMath.js";
-import { calculateAdaptiveBufferMetrics } from "./adaptiveBuffer.js";
+import {
+    calculateAdaptiveBufferMetrics,
+    limitAdaptiveBufferIncrease
+} from "./adaptiveBuffer.js";
 import {
     createSnapshotDiagnostics
 } from "./snapshotDiagnostics.js";
@@ -28,6 +31,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     };
     const networkState = {
         bufferMs: networkConfig.initialBufferMs,
+        targetBufferMs: networkConfig.initialBufferMs,
         serverOffset: 0,
         lastSnapshotReceivedAt: null,
         deltas: [],
@@ -77,6 +81,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         entityCache.playerInfo = {};
         geometryApplication.reset();
         networkState.bufferMs = networkConfig.initialBufferMs;
+        networkState.targetBufferMs = networkConfig.initialBufferMs;
         networkState.serverOffset = 0;
         networkState.lastSnapshotReceivedAt = null;
         networkState.deltas = [];
@@ -141,6 +146,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function getDebugState() {
         return {
             bufferMs: networkState.bufferMs,
+            targetBufferMs: networkState.targetBufferMs,
             serverOffsetMs: networkState.serverOffset,
             snapshotInterArrivalMs: networkState.lastSnapshotDeltaMs,
             averageSnapshotDeltaMs: networkState.averageSnapshotDeltaMs,
@@ -286,10 +292,16 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         networkState.lastSnapshotDeltaMs = delta;
         networkState.averageSnapshotDeltaMs = metrics.average;
         networkState.jitterMs = metrics.jitter;
-        networkState.bufferMs = clamp(
+        networkState.targetBufferMs = clamp(
             nextBuffer,
             networkConfig.minBufferMs,
             networkConfig.maxBufferMs
+        );
+        networkState.bufferMs = limitAdaptiveBufferIncrease(
+            networkState.bufferMs,
+            networkState.targetBufferMs,
+            delta,
+            networkConfig
         );
     }
 
@@ -302,7 +314,28 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             return;
         }
 
-        networkState.serverOffset = networkState.serverOffset * 0.9 + nextOffset * 0.1;
+        const smoothingFactor = clamp(
+            getFiniteConfigNumber(networkConfig.serverClockSmoothingFactor, 0.1),
+            0,
+            1
+        );
+        const smoothedOffset = networkState.serverOffset * (1 - smoothingFactor)
+            + nextOffset * smoothingFactor;
+        const maxOffsetIncrease = Math.max(
+            0,
+            getFiniteConfigNumber(
+                networkConfig.serverClockMaxOffsetIncreasePerSnapshotMs,
+                2
+            )
+        );
+
+        // A delayed packet increases Date.now() - serverTime even though the
+        // clocks did not drift. Limit that direction because it moves the
+        // render clock backwards; faster samples may correct it immediately.
+        networkState.serverOffset = Math.min(
+            smoothedOffset,
+            networkState.serverOffset + maxOffsetIncrease
+        );
     }
 
     function saveSnapshot(snapshot) {
@@ -461,16 +494,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function shouldPredictTrails(amount) {
-        if (networkConfig.trailPredictionEnabled === false || amount <= 0) {
-            return false;
-        }
-
-        const maxBufferMs = getFiniteConfigNumber(
-            networkConfig.trailPredictionMaxBufferMs,
-            getFiniteConfigNumber(networkConfig.minBufferMs, 100) + 40
-        );
-
-        return networkState.bufferMs <= maxBufferMs;
+        return networkConfig.trailPredictionEnabled !== false && amount > 0;
     }
 
     function createPredictedTrail(trail, player, territory) {

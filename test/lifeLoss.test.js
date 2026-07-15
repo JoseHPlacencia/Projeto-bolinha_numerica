@@ -1221,14 +1221,15 @@ test("known-simple territory subtraction matches the validated geometry path", (
     }
 });
 
-test("self-intersecting capture replay falls back to a full territory snapshot", () => {
+test("self-intersecting capture does not enter authoritative territory state", () => {
     const player = new Player("self-crossing-capture", { x: 0, y: 0 });
     const players = new Map([[player.id, player]]);
     const territories = createTerritories();
-    const clientState = createClientSnapshotState();
 
     initializePlayerTerritory(territories, player);
-    createSnapshot(players, territories, player.id, clientState, null, config);
+    const territory = territories.get(player.id);
+    const initialPolygon = territory.polygon.map(ring => ring.map(point => point.slice()));
+    const initialVersion = territory.version;
     player.trailLeftSegments = [[
         { x: -200, y: 0 },
         { x: -400, y: -200 },
@@ -1238,21 +1239,10 @@ test("self-intersecting capture replay falls back to a full territory snapshot",
         { x: 200, y: 0 }
     ]];
 
-    assert.ok(captureClosedTrail(player, territories, players));
-    assert.equal(territories.get(player.id).lastCaptureOperation, undefined);
-
-    player.clearTrailState();
-    const snapshot = createSnapshot(
-        players,
-        territories,
-        player.id,
-        clientState,
-        null,
-        config
-    );
-
-    assert.equal(snapshot.territoryOps[player.id], undefined);
-    assert.ok(snapshot.territories[player.id]);
+    assert.equal(captureClosedTrail(player, territories, players), null);
+    assert.deepEqual(territory.polygon, initialPolygon);
+    assert.equal(territory.version, initialVersion);
+    assert.equal(territory.lastCaptureOperation, undefined);
 });
 
 test("ending a trail emits a generation tombstone", () => {

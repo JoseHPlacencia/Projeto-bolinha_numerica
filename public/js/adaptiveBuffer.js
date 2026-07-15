@@ -28,6 +28,35 @@ export function calculateAdaptiveBufferMetrics(values, config = {}) {
     };
 }
 
+/**
+ * Lets the interpolation delay grow without moving the render clock sharply
+ * backwards. Decreases remain immediate because they move rendering forward.
+ * The time-based limit also prevents a batch of snapshots received in the same
+ * browser task from applying the per-snapshot allowance repeatedly.
+ */
+export function limitAdaptiveBufferIncrease(previousBuffer, targetBuffer, elapsedMs, config = {}) {
+    if (!Number.isFinite(targetBuffer)) {
+        return previousBuffer;
+    }
+
+    if (!Number.isFinite(previousBuffer) || targetBuffer <= previousBuffer) {
+        return targetBuffer;
+    }
+
+    const perSnapshotLimit = Math.max(
+        0,
+        getFiniteConfigNumber(config, "adaptiveBufferMaxIncreasePerSnapshotMs", 4)
+    );
+    const increaseRate = Math.max(
+        0,
+        getFiniteConfigNumber(config, "adaptiveBufferMaxIncreaseRateMsPerSecond", 80)
+    );
+    const timeBasedLimit = increaseRate * Math.max(0, Number(elapsedMs) || 0) / 1000;
+    const allowedIncrease = Math.min(perSnapshotLimit, timeBasedLimit);
+
+    return Math.min(targetBuffer, previousBuffer + allowedIncrease);
+}
+
 function createEmptyMetrics() {
     return {
         adaptiveAverage: 0,

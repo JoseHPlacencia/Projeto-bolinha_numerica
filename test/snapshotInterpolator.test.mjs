@@ -89,7 +89,7 @@ const testableSource = source.replace(
         "const lerpAngle = lerp;"
     ].join("\n")
 ).replace(
-    'import { calculateAdaptiveBufferMetrics } from "./adaptiveBuffer.js";',
+    /import \{[^}]*\} from "\.\/adaptiveBuffer\.js";/,
     adaptiveBufferSource
 ).replace(
     /import \{\s*createSnapshotDiagnostics\s*\} from "\.\/snapshotDiagnostics\.js";/,
@@ -106,7 +106,8 @@ const {
     calculateAdaptiveBufferMetrics,
     createSnapshotApplyResult,
     createSnapshotGeometryApplication,
-    createSnapshotInterpolator
+    createSnapshotInterpolator,
+    limitAdaptiveBufferIncrease
 } = await import(moduleUrl);
 const viewportClippingPath = new URL("../public/js/renderers/viewportClipping.js", import.meta.url);
 const viewportClippingSource = await readFile(viewportClippingPath, "utf8");
@@ -459,6 +460,42 @@ test("adaptive buffer shares one sorted sample set for trimming and percentile",
     assert.equal(metrics.percentile, 10);
 });
 
+test("adaptive buffer limits increases and does not accumulate batched allowances", () => {
+    const config = {
+        adaptiveBufferMaxIncreasePerSnapshotMs: 4,
+        adaptiveBufferMaxIncreaseRateMsPerSecond: 80
+    };
+
+    assert.equal(limitAdaptiveBufferIncrease(100, 180, 50, config), 104);
+    assert.equal(limitAdaptiveBufferIncrease(104, 180, 0, config), 104);
+    assert.equal(limitAdaptiveBufferIncrease(150, 100, 50, config), 100);
+});
+
+test("delayed packets cannot move the synchronized server clock sharply backwards", () => {
+    const originalDateNow = Date.now;
+    let currentTime = 1000;
+
+    Date.now = () => currentTime;
+
+    try {
+        const interpolator = createInterpolator({
+            maxSnapshots: 3,
+            serverClockMaxOffsetIncreasePerSnapshotMs: 2,
+            serverClockSmoothingFactor: 0.1
+        });
+
+        interpolator.processSnapshot(createSnapshot(1, 1000));
+        currentTime = 1050;
+        interpolator.processSnapshot(createSnapshot(2, 1050));
+        currentTime = 1250;
+        interpolator.processSnapshot(createSnapshot(3, 1100));
+
+        assert.equal(interpolator.getDebugState().serverOffsetMs, 2);
+    } finally {
+        Date.now = originalDateNow;
+    }
+});
+
 test("network diagnostics keeps normalized bounded history and resets independently", () => {
     const interpolator = createInterpolator({ diagnosticsHistoryLimit: 2 });
 
@@ -728,7 +765,6 @@ test("pending reliable geometry does not freeze prediction for preserved trails"
         const interpolator = createInterpolator({
             maxSnapshots: 2,
             trailPredictionEnabled: true,
-            trailPredictionMaxBufferMs: 1000,
             trailPredictionPlayerHalfWidth: 35
         });
 
@@ -760,6 +796,58 @@ test("pending reliable geometry does not freeze prediction for preserved trails"
 
         assert.equal(trail.leftSegments[0].length, 3);
         assert.deepEqual([lastPoint.x, lastPoint.y], [100, 35]);
+    } finally {
+        Date.now = originalDateNow;
+    }
+});
+
+test("high interpolation buffer does not disable bounded trail prediction", () => {
+    const originalDateNow = Date.now;
+    let currentTime = 1000;
+
+    Date.now = () => currentTime;
+
+    try {
+        const interpolator = createInterpolator({
+            initialBufferMs: 200,
+            minBufferMs: 200,
+            maxBufferMs: 200,
+            maxSnapshots: 2,
+            trailPredictionEnabled: true,
+            trailPredictionMaxPointDistance: 87.5,
+            trailPredictionPlayerHalfWidth: 35
+        });
+
+        interpolator.processSnapshot(createSnapshot(1, 1000, {
+            players: {
+                player: [10, 0, 0]
+            },
+            playerInfo: {
+                player: ["#ff00ff", 0, 0, 1, "Player", 0, 1, 1, 0]
+            },
+            trailIds: ["player"],
+            trails: {
+                player: createFullTrail([[0, 35], [10, 35]])
+            }
+        }));
+
+        currentTime = 2000;
+        interpolator.processSnapshot(createSnapshot(2, 2000, {
+            players: {
+                player: [95, 0, 0]
+            },
+            preserveTrails: true,
+            trailIds: ["player"]
+        }));
+
+        currentTime = 2200;
+        const state = interpolator.getRenderState();
+        const trail = state.trails.player;
+        const lastPoint = trail.leftSegments[0][trail.leftSegments[0].length - 1];
+
+        assert.equal(interpolator.getDebugState().bufferMs, 200);
+        assert.equal(trail.leftSegments[0].length, 3);
+        assert.deepEqual([lastPoint.x, lastPoint.y], [95, 35]);
     } finally {
         Date.now = originalDateNow;
     }

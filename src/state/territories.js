@@ -27,6 +27,7 @@ const {
     subtractTerritoryPolygon
 } = require("./territoryOperations");
 const { createTerritoryOverlapRepair } = require("./territoryOverlapRepair");
+const { removeDegenerateTerritorySpikes } = require("./territoryPolygonCleanup");
 
 const territoryChangeAreaEpsilon = 1;
 
@@ -326,11 +327,23 @@ function getTerritoryBounds(territory) {
 
 function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
     const previousArea = getTerritoryArea(territory);
-    const metrics = resolvePolygonMetrics(nextPolygon, options.metrics);
+    const cleanupOptions = getTerritoryCleanupOptions();
+    const preparedPolygon = removeDegenerateTerritorySpikes(nextPolygon, cleanupOptions);
+    const removedIncomingSpike = preparedPolygon !== nextPolygon;
+    const metrics = resolvePolygonMetrics(preparedPolygon, options.metrics);
     const nextArea = metrics.area;
+    let removedExistingSpike = false;
 
-    if (Math.abs(previousArea - nextArea) <= territoryChangeAreaEpsilon) {
-        return false;
+    if (!removedIncomingSpike
+        && Math.abs(previousArea - nextArea) <= territoryChangeAreaEpsilon) {
+        removedExistingSpike = removeDegenerateTerritorySpikes(
+            territory.polygon,
+            cleanupOptions
+        ) !== territory.polygon;
+
+        if (!removedExistingSpike) {
+            return false;
+        }
     }
 
     delete territory.lastCaptureOperation;
@@ -340,12 +353,31 @@ function updateTerritoryPolygon(territory, nextPolygon, options = {}) {
         territory.captureOperationLog = [];
     }
 
-    territory.polygon = nextPolygon;
+    territory.polygon = preparedPolygon;
     territory.area = nextArea;
     territory.bounds = metrics.bounds;
     territory.version = (territory.version || 0) + 1;
 
+    if (removedIncomingSpike || removedExistingSpike) {
+        // A trail-capture operation describes the polygon before this cleanup.
+        // Force a full territory snapshot for this version so the client cannot
+        // reconstruct the discarded spike through incremental replay.
+        territory.captureOperationUnsafeVersion = territory.version;
+    } else {
+        delete territory.captureOperationUnsafeVersion;
+    }
+
     return true;
+}
+
+function getTerritoryCleanupOptions() {
+    return {
+        maxArea: config.territory.degenerateSpikeMaxArea,
+        maxEffectiveWidth: config.territory.degenerateSpikeMaxEffectiveWidth,
+        maxMouthWidth: config.territory.degenerateSpikeMaxMouthWidth,
+        maxPointSpan: config.territory.degenerateSpikeMaxPointSpan,
+        minDepth: config.territory.degenerateSpikeMinDepth
+    };
 }
 
 function resolvePolygonMetrics(polygon, metrics) {

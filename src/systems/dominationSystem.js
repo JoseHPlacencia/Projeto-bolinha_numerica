@@ -7,7 +7,6 @@ const { getHighResolutionTime } = require("../utils/time");
 const {
     calculatePolygonArea,
     createPolygonMetrics,
-    createKnownSimplePolygonFromPoints,
     createPolygonFromPoints,
     doBoundsContainPoint,
     doBoundsOverlap,
@@ -627,7 +626,7 @@ function createTrailCandidateFromPoints(points) {
         return null;
     }
 
-    const polygon = createKnownSimplePolygonFromPoints(points);
+    const polygon = createPolygonFromPoints(points);
     const area = calculatePolygonArea(polygon);
 
     if (area <= 0) {
@@ -690,6 +689,11 @@ function storeCaptureOperation(
     }
 
     const nextVersion = territory.version || 0;
+
+    if (territory.captureOperationUnsafeVersion === nextVersion) {
+        delete territory.lastCaptureOperation;
+        return;
+    }
 
     if (capture.operation.previewPolygon.length === 0) {
         return;
