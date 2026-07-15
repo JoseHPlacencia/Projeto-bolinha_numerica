@@ -8,12 +8,25 @@
 try {
     const savedTheme = localStorage.getItem("vennperioVisualTheme");
     const savedPerformanceMode = localStorage.getItem("vennperioPerformanceMode");
-    document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light";
+    const systemTheme = typeof window.matchMedia === "function"
+        && window.matchMedia("(prefers-color-scheme: light)").matches
+        ? "light"
+        : "dark";
+    const hasSavedTheme = savedTheme === "light" || savedTheme === "dark";
+    const initialTheme = hasSavedTheme
+        ? savedTheme
+        : systemTheme;
+
+    document.documentElement.dataset.theme = initialTheme;
     document.documentElement.dataset.renderQuality = savedPerformanceMode === "false"
         ? "quality"
         : "performance";
+
+    if (!hasSavedTheme) {
+        localStorage.setItem("vennperioVisualTheme", initialTheme);
+    }
 } catch {
-    document.documentElement.dataset.theme = "light";
+    document.documentElement.dataset.theme = "dark";
     document.documentElement.dataset.renderQuality = "performance";
 }
 </script>
@@ -322,6 +335,7 @@ try {
                         <option value="0">Desativada</option>
                         <option value="30">30 FPS</option>
                         <option value="60" selected>60 FPS</option>
+                        <option value="90">90 FPS</option>
                         <option value="120">120 FPS</option>
                     </select>
                 </div>

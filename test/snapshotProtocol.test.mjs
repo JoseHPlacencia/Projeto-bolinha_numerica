@@ -1,5 +1,5 @@
-import test from "node:test";
 import assert from "node:assert/strict";
+import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 

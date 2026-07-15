@@ -1,6 +1,6 @@
 import { createCanvasRenderer } from "./renderer.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
-import { getRenderFrameIntervalMs } from "./renderSettings.js";
+import { createRenderFrameLimiter } from "./renderSettings.js";
 
 let renderer = null;
 let snapshots = null;
@@ -11,8 +11,8 @@ let scheduledFrame = null;
 let frameCount = 0;
 let renderedFrameCount = 0;
 let renderTimeTotal = 0;
-let lastRenderedAt = Number.NEGATIVE_INFINITY;
 let debugMeasuredAt = performance.now();
+const renderFrameLimiter = createRenderFrameLimiter(() => currentGameConfig);
 
 self.addEventListener("message", event => {
     const message = event.data || {};
@@ -75,7 +75,7 @@ function applyGameConfig(nextConfig) {
     }
 
     mergeObject(currentGameConfig, nextConfig);
-    lastRenderedAt = Number.NEGATIVE_INFINITY;
+    renderFrameLimiter.reset();
 }
 
 function mergeObject(target, source) {
@@ -142,7 +142,7 @@ function startRenderLoop() {
     frameCount = 0;
     renderedFrameCount = 0;
     renderTimeTotal = 0;
-    lastRenderedAt = Number.NEGATIVE_INFINITY;
+    renderFrameLimiter.reset();
     debugMeasuredAt = performance.now();
     scheduledFrame = scheduleFrame(renderLoop);
 }
@@ -161,7 +161,7 @@ function renderLoop(timestamp = performance.now()) {
         return;
     }
 
-    if (!shouldRenderFrame(timestamp)) {
+    if (!renderFrameLimiter.shouldRender(timestamp)) {
         publishDebugState(0, false);
         return;
     }
@@ -176,17 +176,6 @@ function renderLoop(timestamp = performance.now()) {
     const startedAt = performance.now();
     renderer.renderWorld(state, currentPlayerId);
     publishDebugState(performance.now() - startedAt, true);
-}
-
-function shouldRenderFrame(now) {
-    const interval = getRenderFrameIntervalMs(currentGameConfig);
-
-    if (interval > 0 && now - lastRenderedAt < interval - 0.5) {
-        return false;
-    }
-
-    lastRenderedAt = now;
-    return true;
 }
 
 function scheduleFrame(callback) {

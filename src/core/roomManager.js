@@ -174,6 +174,13 @@ function handleRoomPopulationChanged(io, roomCode) {
         return;
     }
 
+    // System rooms live beside the gateway in distributed mode, but normal
+    // rooms live in workers. Publishing this manager's local (empty) public
+    // directory from BOTS would overwrite the coordinator's global list.
+    if (room.hiddenFromList || room.isSystemRoom) {
+        return;
+    }
+
     io?.emit?.("roomsList", listRooms());
 }
 
@@ -441,6 +448,7 @@ module.exports = {
     createBackgroundRoom,
     createRoom,
     getPublicMatchCandidates,
+    handleRoomPopulationChanged,
     joinRoom,
     leaveRoom,
     listRooms,

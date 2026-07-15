@@ -1,6 +1,6 @@
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
 import { createWorldRenderer } from "./worldRenderer.js";
-import { getRenderFrameIntervalMs } from "./renderSettings.js";
+import { createRenderFrameLimiter } from "./renderSettings.js";
 
 const RECONNECT_DELAY_MS = 2000;
 
@@ -24,6 +24,7 @@ export function createMenuBackground(gameConfig) {
     const snapshots = createSnapshotInterpolator(gameConfig.network, {
         onResyncNeeded: () => socket.emit("snapshotResync")
     });
+    const renderFrameLimiter = createRenderFrameLimiter(() => gameConfig);
     const isWorkerRenderer = renderer.getDebugState().mode === "worker";
     const context = isWorkerRenderer
         ? null
@@ -31,7 +32,6 @@ export function createMenuBackground(gameConfig) {
 
     let animationFrame = null;
     let followId = null;
-    let lastRenderedAt = Number.NEGATIVE_INFINITY;
     let reconnectTimer = null;
     let running = false;
 
@@ -80,6 +80,7 @@ export function createMenuBackground(gameConfig) {
 
     return {
         setRenderingSettings,
+        setVisualTheme,
         start,
         stop
     };
@@ -92,7 +93,7 @@ export function createMenuBackground(gameConfig) {
         running = true;
         renderer.setActive(true);
         setFollowId(null);
-        lastRenderedAt = Number.NEGATIVE_INFINITY;
+        renderFrameLimiter.reset();
         resizeCanvas();
         window.addEventListener("resize", resizeCanvas);
         socket.connect();
@@ -128,7 +129,7 @@ export function createMenuBackground(gameConfig) {
 
         animationFrame = requestAnimationFrame(render);
 
-        if (!shouldRenderFrame(now)) {
+        if (!renderFrameLimiter.shouldRender(now)) {
             return;
         }
 
@@ -148,19 +149,16 @@ export function createMenuBackground(gameConfig) {
             ...(gameConfig.renderingSettings || {}),
             ...settings
         };
-        lastRenderedAt = Number.NEGATIVE_INFINITY;
+        renderFrameLimiter.reset();
         renderer.updateConfig({ renderingSettings: gameConfig.renderingSettings });
     }
 
-    function shouldRenderFrame(now) {
-        const interval = getRenderFrameIntervalMs(gameConfig);
-
-        if (interval > 0 && now - lastRenderedAt < interval - 0.5) {
-            return false;
-        }
-
-        lastRenderedAt = now;
-        return true;
+    function setVisualTheme(mode) {
+        gameConfig.visualTheme = {
+            ...(gameConfig.visualTheme || {}),
+            mode
+        };
+        renderer.updateConfig({ visualTheme: gameConfig.visualTheme });
     }
 
     function pickFollowId(state) {
@@ -311,6 +309,7 @@ function getPixelRatio() {
 function createNoopMenuBackground() {
     return {
         setRenderingSettings() {},
+        setVisualTheme() {},
         start() {},
         stop() {}
     };

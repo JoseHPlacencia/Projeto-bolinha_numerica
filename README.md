@@ -43,6 +43,6 @@ npm test
 
 - `src/`: servidor autoritativo, regras de jogo, geometria e serialização;
 - `public/`: interface, input, interpolação de snapshots e renderização;
-- `test/`: testes automatizados de regras, geometria e protocolo de snapshots;
+- `test/`: testes automatizados organizados por subsistema, com fixtures compartilhadas em `test/helpers/`;
 - `scripts/`: ferramentas versionadas de desenvolvimento;
 - `.ai/`: contexto e documentação de desenvolvimento local; não é versionada.

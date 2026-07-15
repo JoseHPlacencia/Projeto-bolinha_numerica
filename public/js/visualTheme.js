@@ -2,9 +2,9 @@ export const VISUAL_THEME_LIGHT = "light";
 export const VISUAL_THEME_DARK = "dark";
 
 export function normalizeVisualTheme(theme) {
-    return theme === VISUAL_THEME_DARK
-        ? VISUAL_THEME_DARK
-        : VISUAL_THEME_LIGHT;
+    return theme === VISUAL_THEME_LIGHT
+        ? VISUAL_THEME_LIGHT
+        : VISUAL_THEME_DARK;
 }
 
 export function isDarkVisualTheme(gameConfig) {

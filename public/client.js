@@ -5,6 +5,7 @@ import { createMenuBackground } from "./js/menuBackground.js";
 import {
     DEFAULT_FPS_LIMIT,
     DEFAULT_PERFORMANCE_MODE,
+    detectPreferredFpsLimit,
     normalizeFpsLimit
 } from "./js/renderSettings.js";
 import {
@@ -70,9 +71,11 @@ initializeClient();
 
 async function initializeClient() {
     try {
-        const gameConfig = await loadGameConfig();
+        const [gameConfig] = await Promise.all([
+            loadGameConfig(),
+            loadRenderingPreferences()
+        ]);
         activeGameConfig = gameConfig;
-        loadRenderingPreferences();
         applyVisualTheme(selectedTheme, { persist: false, updateClient: false });
         applyRenderingSettings({}, { persist: false, updateClient: false });
         menuBackground = createMenuBackground(gameConfig);
@@ -122,16 +125,20 @@ function loadPreferences() {
     if (savedDifficulty) selectDifficulty(savedDifficulty);
 }
 
-function loadRenderingPreferences() {
+async function loadRenderingPreferences() {
     const savedFpsLimit = localStorage.getItem(STORAGE_KEYS.fpsLimit);
     const savedPerformanceMode = localStorage.getItem(STORAGE_KEYS.performanceMode);
 
-    selectedFpsLimit = normalizeFpsLimit(
-        savedFpsLimit === null ? DEFAULT_FPS_LIMIT : savedFpsLimit
-    );
+    selectedFpsLimit = savedFpsLimit === null
+        ? await detectPreferredFpsLimit()
+        : normalizeFpsLimit(savedFpsLimit);
     selectedPerformanceMode = savedPerformanceMode === null
         ? DEFAULT_PERFORMANCE_MODE
         : savedPerformanceMode !== "false";
+
+    if (savedFpsLimit === null) {
+        localStorage.setItem(STORAGE_KEYS.fpsLimit, String(selectedFpsLimit));
+    }
 }
 
 function attachColorPicker() {
@@ -230,8 +237,9 @@ function applyVisualTheme(theme, options = {}) {
         };
     }
 
-    if (updateClient && gameClient && typeof gameClient.setVisualTheme === "function") {
-        gameClient.setVisualTheme(selectedTheme);
+    if (updateClient) {
+        gameClient?.setVisualTheme?.(selectedTheme);
+        menuBackground?.setVisualTheme?.(selectedTheme);
     }
 
     if (persist) {
