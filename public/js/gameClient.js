@@ -13,6 +13,7 @@ const DEFAULT_MINIMAP_FRAME_RATE = 15;
 
 export function startClient(gameConfig, options = {}) {
     const socket = io({
+        autoConnect: false,
         transports: gameConfig.socket.transports
     });
     const canvas = document.getElementById("gameCanvas");
@@ -102,6 +103,10 @@ export function startClient(gameConfig, options = {}) {
         renderer.processSnapshot(snapshot);
     });
 
+    // Connect only after every consumer has registered its listeners. The
+    // server publishes the room directory immediately on connection, so an
+    // eager connection could deliver it before roomUi was ready.
+    socket.connect();
     resizeCanvases();
     if (renderingActive) {
         animationFrame = requestAnimationFrame(render);

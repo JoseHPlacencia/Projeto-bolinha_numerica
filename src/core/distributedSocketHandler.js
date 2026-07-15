@@ -41,6 +41,10 @@ function registerDistributedSocket(io, coordinator) {
 }
 
 function registerRoomEvents(socket, io, coordinator) {
+    socket.on("requestRoomsList", () => {
+        socket.emit("roomsList", coordinator.listRooms());
+    });
+
     socket.on("joinRoom", async payload => {
         if (socket.data.roomRequestPending) return;
         socket.data.roomRequestPending = true;

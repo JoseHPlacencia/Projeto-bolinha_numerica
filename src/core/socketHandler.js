@@ -98,6 +98,10 @@ function buildRoomsList(roomManager) {
 }
 
 function registerRoomEvents(socket, io, roomManager) {
+    socket.on("requestRoomsList", () => {
+        socket.emit("roomsList", buildRoomsList(roomManager));
+    });
+
     socket.on("joinRoom", payload => {
         leaveMenuBackground(socket);
 

@@ -70,8 +70,8 @@ export function createRoomUi(socket, options = {}) {
         getRooms: () => [...allRooms],
         joinRoom: roomOptions => joinRoom(socket, elements, roomOptions, options),
         openCreateModal: () => openCreateModal(elements, options),
-        openFindModal: () => openFindModal(elements),
-        openModal: () => openFindModal(elements),
+        openFindModal: () => openFindModal(socket, elements),
+        openModal: () => openFindModal(socket, elements),
         quickMatch: () => quickMatch(socket, elements, options),
         resetActions: () => resetActions(elements)
     };
@@ -889,9 +889,10 @@ function openCreateModal(elements, options = {}) {
     openRoomModal(elements.roomCreateModal);
 }
 
-function openFindModal(elements) {
+function openFindModal(socket, elements) {
     closeModal(elements);
     openRoomModal(elements.roomFindModal);
+    socket.emit("requestRoomsList");
 }
 
 function closeModal(elements) {
