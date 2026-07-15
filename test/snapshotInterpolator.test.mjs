@@ -401,6 +401,51 @@ test("geometry application rolls back when a transaction callback throws", () =>
     assert.equal(initialGeometry.trails.player.leftSegments[0].length, 2);
 });
 
+test("capture operation failure requests only selective territory recovery", () => {
+    let resyncRequestCount = 0;
+    const suppressedReasons = [];
+    const application = createSnapshotGeometryApplication({
+        captureOperationResyncEnabled: false
+    }, {
+        recordResyncSuppressed(reason) {
+            suppressedReasons.push(reason);
+        },
+        requestResync() {
+            resyncRequestCount++;
+        }
+    });
+    const initialResult = createSnapshotApplyResult();
+    const initialGeometry = application.applySnapshotGeometry(createGeometryPayload(1, {
+        territoryIds: ["player"],
+        territoryVersions: { player: 1 },
+        territories: {
+            player: createTerritory(1, 20)
+        }
+    }), initialResult);
+    const captureResult = createSnapshotApplyResult();
+
+    application.applySnapshotGeometry(createGeometryPayload(2, {
+        territoryIds: ["player"],
+        territoryVersions: { player: 1 },
+        territoryOps: {
+            player: {
+                type: "trailCapture",
+                baseVersion: 1,
+                version: 2,
+                trailGeneration: 2,
+                trailSide: "left",
+                trailSegmentIndex: 0,
+                trailSegmentLength: 4
+            }
+        }
+    }), captureResult, initialGeometry);
+
+    assert.equal(captureResult.applied, false);
+    assert.deepEqual(captureResult.invalidations.territories, ["player"]);
+    assert.equal(resyncRequestCount, 0);
+    assert.deepEqual(suppressedReasons, ["capture_operation_resync_disabled"]);
+});
+
 test("adaptive buffer shares one sorted sample set for trimming and percentile", () => {
     const metrics = calculateAdaptiveBufferMetrics([10, 10, 10, 100], {
         adaptiveBufferMinSamplesForTrim: 4,
@@ -476,6 +521,42 @@ test("late snapshots do not regress territory or trail render state", () => {
     assert.equal(state.territories.territory.version, 2);
     assert.equal(state.territories.territory.polygon.rings[0][1].x, 20);
     assert.equal(state.trails.player.leftSegments[0].length, 4);
+});
+
+test("render timeline does not move geometry backward", () => {
+    const originalDateNow = Date.now;
+    let currentTime = 1000;
+
+    Date.now = () => currentTime;
+
+    try {
+        const interpolator = createInterpolator({ maxSnapshots: 2 });
+
+        interpolator.processSnapshot(createSnapshot(1, 1000, {
+            territoryIds: ["territory"],
+            territoryVersions: { territory: 1 },
+            territories: {
+                territory: createTerritory(1, 10)
+            }
+        }));
+
+        currentTime = 2000;
+        interpolator.processSnapshot(createSnapshot(2, 2000, {
+            territoryIds: ["territory"],
+            territoryVersions: { territory: 2 },
+            territories: {
+                territory: createTerritory(2, 20)
+            }
+        }));
+
+        currentTime = 1600;
+        assert.equal(interpolator.getRenderState().territories.territory.version, 2);
+
+        currentTime = 1400;
+        assert.equal(interpolator.getRenderState().territories.territory.version, 2);
+    } finally {
+        Date.now = originalDateNow;
+    }
 });
 
 test("catch status is normalized and exposed in render state", () => {
@@ -1036,6 +1117,83 @@ test("capture operation reuses the acknowledged trail instead of resending it", 
     assert.equal(captureResult.applied, true);
     assert.equal(state.territories[player.id].version, 2);
     assert.equal(state.trails[player.id], undefined);
+});
+
+test("capture operation uses the newest partial trail generation", () => {
+    const player = new Player("player", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const clientState = createClientSnapshotState();
+    const interpolator = createInterpolator();
+    const boundaryX = Math.sqrt(200 ** 2 - 50 ** 2);
+    let sequence = 0;
+
+    initializePlayerTerritory(territories, player);
+    player.trailLeftSegments = [[
+        ...Array.from({ length: 300 }, () => ({ x: 999, y: 999 }))
+    ]];
+
+    const oldTrailSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        serverConfig
+    );
+
+    oldTrailSnapshot.sequence = ++sequence;
+    oldTrailSnapshot.snapshotEpoch = 1;
+    assert.equal(interpolator.processSnapshot(oldTrailSnapshot).applied, true);
+
+    player.clearTrailState();
+    const captureTrailGeneration = player.trailGeneration;
+    player.trailLeftSegments = [[...createCaptureTrailPoints(boundaryX, 200, 1200)]];
+    player.trailLeftFillPath = createLongTrailPoints(600, -20);
+    player.trailRightFillPath = createLongTrailPoints(600, 20);
+
+    const partialTrailSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        serverConfig
+    );
+
+    partialTrailSnapshot.sequence = ++sequence;
+    partialTrailSnapshot.snapshotEpoch = 1;
+    assert.equal(partialTrailSnapshot.trails[player.id].partial, true);
+    assert.equal(interpolator.processSnapshot(partialTrailSnapshot).applied, true);
+    assert.equal(
+        interpolator.getRenderState().trails[player.id].leftSegments[0].length,
+        300,
+        "the previous complete trail remains visible while the new generation is staged"
+    );
+
+    assert.ok(captureClosedTrail(player, territories, players));
+    player.clearTrailState();
+
+    const captureSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        serverConfig
+    );
+    const operation = captureSnapshot.territoryOps[player.id];
+
+    captureSnapshot.sequence = ++sequence;
+    captureSnapshot.snapshotEpoch = 1;
+    assert.equal(operation.trailGeneration, captureTrailGeneration);
+    assert.ok(operation.trailTailStart > 0);
+
+    const captureResult = interpolator.processSnapshot(captureSnapshot);
+
+    assert.equal(captureResult.applied, true);
+    assert.equal(interpolator.getRenderState().territories[player.id].version, 2);
+    assert.equal(interpolator.getRenderState().trails[player.id], undefined);
 });
 
 test("very long capture falls back to a full territory definition", () => {

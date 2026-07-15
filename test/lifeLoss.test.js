@@ -47,6 +47,7 @@ const {
 } = require("../src/systems/botSystem");
 const { updatePlayer, updatePlayers } = require("../src/systems/movementSystem");
 const { updatePlayerTrail, updateTrails } = require("../src/systems/trailSystem");
+const { captureClosedTrail } = require("../src/systems/dominationSystem");
 const {
     clearCatchEliminationMarksForTarget,
     confirmCatchEliminationTargets,
@@ -1218,6 +1219,40 @@ test("known-simple territory subtraction matches the validated geometry path", (
             subtractPolygonComponents(subject, clipping)
         );
     }
+});
+
+test("self-intersecting capture replay falls back to a full territory snapshot", () => {
+    const player = new Player("self-crossing-capture", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const clientState = createClientSnapshotState();
+
+    initializePlayerTerritory(territories, player);
+    createSnapshot(players, territories, player.id, clientState, null, config);
+    player.trailLeftSegments = [[
+        { x: -200, y: 0 },
+        { x: -400, y: -200 },
+        { x: 400, y: 200 },
+        { x: -400, y: 200 },
+        { x: 400, y: -200 },
+        { x: 200, y: 0 }
+    ]];
+
+    assert.ok(captureClosedTrail(player, territories, players));
+    assert.equal(territories.get(player.id).lastCaptureOperation, undefined);
+
+    player.clearTrailState();
+    const snapshot = createSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        config
+    );
+
+    assert.equal(snapshot.territoryOps[player.id], undefined);
+    assert.ok(snapshot.territories[player.id]);
 });
 
 test("ending a trail emits a generation tombstone", () => {

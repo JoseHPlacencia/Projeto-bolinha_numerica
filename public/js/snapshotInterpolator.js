@@ -44,6 +44,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     let currentSnapshotEpoch = null;
     let hasServerClockSync = false;
     let lastResyncRequestedAt = Number.NEGATIVE_INFINITY;
+    let lastRenderTime = Number.NEGATIVE_INFINITY;
     const {
         getNetworkDiagnostics,
         recordNetworkDiagnosticsEvent,
@@ -86,6 +87,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         debugState.visibleTerritories = 0;
         debugState.visibleTrails = 0;
         hasServerClockSync = false;
+        lastRenderTime = Number.NEGATIVE_INFINITY;
     }
 
     function processSnapshot(rawSnapshot) {
@@ -117,11 +119,12 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
 
         if (snapshots.length === 1) {
+            lastRenderTime = getMonotonicRenderTime(snapshots[0].time);
             return createRenderState(snapshots[0], snapshots[0].players);
         }
 
         const serverNow = Date.now() - networkState.serverOffset;
-        const renderTime = serverNow - networkState.bufferMs;
+        const renderTime = getMonotonicRenderTime(serverNow - networkState.bufferMs);
         const { previous, next } = findSnapshotPair(renderTime);
         const interval = next.time - previous.time || 1;
         const amount = clamp((renderTime - previous.time) / interval, 0, 1);
@@ -343,6 +346,25 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         }
 
         return { previous, next };
+    }
+
+    function getMonotonicRenderTime(candidateTime) {
+        const latestSnapshot = snapshots[snapshots.length - 1];
+        const latestTime = latestSnapshot && latestSnapshot.time;
+        const fallbackTime = Number.isFinite(latestTime) ? latestTime : 0;
+        const finiteCandidate = Number.isFinite(candidateTime) ? candidateTime : fallbackTime;
+        const previousRenderTime = lastRenderTime;
+        const monotonicCandidate = Number.isFinite(lastRenderTime)
+            ? Math.max(lastRenderTime, finiteCandidate)
+            : finiteCandidate;
+        const canClampToLatestSnapshot = Number.isFinite(latestTime)
+            && (!Number.isFinite(previousRenderTime) || latestTime >= previousRenderTime);
+
+        lastRenderTime = canClampToLatestSnapshot
+            ? Math.min(monotonicCandidate, latestTime)
+            : monotonicCandidate;
+
+        return lastRenderTime;
     }
 
     function interpolatePlayers(previous, next, amount) {

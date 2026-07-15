@@ -237,7 +237,9 @@ const network = Object.freeze({
     captureOperationMaxTrailPoints: 2048,
     optimisticOwnerCaptureOperationSyncEnabled: false,
     captureOverlapAuditEnabled: false,
-    captureOperationResyncEnabled: true,
+    // Reliable snapshot acknowledgements invalidate only the failed territory.
+    // A full epoch reset would make unrelated trails and territories blink.
+    captureOperationResyncEnabled: false,
     reliableTrailUpdatesEnabled: true,
     coordinatePrecision: 10,
     anglePrecision: 1000,

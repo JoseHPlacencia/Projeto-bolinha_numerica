@@ -8,6 +8,7 @@ const {
     calculatePolygonArea,
     createPolygonMetrics,
     createKnownSimplePolygonFromPoints,
+    createPolygonFromPoints,
     doBoundsContainPoint,
     doBoundsOverlap,
     findClosestPolygonBoundaryContact,
@@ -572,13 +573,19 @@ function getSmallestAreaCandidate(candidates) {
 }
 
 function getTrailSegments(player) {
+    const generation = Number.isSafeInteger(player && player.trailGeneration)
+        ? player.trailGeneration
+        : 0;
+
     return [
         ...getVisibleSegments(player.trailLeftSegments).map((points, index) => ({
+            generation,
             side: "left",
             index,
             points
         })),
         ...getVisibleSegments(player.trailRightSegments).map((points, index) => ({
+            generation,
             side: "right",
             index,
             points
@@ -647,6 +654,7 @@ function createCaptureOperation(
 
     return {
         type: "trailCapture",
+        trailGeneration: trail.generation,
         trailSide: trail.side,
         trailSegmentIndex: trail.index,
         trailSegmentLength: trail.points.length,
@@ -719,6 +727,7 @@ function storeCaptureOperation(
         type: "trailCapture",
         baseVersion,
         version: nextVersion,
+        trailGeneration: capture.operation.trailGeneration,
         trailSide: capture.operation.trailSide,
         trailSegmentIndex: capture.operation.trailSegmentIndex,
         trailSegmentLength: capture.operation.trailSegmentLength,
@@ -818,7 +827,11 @@ function createCaptureOperationReplayPolygon(operation, basePolygon) {
         localEndContact.point
     );
 
-    return createKnownSimplePolygonFromPoints(trailPoints.concat(boundaryPath));
+    // Capture candidates are cheap to build under the simple-ring invariant,
+    // but an operation sent over the network must prove that invariant after
+    // coordinate packing. Otherwise the client would correctly reject it and
+    // request geometry recovery.
+    return createPolygonFromPoints(trailPoints.concat(boundaryPath));
 }
 
 function createPackedPointRing(ring) {

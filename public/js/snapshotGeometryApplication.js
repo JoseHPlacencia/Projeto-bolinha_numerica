@@ -730,15 +730,26 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
     }
 
     function getCaptureTrailSegmentState(id, operation) {
-        const trail = entityCache.trails[id];
+        const trail = getNewestTrailState(
+            entityCache.trails[id],
+            entityCache.trailAssemblies[id]
+        );
+        const operationGeneration = Number.isSafeInteger(operation.trailGeneration)
+            ? operation.trailGeneration
+            : null;
+        const trailGeneration = Number.isSafeInteger(trail && trail.generation)
+            ? trail.generation
+            : null;
+        const canUseTrail = operationGeneration === null
+            || operationGeneration === trailGeneration;
         const fallbackPoints = unpackPoints(operation.trailPoints);
         const trailTailPoints = unpackPoints(operation.trailTailPoints);
         const trailTailStart = Number.isInteger(operation.trailTailStart)
             ? operation.trailTailStart
             : null;
-        const segments = trail && operation.trailSide === "right"
+        const segments = canUseTrail && trail && operation.trailSide === "right"
             ? trail.rightSegments
-            : trail && trail.leftSegments;
+            : canUseTrail && trail && trail.leftSegments;
         const segment = segments && segments[operation.trailSegmentIndex];
         const mergedSegment = createMergedTrailSegment(
             segment,
@@ -747,6 +758,9 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
         );
         const debug = {
             hasCachedTrail: Boolean(trail),
+            operationTrailGeneration: operationGeneration,
+            cachedTrailGeneration: trailGeneration,
+            cachedTrailGenerationMatches: canUseTrail,
             trailSide: operation.trailSide,
             cachedSideSegmentCount: Array.isArray(segments) ? segments.length : 0,
             trailSegmentIndex: operation.trailSegmentIndex,
@@ -882,6 +896,9 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
             operationType: operation && operation.type || null,
             baseVersion: finiteOrNull(operation && operation.baseVersion),
             operationVersion: finiteOrNull(operation && operation.version),
+            trailGeneration: Number.isSafeInteger(operation && operation.trailGeneration)
+                ? operation.trailGeneration
+                : null,
             trailSide: operation && operation.trailSide || null,
             trailSegmentIndex: Number.isInteger(operation && operation.trailSegmentIndex)
                 ? operation.trailSegmentIndex

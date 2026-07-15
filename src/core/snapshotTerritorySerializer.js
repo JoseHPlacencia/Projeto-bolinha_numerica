@@ -201,6 +201,7 @@ function createCaptureTerritoryOperation(territory, knownTerritory, knownTrail, 
         type: operation.type,
         baseVersion: operation.baseVersion,
         version: operation.version,
+        trailGeneration: operation.trailGeneration,
         trailSide: operation.trailSide,
         trailSegmentIndex: operation.trailSegmentIndex,
         trailSegmentLength: operation.trailSegmentLength,
@@ -299,6 +300,13 @@ function createNeededCaptureTrailPoints(operation, knownTrail) {
 
 function getKnownCaptureTrailSegmentLength(knownTrail, operation) {
     if (!knownTrail || !operation) {
+        return 0;
+    }
+
+    if (
+        Number.isSafeInteger(operation.trailGeneration)
+        && knownTrail.generation !== operation.trailGeneration
+    ) {
         return 0;
     }
 

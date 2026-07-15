@@ -56,6 +56,10 @@ const argumentNames = new Set([
 ]);
 const trailCounterNames = [
     "captureAttempts",
+    "captureOperationReplayAccepted",
+    "captureOperationReplayAreaMismatch",
+    "captureOperationReplayInvalid",
+    "captureOperationReplayRejected",
     "captures",
     "clearTrailCount",
     "closedTrailReturns",
