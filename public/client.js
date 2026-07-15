@@ -695,6 +695,9 @@ function showGameOver(data = {}) {
     } else if (data.reason === "noRespawnSpace") {
         if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
         gameOverMessage.textContent = "Seu território não tinha espaço suficiente para respawn.";
+    } else if (data.reason === "roomUnavailable") {
+        if (gameOverTitle) gameOverTitle.textContent = "Sala encerrada";
+        gameOverMessage.textContent = "A sala foi encerrada por uma falha temporária no servidor.";
     } else if (eliminatedBy) {
         if (gameOverTitle) gameOverTitle.textContent = "Fim de jogo";
         gameOverMessage.textContent = `Suas vidas acabaram. Você foi eliminado por ${eliminatedBy}.`;

@@ -20,7 +20,7 @@ npm ci
 npm run dev
 ```
 
-O servidor usa `http://localhost:3000` por padrão. A porta pode ser alterada com a variável de ambiente `PORT`, e o endereço de escuta com `HOST`.
+O servidor usa `http://localhost:3000` por padrão. A porta pode ser alterada com a variável de ambiente `PORT`, e o endereço de escuta com `HOST`. A variável `VENNPERIO_SERVER_CORES` seleciona de 2 a 4 núcleos totais: um mantém o gateway e a sala `BOTS`, e os demais executam as salas comuns em workers. Sem essa variável, o servidor detecta a capacidade disponível dentro desse intervalo.
 
 Para uma execução sem reinício automático:
 

@@ -1,14 +1,17 @@
 const config = require("../config/gameConfig");
-const { createPlayer } = require("../entities/player");
-const {
-    initializePlayerTerritory
-} = require("../state/territories");
 const { invalidateSnapshotCache } = require("./snapshotLoop");
 const { resetSocketSnapshotState } = require("./snapshotState");
+const { initializeRoomPlayer } = require("./roomPlayer");
+const { applyPlayerInput } = require("./playerInput");
 const { createRateLimiter } = require("../utils/rateLimiter");
 const { redirectSpectatorsAfterPlayerExit } = require("../systems/spectatorSystem");
 
 function registerSocket(io, roomManager) {
+    if (roomManager && roomManager.isDistributedRoomCoordinator === true) {
+        const registerDistributedSocket = require("./distributedSocketHandler");
+        return registerDistributedSocket(io, roomManager);
+    }
+
     io.on("connection", socket => {
         socket.emit("roomsList", buildRoomsList(roomManager));
 
@@ -312,26 +315,7 @@ function leaveMenuBackground(socket) {
 }
 
 function initializeSocketPlayer(room, socket, alreadyJoined, playerOptions = {}, spawn = null) {
-    if (alreadyJoined) {
-        return room.players.get(socket.id) || null;
-    }
-
-    const runtimeConfig = room.runtimeConfig || config;
-    const player = createPlayer(room.players, socket.id, room.territories, {
-        ...playerOptions,
-        maxLives: runtimeConfig.gameMode && runtimeConfig.gameMode.catch
-            ? runtimeConfig.gameMode.catch.roomLives
-            : null,
-        runtimeConfig,
-        spawn
-    });
-
-    if (!player) {
-        return null;
-    }
-
-    initializePlayerTerritory(room.territories, player, runtimeConfig);
-    return player;
+    return initializeRoomPlayer(room, socket.id, alreadyJoined, playerOptions, spawn);
 }
 
 function normalizePlayerOptions(rawPlayer) {
@@ -509,93 +493,23 @@ function hasSnapshotContext(socket) {
 }
 
 function handleInputDown(players, playerId, rawAction) {
-    const action = normalizeInputAction(rawAction);
-    if (!isInputActionValid(action)) return;
-    const player = players.get(playerId);
-    if (player) player.pressAction(action);
+    applyPlayerInput(players, playerId, "down", rawAction);
 }
 
 function handleInputUp(players, playerId, rawAction) {
-    const action = normalizeInputAction(rawAction);
-    if (!isInputActionValid(action)) return;
-    const player = players.get(playerId);
-    if (player) player.releaseAction(action);
+    applyPlayerInput(players, playerId, "up", rawAction);
 }
 
 function handleInputDirection(players, playerId, rawInput) {
-    const input = normalizeInputDirection(rawInput);
-    if (!input) return;
-    const player = players.get(playerId);
-    if (player) player.setDirectionAngle(input.angle, input.source);
+    applyPlayerInput(players, playerId, "direction", rawInput);
 }
 
 function handleInputDirectionEnd(players, playerId) {
-    const player = players.get(playerId);
-    if (player) player.clearDirectionAngle();
+    applyPlayerInput(players, playerId, "directionEnd");
 }
 
 function handleViewport(players, playerId, rawViewport) {
-    const viewport = normalizeViewport(rawViewport);
-    const player = players.get(playerId);
-    if (player && viewport) player.setViewport(viewport);
-}
-
-function normalizeInputAction(action) {
-    return String(action || "").toLowerCase();
-}
-
-function isInputActionValid(action) {
-    return Object.prototype.hasOwnProperty.call(config.inputActionAngles, action);
-}
-
-function normalizeInputDirection(rawInput) {
-    const rawAngle = isInputDirectionPayload(rawInput) ? rawInput.angle : rawInput;
-    const angle = normalizeInputAngle(rawAngle);
-    if (angle === null) return null;
-    return {
-        angle,
-        source: isInputDirectionPayload(rawInput)
-            ? normalizeInputSource(rawInput.source)
-            : null
-    };
-}
-
-function isInputDirectionPayload(rawInput) {
-    return rawInput !== null && typeof rawInput === "object";
-}
-
-function normalizeInputAngle(rawAngle) {
-    const angle = Number(rawAngle);
-    if (!Number.isFinite(angle)) return null;
-    return Math.atan2(Math.sin(angle), Math.cos(angle));
-}
-
-function normalizeInputSource(rawSource) {
-    const source = String(rawSource || "").toLowerCase();
-    return isInputSourceValid(source) ? source : null;
-}
-
-function isInputSourceValid(source) {
-    return source === "mouse"
-        || source === "pointer"
-        || source === "keyboard"
-        || source === "gamepad-left"
-        || source === "gamepad-right"
-        || source === "gamepad-dpad";
-}
-
-function normalizeViewport(rawViewport) {
-    if (!rawViewport || typeof rawViewport !== "object") return null;
-    const width = clampNumber(Number(rawViewport.width), 1, config.screen.virtualWidth * 2);
-    const height = clampNumber(Number(rawViewport.height), 1, config.screen.virtualHeight * 2);
-    const scale = clampNumber(Number(rawViewport.scale), 0.05, 4);
-    if (width === null || height === null || scale === null) return null;
-    return { width, height, scale };
-}
-
-function clampNumber(value, min, max) {
-    if (!Number.isFinite(value)) return null;
-    return Math.min(Math.max(value, min), max);
+    applyPlayerInput(players, playerId, "viewport", rawViewport);
 }
 
 module.exports = registerSocket;

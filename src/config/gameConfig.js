@@ -1,3 +1,5 @@
+const { resolveServerCoreCount } = require("./serverRuntime");
+
 const socketTransports = Object.freeze(["polling", "websocket"]);
 
 const inputActionAngles = Object.freeze({
@@ -21,8 +23,11 @@ const inputBindings = Object.freeze({
     w: "move-up"
 });
 
+const serverCoreCount = resolveServerCoreCount();
 const server = Object.freeze({
-    port: Number(process.env.PORT) || 3000
+    coreCount: serverCoreCount,
+    port: Number(process.env.PORT) || 3000,
+    roomWorkerCount: serverCoreCount - 1
 });
 
 const socket = Object.freeze({

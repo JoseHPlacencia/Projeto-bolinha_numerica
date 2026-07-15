@@ -46,9 +46,12 @@ function compareCandidates(first, second) {
 }
 
 function getRoomHumanPlayerCount(room) {
-    return room && room.players instanceof Map
-        ? getHumanPlayerCount(room.players)
-        : 0;
+    if (room && room.players instanceof Map) {
+        return getHumanPlayerCount(room.players);
+    }
+
+    const playerCount = Number(room && room.playerCount);
+    return Number.isFinite(playerCount) ? Math.max(0, playerCount) : 0;
 }
 
 function getCreatedAt(room) {

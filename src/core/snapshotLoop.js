@@ -54,7 +54,7 @@ function startSnapshotLoop(io, players, territories, roomCode, numberSystem, run
 function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
     const deferTerritoryGeometry = shouldDeferTerritoryGeometry(territories);
 
-    for (const socket of io.sockets.sockets.values()) {
+    for (const socket of getRoomSockets(io, roomCode)) {
         const isPlayerSocket = roomCode && socket.data.roomCode === roomCode && players.has(socket.id);
         const isSpectatorSocket = roomCode && socket.data.spectatorRoomCode === roomCode;
 
@@ -120,6 +120,15 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         socket.data.snapshotState = nextSnapshotState;
         emitVolatileSnapshot(socket, snapshot, "volatile", null, sendDiagnostics);
     }
+}
+
+function getRoomSockets(io, roomCode) {
+    if (io && typeof io.getRoomSockets === "function") {
+        return io.getRoomSockets(roomCode);
+    }
+
+    const sockets = io && io.sockets && io.sockets.sockets;
+    return sockets && typeof sockets.values === "function" ? sockets.values() : [];
 }
 
 function retryPendingReliableSnapshot(socket) {
