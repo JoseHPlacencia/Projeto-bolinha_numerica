@@ -32,10 +32,17 @@ app.get("/shared/math.js", (_request, response) => {
 });
 
 app.get("/", (_request, response) => {
+    disableStaticAssetCache(response);
     response.sendFile(path.join(publicPath, "index.html"));
 });
 
-app.use(express.static(publicPath));
+app.use(express.static(publicPath, {
+    setHeaders: (response, filePath) => {
+        if (/\.(?:css|html|js)$/i.test(filePath)) {
+            disableStaticAssetCache(response);
+        }
+    }
+}));
 
 registerSocket(io, roomCoordinator);
 startServer().catch(handleServerStartFailure);
@@ -52,6 +59,10 @@ function createSocketOptions() {
         ...config.socket,
         transports: [...config.socket.transports]
     };
+}
+
+function disableStaticAssetCache(response) {
+    response.setHeader("Cache-Control", "no-store");
 }
 
 async function startServer() {

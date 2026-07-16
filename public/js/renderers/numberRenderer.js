@@ -2,40 +2,31 @@ import { isPerformanceMode } from "../renderSettings.js";
 import { isDarkVisualTheme } from "../visualTheme.js";
 
 const NUMBER_RADIUS = 44;
+const NUMBER_RING_WIDTH = 4;
+const NEARBY_HALO_RADIUS = NUMBER_RADIUS + 9;
+const NEARBY_DISTANCE_SQUARED = 450 ** 2;
 const FULL_CIRCLE_RADIANS = Math.PI * 2;
 
-const NUMBER_COLORS = [
-    ["#4ade80", "#166534"],
-    ["#f87171", "#7f1d1d"],
-    ["#facc15", "#713f12"],
-    ["#60a5fa", "#1e3a8a"],
-    ["#c084fc", "#4a1d96"],
-    ["#e2e8f0", "#1e293b"]
-];
+function getNumberColors(colorSeed, numberId, darkTheme) {
+    const seed = Number.isSafeInteger(colorSeed) && colorSeed >= 0
+        ? colorSeed
+        : Math.abs(Number(numberId) || 0);
+    const hue = seed % 360;
 
-function getColorIndex(display) {
-    const displayText = String(display);
-
-    if (/^-\d/.test(displayText)) {
-        return 1;
-    }
-    if (/^\d+$/.test(displayText)) {
-        return 0;
-    }
-    if (displayText.includes("/")) {
-        return 2;
-    }
-    if (displayText.startsWith("\u221A")) {
-        return 3;
-    }
-    if (displayText === "\u03C0" || displayText === "e" || displayText === "\u03C6") {
-        return 4;
-    }
-
-    return 5;
+    return darkTheme
+        ? {
+            accent: `hsl(${hue} 92% 68%)`,
+            fill: `hsl(${hue} 72% 18%)`,
+            text: `hsl(${hue} 55% 88%)`
+        }
+        : {
+            accent: `hsl(${hue} 78% 32%)`,
+            fill: `hsl(${hue} 76% 88%)`,
+            text: `hsl(${hue} 65% 24%)`
+        };
 }
 
-export function drawNumberLayer(context, numbers, viewportBounds, gameConfig) {
+export function drawNumberLayer(context, numbers, viewportBounds, gameConfig, currentPlayer = null) {
     if (!numbers || numbers.length === 0 || !viewportBounds) {
         return;
     }
@@ -54,43 +45,54 @@ export function drawNumberLayer(context, numbers, viewportBounds, gameConfig) {
     context.shadowOffsetY = 0;
 
     for (const number of numbers) {
-        const [, x, y, display] = number;
+        const [numberId, x, y, display, , colorSeed] = number;
 
         if (x + padding < minX || x - padding > maxX || y + padding < minY || y - padding > maxY) {
             continue;
         }
 
-        const colorIndex = getColorIndex(display);
-        const [foregroundColor, backgroundColor] = NUMBER_COLORS[colorIndex];
+        const colors = getNumberColors(
+            colorSeed,
+            numberId,
+            darkTheme
+        );
+        const isNearby = isNearPlayer(x, y, currentPlayer);
 
-        if (darkTheme && performanceMode) {
+        if (isNearby) {
             context.save();
-            context.globalAlpha = 0.2;
+            context.globalAlpha = darkTheme ? 0.48 : 0.34;
             context.beginPath();
-            context.arc(x, y, NUMBER_RADIUS + 9, 0, FULL_CIRCLE_RADIANS);
-            context.fillStyle = foregroundColor;
-            context.fill();
+            context.arc(x, y, NEARBY_HALO_RADIUS, 0, FULL_CIRCLE_RADIANS);
+            context.lineWidth = 2;
+            context.strokeStyle = colors.accent;
+            context.stroke();
             context.restore();
         }
 
-        if (darkTheme && !performanceMode) {
-            context.shadowColor = foregroundColor;
-            context.shadowBlur = 28;
+        if (!performanceMode) {
+            context.shadowColor = colors.accent;
+            context.shadowBlur = darkTheme ? 24 : 12;
         }
 
         context.beginPath();
         context.arc(x, y, NUMBER_RADIUS, 0, FULL_CIRCLE_RADIANS);
-        context.fillStyle = backgroundColor;
+        context.fillStyle = colors.fill;
         context.fill();
 
-        context.lineWidth = 3;
-        context.strokeStyle = foregroundColor;
+        context.lineWidth = NUMBER_RING_WIDTH;
+        context.strokeStyle = colors.accent;
         context.stroke();
         context.shadowColor = "transparent";
         context.shadowBlur = 0;
 
-        context.font = `900 ${getNumberFontSize(display)}px Play,sans-serif`;
-        context.fillStyle = foregroundColor;
+        context.font = `700 ${getNumberFontSize(display)}px Play,sans-serif`;
+        context.lineJoin = "round";
+        context.lineWidth = 2.5;
+        context.strokeStyle = darkTheme
+            ? "rgba(0, 0, 0, 0.88)"
+            : "rgba(255, 255, 255, 0.92)";
+        context.strokeText(display, x, y);
+        context.fillStyle = colors.text;
         context.fillText(display, x, y);
     }
 
@@ -100,18 +102,26 @@ export function drawNumberLayer(context, numbers, viewportBounds, gameConfig) {
 function getNumberFontSize(display) {
     const textLength = String(display).length;
 
-    if (textLength > 5) {
-        return 13;
-    }
     if (textLength > 4) {
-        return 15;
+        return 20;
     }
     if (textLength > 3) {
-        return 17;
+        return 23;
     }
     if (textLength > 2) {
-        return 19;
+        return 26;
     }
 
-    return 22;
+    return 30;
+}
+
+function isNearPlayer(x, y, player) {
+    if (!player || !Number.isFinite(player.x) || !Number.isFinite(player.y)) {
+        return false;
+    }
+
+    const deltaX = x - player.x;
+    const deltaY = y - player.y;
+
+    return deltaX * deltaX + deltaY * deltaY <= NEARBY_DISTANCE_SQUARED;
 }

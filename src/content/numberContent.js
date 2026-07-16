@@ -20,6 +20,7 @@ const IRRATIONAL_CONSTANTS = Object.freeze([
 ]);
 
 const FRACTION_DENOMINATORS = Object.freeze([2, 3, 4, 5, 6, 8, 10]);
+const NEGATIVE_FRACTION_DENOMINATORS = Object.freeze([2, 3, 4, 5, 6, 8]);
 const PERFECT_ROOTS = Object.freeze([1, 4, 9, 16, 25, 36, 49, 64, 81]);
 const NON_PERFECT_ROOTS = Object.freeze([
     2, 3, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 22, 23, 24, 26,
@@ -39,14 +40,19 @@ function makeNegative() {
 }
 
 function makeFraction() {
-    const denominator = pickRandomItem(FRACTION_DENOMINATORS);
-    let numerator = Math.floor(Math.random() * (denominator * 2 - 1)) + 1;
+    const isNegative = Math.random() < 0.3;
+    const denominators = isNegative
+        ? NEGATIVE_FRACTION_DENOMINATORS
+        : FRACTION_DENOMINATORS;
+    const denominator = pickRandomItem(denominators);
+    const displayNumeratorLimit = isNegative || denominator === 10 ? 9 : 99;
+    const numeratorLimit = Math.min(denominator * 2 - 1, displayNumeratorLimit);
+    let numerator = Math.floor(Math.random() * numeratorLimit) + 1;
 
     if (numerator === denominator) {
         numerator = denominator - 1 || 1;
     }
 
-    const isNegative = Math.random() < 0.3;
     const value = (isNegative ? -numerator : numerator) / denominator;
     const display = `${isNegative ? "-" : ""}${numerator}/${denominator}`;
     const sets = ["fracao", "racional"];

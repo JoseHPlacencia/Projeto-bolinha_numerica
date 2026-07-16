@@ -102,7 +102,13 @@ export function createCanvasRenderer(canvas, gameConfig) {
         drawMap(context, gameConfig.world, gameConfig);
         drawTerritoryLayer(context, state, gameConfig, viewportBounds);
         drawTrailLayer(context, state, gameConfig, viewportBounds);
-        drawNumberLayer(context, state.numbers && state.numbers.nums, viewportBounds, gameConfig);
+        drawNumberLayer(
+            context,
+            state.numbers && state.numbers.nums,
+            viewportBounds,
+            gameConfig,
+            currentPlayer
+        );
         drawPlayerLayer(context, state.players, currentPlayer, currentPlayerId, gameConfig, viewportBounds);
         context.restore();
     }

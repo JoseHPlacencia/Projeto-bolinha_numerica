@@ -7,6 +7,7 @@ const {
 } = require("../content/numberContent");
 
 const NUMBER_CONFIG = config.numbers;
+const COLOR_SEED_RANGE = 0x100000000;
 
 function createNumberSystem(mapRadius, players, difficulty, numberOptions = {}) {
     const { key: profileKey, profile } = getNumberProfile(difficulty);
@@ -88,6 +89,7 @@ function spawnOneNumber(state, mapRadius, players, generateNumber, numberConfig)
         display: numberData.display,
         value: numberData.value,
         sets: numberData.sets,
+        colorSeed: Math.floor(Math.random() * COLOR_SEED_RANGE),
         version: 1
     });
 
@@ -229,7 +231,8 @@ function serializeNumbers(state) {
             Math.round(number.x),
             Math.round(number.y),
             number.display,
-            Number(number.value.toFixed(4))
+            Number(number.value.toFixed(4)),
+            number.colorSeed
         ]);
     }
 
