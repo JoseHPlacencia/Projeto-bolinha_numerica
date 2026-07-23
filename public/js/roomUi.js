@@ -1,8 +1,12 @@
 const MULTIPLIER_VALUES = Object.freeze([0.5, 0.75, 1, 1.5, 2]);
+const MAP_PLAYER_CAPACITIES = Object.freeze([4, 9, 16, 25, 36]);
 const LIVES_VALUES = Object.freeze([1, 2, 3, 4, 5]);
 const DEFAULT_MAX_PLAYERS = 16;
 const MIN_MAX_PLAYERS = 1;
-const MAX_MAX_PLAYERS = 16;
+const MAX_MAX_PLAYERS = 36;
+const DEFAULT_BOT_COUNT = 2;
+const MIN_BOT_COUNT = 0;
+const MAX_BOT_COUNT = 36;
 
 export function createRoomUi(socket, options = {}) {
     const elements = getRoomElements();
@@ -113,7 +117,7 @@ function getRoomElements() {
         joinRoomButton: document.getElementById("joinRoomButton"),
         leaveRoomButton: document.getElementById("leaveRoomButton"),
         privateRoomCheckbox: document.getElementById("privateRoomCheckbox"),
-        roomAllowBotsCheckbox: document.getElementById("roomAllowBotsCheckbox"),
+        roomBotCountInput: document.getElementById("roomBotCountInput"),
         roomCodeDisplay: document.getElementById("roomCodeDisplay"),
         roomCodeCopyStatus: document.getElementById("roomCodeCopyStatus"),
         roomCodeFilterInput: document.getElementById("roomCodeFilterInput"),
@@ -128,6 +132,7 @@ function getRoomElements() {
         roomFindStatus: document.getElementById("roomFindStatus"),
         roomInfo: document.getElementById("roomInfo"),
         roomJoinPasswordInput: document.getElementById("roomJoinPasswordInput"),
+        roomMaxPlayersHint: document.getElementById("roomMaxPlayersHint"),
         roomMaxPlayersInput: document.getElementById("roomMaxPlayersInput"),
         roomMenuButton: document.getElementById("roomMenuButton"),
         roomPasswordModal: document.getElementById("roomPasswordModal"),
@@ -218,6 +223,17 @@ function bindCustomOptions(elements, options) {
         input.addEventListener("input", () => updateSliderValue(label));
         updateSliderValue(label);
     });
+
+    if (elements.roomMaxPlayersInput && elements.roomBotCountInput) {
+        const mapSizeInput = getMapSizeInput(elements);
+        const syncCapacity = adaptPlayerLimit => syncRoomCapacityControls(elements, {
+            adaptPlayerLimit
+        });
+
+        elements.roomMaxPlayersInput.addEventListener("input", () => syncCapacity(false));
+        mapSizeInput?.addEventListener("input", () => syncCapacity(true));
+        syncCapacity(false);
+    }
 }
 
 function bindCreateRoom(socket, elements, options) {
@@ -234,6 +250,21 @@ function bindCreateRoom(socket, elements, options) {
             );
             elements.roomMaxPlayersInput?.focus();
             elements.roomMaxPlayersInput?.reportValidity();
+            return;
+        }
+
+        if (!isValidBotCount(
+            customOptions.botCount,
+            customOptions.maxPlayers,
+            customOptions.mapSize
+        )) {
+            setStatus(
+                elements,
+                `A quantidade de bots deve ser um número inteiro de ${MIN_BOT_COUNT} até o limite de jogadores.`,
+                true
+            );
+            elements.roomBotCountInput?.focus();
+            elements.roomBotCountInput?.reportValidity();
             return;
         }
 
@@ -385,6 +416,17 @@ function createRoom(socket, elements, roomOptions = {}, options = {}) {
         return;
     }
 
+    if (roomOptions.customOptions
+        && roomOptions.customOptions.botCount !== undefined
+        && !isValidBotCount(
+            roomOptions.customOptions.botCount,
+            roomOptions.customOptions.maxPlayers || DEFAULT_MAX_PLAYERS,
+            roomOptions.customOptions.mapSize || 1
+        )) {
+        setStatus(elements, "A quantidade de bots deve respeitar o limite total de jogadores.", true);
+        return;
+    }
+
     setStatus(elements, "Criando sala...");
     if (elements.createRoomButton) {
         elements.createRoomButton.disabled = true;
@@ -482,14 +524,19 @@ function renderRoomsList(socket, elements, rooms, currentFilter, currentCodeFilt
         const maxPlayers = Number.isInteger(room.maxPlayers)
             ? room.maxPlayers
             : DEFAULT_MAX_PLAYERS;
-        const isFull = room.playerCount >= maxPlayers;
+        const humanCount = Number(room.playerCount) || 0;
+        const botCount = Number(room.botCount) || 0;
+        const occupiedCount = Number.isInteger(room.occupiedCount)
+            ? room.occupiedCount
+            : humanCount + botCount;
+        const isFull = humanCount >= maxPlayers;
 
         return `
         <li class="rooms-list__item">
             <span class="rooms-list__title">
                 <strong>${escapeHtml(room.code)}</strong>
                 ${room.isPrivate ? '<span class="rooms-list__lock" aria-label="Sala privada">Privada</span>' : '<span class="rooms-list__lock">Publica</span>'}
-                <small>${room.playerCount}/${maxPlayers} jogador${maxPlayers !== 1 ? "es" : ""}${room.botCount ? ` + ${room.botCount} bot${room.botCount !== 1 ? "s" : ""}` : ""}</small>
+                <small>${occupiedCount}/${maxPlayers} vagas · ${humanCount} humano${humanCount !== 1 ? "s" : ""} · ${botCount} bot${botCount !== 1 ? "s" : ""}</small>
             </span>
             <span class="rooms-list__actions">
                 <button class="room-icon-button rooms-list__details" data-info-code="${escapeAttribute(room.code)}" type="button" aria-label="Ver propriedades da sala">
@@ -577,7 +624,8 @@ function getCustomOptions(elements, options = {}) {
     }
 
     customOptions.maxPlayers = Number(elements.roomMaxPlayersInput?.value);
-    customOptions.allowBots = Boolean(elements.roomAllowBotsCheckbox?.checked);
+    customOptions.botCount = Number(elements.roomBotCountInput?.value);
+    customOptions.allowBots = customOptions.botCount > 0;
 
     return customOptions;
 }
@@ -586,6 +634,86 @@ function isValidMaxPlayers(value) {
     return Number.isInteger(value)
         && value >= MIN_MAX_PLAYERS
         && value <= MAX_MAX_PLAYERS;
+}
+
+function isValidBotCount(value, maxPlayers, mapSize = 1) {
+    const effectiveMaxPlayers = calculateMapScaledMaxPlayers(maxPlayers, mapSize);
+
+    return Number.isInteger(value)
+        && value >= MIN_BOT_COUNT
+        && value <= Math.min(MAX_BOT_COUNT, effectiveMaxPlayers);
+}
+
+function calculateMapScaledMaxPlayers(maxPlayers, mapSize = 1) {
+    if (!isValidMaxPlayers(maxPlayers)) {
+        return 0;
+    }
+
+    const mapCapacity = calculateMapPlayerCapacity(mapSize);
+
+    return Math.min(maxPlayers, mapCapacity);
+}
+
+function calculateMapPlayerCapacity(mapSize = 1) {
+    const numericMapSize = Number(mapSize);
+    const normalizedMapSize = Number.isFinite(numericMapSize) && numericMapSize > 0
+        ? numericMapSize
+        : 1;
+    const index = MULTIPLIER_VALUES.reduce((closestIndex, candidate, candidateIndex) => (
+        Math.abs(candidate - normalizedMapSize) < Math.abs(MULTIPLIER_VALUES[closestIndex] - normalizedMapSize)
+            ? candidateIndex
+            : closestIndex
+    ), 2);
+
+    return MAP_PLAYER_CAPACITIES[index];
+}
+
+function getMapSizeInput(elements) {
+    return elements.customOptionsPanel
+        ?.querySelector("[data-option='mapSize'] input[type='range']") || null;
+}
+
+function getSelectedMapSize(elements) {
+    const input = getMapSizeInput(elements);
+    return input ? MULTIPLIER_VALUES[getSliderIndex(input)] : 1;
+}
+
+function syncRoomCapacityControls(elements, options = {}) {
+    if (!elements.roomMaxPlayersInput || !elements.roomBotCountInput) {
+        return;
+    }
+
+    const mapCapacity = calculateMapPlayerCapacity(getSelectedMapSize(elements));
+    const previousMapCapacity = Number(elements.roomMaxPlayersInput.dataset.mapCapacity);
+    let maxPlayers = Number(elements.roomMaxPlayersInput.value);
+
+    if (options.adaptPlayerLimit
+        && (maxPlayers > mapCapacity || maxPlayers === previousMapCapacity)) {
+        maxPlayers = mapCapacity;
+        elements.roomMaxPlayersInput.value = String(mapCapacity);
+    }
+
+    elements.roomMaxPlayersInput.max = String(mapCapacity);
+    elements.roomMaxPlayersInput.dataset.mapCapacity = String(mapCapacity);
+
+    const effectiveMaxPlayers = calculateMapScaledMaxPlayers(
+        maxPlayers,
+        getSelectedMapSize(elements)
+    );
+    const botLimit = effectiveMaxPlayers > 0
+        ? Math.min(MAX_BOT_COUNT, effectiveMaxPlayers)
+        : MAX_BOT_COUNT;
+
+    elements.roomBotCountInput.max = String(botLimit);
+    if (Number(elements.roomBotCountInput.value) > botLimit) {
+        elements.roomBotCountInput.value = String(botLimit);
+    }
+
+    if (elements.roomMaxPlayersHint) {
+        elements.roomMaxPlayersHint.textContent = effectiveMaxPlayers > 0
+            ? `Limite da sala: ${effectiveMaxPlayers}; máximo neste mapa: ${mapCapacity}`
+            : `Informe um valor de ${MIN_MAX_PLAYERS} a ${mapCapacity}`;
+    }
 }
 
 function getCustomOptionSliders(elements) {
@@ -677,9 +805,12 @@ function resetCustomOptions(elements, options = {}) {
         elements.roomMaxPlayersInput.value = String(DEFAULT_MAX_PLAYERS);
     }
 
-    if (elements.roomAllowBotsCheckbox) {
-        elements.roomAllowBotsCheckbox.checked = true;
+    if (elements.roomBotCountInput) {
+        elements.roomBotCountInput.value = String(DEFAULT_BOT_COUNT);
+        elements.roomBotCountInput.max = String(DEFAULT_MAX_PLAYERS);
     }
+
+    syncRoomCapacityControls(elements);
 
     if (elements.customOptionsPanel) {
         elements.customOptionsPanel.classList.add("hidden");
@@ -754,21 +885,32 @@ function createRoomDetailsHtml(room) {
     const maxPlayers = Number.isInteger(room.maxPlayers)
         ? room.maxPlayers
         : custom.maxPlayers || DEFAULT_MAX_PLAYERS;
-    const allowBots = typeof room.allowBots === "boolean"
-        ? room.allowBots
-        : custom.allowBots !== false;
+    const humanCount = Number(room.playerCount) || 0;
+    const botCount = Number(room.botCount) || 0;
+    const occupiedCount = Number.isInteger(room.occupiedCount)
+        ? room.occupiedCount
+        : humanCount + botCount;
+    const requestedBotCount = Number.isInteger(custom.botCount)
+        ? custom.botCount
+        : botCount;
+    const requestedMaxPlayers = Number.isInteger(custom.requestedMaxPlayers)
+        ? custom.requestedMaxPlayers
+        : maxPlayers;
+    const capacityNote = requestedMaxPlayers > maxPlayers
+        ? `; teto escolhido: ${requestedMaxPlayers}`
+        : "";
 
     return `
         <dl class="room-details__list">
             <div><dt>Privacidade</dt><dd>${room.isPrivate ? "Privada" : "Publica"}</dd></div>
             <div><dt>Dificuldade</dt><dd>${formatDifficulty(room.difficulty)}</dd></div>
-            <div><dt>Jogadores</dt><dd>${room.playerCount}/${maxPlayers} humanos, ${room.botCount || 0} bots</dd></div>
-            <div><dt>Bots</dt><dd>${allowBots ? "Permitidos" : "Desativados"}</dd></div>
+            <div><dt>Jogadores</dt><dd>${occupiedCount}/${maxPlayers} vagas: ${humanCount} humanos, ${botCount} bots${capacityNote}</dd></div>
+            <div><dt>Bots</dt><dd>${requestedBotCount > 0 ? `${requestedBotCount} configurados, ${botCount} ativos` : "Desativados"}</dd></div>
             <div><dt>Mapa</dt><dd>${formatNumber(world.mapRadius)} unidades (${formatMultiplier(custom.mapSize || 1)})</dd></div>
             <div><dt>Velocidade</dt><dd>${formatNumber(movement.speed)} u/s (${formatMultiplier(custom.playerSpeed || 1)})</dd></div>
-            <div><dt>Números</dt><dd>${numbers.maxNumbers || "-"} no mapa (${formatMultiplier(custom.numberDensity || 1)})</dd></div>
+            <div><dt>Números</dt><dd>${numbers.maxNumbers || "-"} no mapa (${formatMultiplier((custom.mapSize || 1) ** 2)} área × ${formatMultiplier(custom.numberDensity || 1)} ajuste)</dd></div>
             <div><dt>Respawn</dt><dd>${formatNumber(numbers.respawnDelaySec, 1)}s (${formatMultiplier(custom.numberRespawn || 1)})</dd></div>
-            <div><dt>Distribuição</dt><dd>${Math.round((numbers.spawnRadiusRatio || 0) * 100)}% do raio (${formatMultiplier(custom.numberSpread || 1)})</dd></div>
+            <div><dt>Área de surgimento</dt><dd>até ${Math.round((numbers.spawnRadiusRatio || 0) * 100)}% do raio</dd></div>
             <div><dt>Tema</dt><dd>${formatMultiplier(custom.themeDuration || 1)} da duração padrão</dd></div>
             <div><dt>Vidas</dt><dd>${lives || "-"}</dd></div>
         </dl>

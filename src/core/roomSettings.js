@@ -1,17 +1,18 @@
 const config = require("../config/gameConfig");
+const { calculateMapScaledPlayerLimit } = require("./roomCapacity");
 
 const MULTIPLIER_OPTION_IDS = Object.freeze([
     "mapSize",
     "playerSpeed",
     "numberRespawn",
     "numberDensity",
-    "numberSpread",
     "themeDuration"
 ]);
 
 function createRoomRuntimeConfig(rawOptions = {}, difficulty = config.gameMode.catch.defaultDifficulty) {
     const customOptions = normalizeRoomCustomOptions(rawOptions, difficulty);
     const numberDensity = customOptions.numberDensity;
+    const mapAreaMultiplier = customOptions.mapSize ** 2;
 
     return {
         customOptions,
@@ -36,10 +37,11 @@ function createRoomRuntimeConfig(rawOptions = {}, difficulty = config.gameMode.c
         }),
         numbers: Object.freeze({
             ...config.numbers,
-            maxNumbers: Math.max(5, Math.round(config.numbers.maxNumbers * numberDensity)),
+            maxNumbers: Math.max(1, Math.round(
+                config.numbers.maxNumbers * mapAreaMultiplier * numberDensity
+            )),
             minDistanceBetween: Math.max(40, Math.round(config.numbers.minDistanceBetween / Math.sqrt(numberDensity))),
             respawnDelaySec: roundPositive(config.numbers.respawnDelaySec * customOptions.numberRespawn, 2),
-            spawnRadiusRatio: clamp(config.numbers.spawnRadiusRatio * customOptions.numberSpread, 0.35, 0.98),
             themeIntervalMultiplier: customOptions.themeDuration
         }),
         gameMode: Object.freeze({
@@ -61,10 +63,18 @@ function normalizeRoomCustomOptions(rawOptions = {}, difficulty = config.gameMod
     }
 
     normalized.lives = normalizeLives(source.lives, difficulty);
-    normalized.maxPlayers = normalizeMaxPlayers(source.maxPlayers);
-    normalized.allowBots = typeof source.allowBots === "boolean"
-        ? source.allowBots
-        : config.roomCustomOptions.allowBotsDefault !== false;
+    normalized.requestedMaxPlayers = normalizeMaxPlayers(source.maxPlayers);
+    normalized.maxPlayers = calculateMapScaledPlayerLimit(
+        normalized.mapSize,
+        normalized.requestedMaxPlayers,
+        config.roomCustomOptions.players.max
+    );
+    normalized.botCount = normalizeBotCount(
+        source.botCount,
+        normalized.maxPlayers,
+        source.allowBots
+    );
+    normalized.allowBots = normalized.botCount > 0;
     return Object.freeze(normalized);
 }
 
@@ -109,6 +119,22 @@ function normalizeMaxPlayers(value) {
     return clamp(numericValue, playerOptions.min, playerOptions.max);
 }
 
+function normalizeBotCount(value, maxPlayers, legacyAllowBots) {
+    if (legacyAllowBots === false) {
+        return 0;
+    }
+
+    const numericValue = Number(value);
+    const botOptions = config.roomCustomOptions.bots;
+    const maximum = Math.min(botOptions.max, maxPlayers);
+
+    if (!Number.isInteger(numericValue)) {
+        return Math.min(botOptions.default, maximum);
+    }
+
+    return clamp(numericValue, botOptions.min, maximum);
+}
+
 function validateRoomCustomOptions(rawOptions = {}) {
     if (!rawOptions || typeof rawOptions !== "object") {
         return null;
@@ -127,6 +153,25 @@ function validateRoomCustomOptions(rawOptions = {}) {
 
     if (rawOptions.allowBots !== undefined && typeof rawOptions.allowBots !== "boolean") {
         return "A opção de permitir bots deve ser verdadeira ou falsa.";
+    }
+
+    if (rawOptions.botCount !== undefined) {
+        const botCount = rawOptions.botCount;
+        const botOptions = config.roomCustomOptions.bots;
+        const requestedMaxPlayers = normalizeMaxPlayers(rawOptions.maxPlayers);
+        const mapSize = normalizeMultiplier(rawOptions.mapSize);
+        const maxPlayers = calculateMapScaledPlayerLimit(
+            mapSize,
+            requestedMaxPlayers,
+            config.roomCustomOptions.players.max
+        );
+        const maximum = Math.min(botOptions.max, maxPlayers);
+
+        if (!Number.isInteger(botCount)
+            || botCount < botOptions.min
+            || botCount > maximum) {
+            return `A quantidade de bots deve ser um número inteiro de ${botOptions.min} a ${maximum}.`;
+        }
     }
 
     return null;

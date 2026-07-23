@@ -26,6 +26,7 @@ function initializeRoomPlayer(room, playerId, alreadyJoined, playerOptions = {},
     }
 
     initializePlayerTerritory(room.territories, player, runtimeConfig);
+    room.botManager?.ensureBots();
     return player;
 }
 

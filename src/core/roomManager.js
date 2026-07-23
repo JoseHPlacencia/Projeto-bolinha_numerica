@@ -20,7 +20,9 @@ const {
     validateRoomCustomOptions
 } = require("./roomSettings");
 const { getPublicMatchCandidates: selectPublicMatchCandidates } = require("./matchmaking");
+const { calculateActiveBotTarget } = require("./roomCapacity");
 const { resetSocketSnapshotState } = require("./snapshotState");
+const { redirectSpectatorsAfterPlayerExit } = require("../systems/spectatorSystem");
 
 const rooms = new Map();
 const socketIdToRoomCode = new Map();
@@ -48,8 +50,11 @@ function createRoom(io, options = {}) {
     const players = new Map();
     const difficultyKey = normalizeRoomDifficulty(options.difficulty);
     const runtimeConfig = createRoomRuntimeConfig(options.customOptions, difficultyKey);
-    const targetBotCount = runtimeConfig.customOptions.allowBots
-        ? getTargetBotCount({ botCount: options.botCount })
+    const requestedBotCount = options.botCount === null || options.botCount === undefined
+        ? runtimeConfig.customOptions.botCount
+        : options.botCount;
+    const targetBotCount = runtimeConfig.customOptions.allowBots || isSystemRoom
+        ? getTargetBotCount({ botCount: requestedBotCount })
         : 0;
     const numberSystem = createNumberSystem(
         runtimeConfig.world.mapRadius,
@@ -75,7 +80,7 @@ function createRoom(io, options = {}) {
         snapshotLoopInterval: null,
         isPrivate,
         isSystemRoom,
-        allowBots: runtimeConfig.customOptions.allowBots,
+        allowBots: targetBotCount > 0,
         maxPlayers: runtimeConfig.customOptions.maxPlayers,
         targetBotCount,
         runtimeConfig,
@@ -112,7 +117,30 @@ function createRoom(io, options = {}) {
         numberSystem,
         botCount: targetBotCount,
         botDifficulty: options.botDifficulty || difficultyKey,
-        runtimeConfig
+        runtimeConfig,
+        resolveBotCount: configuredTarget => (
+            isSystemRoom
+                ? configuredTarget
+                : calculateActiveBotTarget(
+                    room.maxPlayers,
+                    getHumanPlayerCount(room.players),
+                    configuredTarget
+                )
+        ),
+        onBotRemoved: botId => {
+            redirectSpectatorsAfterPlayerExit(
+                io,
+                roomCode,
+                players,
+                territories,
+                botId,
+                null,
+                runtimeConfig
+            );
+        },
+        onPopulationChanged: () => {
+            handleRoomPopulationChanged(io, roomCode);
+        }
     });
     room.botManager.ensureBots();
     room.gameLoopInterval = startGameLoop(
@@ -302,8 +330,12 @@ function joinRoom(roomCode, socket, password = "") {
 
     const alreadyJoined = socket.data.roomCode === normalizedRoomCode && room.players.has(socket.id);
 
-    if (!alreadyJoined && getHumanPlayerCount(room.players) >= room.maxPlayers) {
-        return { success: false, message: "Room is full." };
+    if (!alreadyJoined) {
+        while (room.players.size >= room.maxPlayers) {
+            if (!room.botManager?.releaseSlotForHuman()) {
+                return { success: false, message: "Room is full." };
+            }
+        }
     }
 
     const spawn = alreadyJoined ? null : createSpawn(room.players, room.territories, room.runtimeConfig);
@@ -385,6 +417,8 @@ function leaveRoom(socket, options = {}) {
         && getHumanPlayerCount(room.players) === 0;
     if (destroyed) {
         destroyRoom(roomCode);
+    } else {
+        room.botManager?.ensureBots();
     }
 
     return { room, destroyed };
@@ -406,6 +440,7 @@ function listRooms() {
             code: room.code,
             botCount: getBotPlayerCount(room.players),
             playerCount: getHumanPlayerCount(room.players),
+            occupiedCount: room.players.size,
             difficulty: room.difficulty || "medium",
             isPrivate: Boolean(room.isPrivate),
             allowBots: room.allowBots,

@@ -1,6 +1,9 @@
 const config = require("../config/gameConfig");
 const { createPlayer } = require("../entities/player");
-const { initializePlayerTerritory } = require("../state/territories");
+const {
+    deletePlayerTerritory,
+    initializePlayerTerritory
+} = require("../state/territories");
 const { distanceBetween } = require("../utils/math");
 const {
     createBotUpdateDiagnostics,
@@ -27,7 +30,18 @@ const { chooseSelfTrailSafeAngle } = createBotRouteSafety({ getReturnTarget });
  * Target selection and route safety are independent policies. This manager owns
  * only their shared cycle/tick contexts and preserves the public room API.
  */
-function createBotManager({ roomCode, players, territories, numberSystem, botCount = null, botDifficulty = null, runtimeConfig = null }) {
+function createBotManager({
+    roomCode,
+    players,
+    territories,
+    numberSystem,
+    botCount = null,
+    botDifficulty = null,
+    runtimeConfig = null,
+    resolveBotCount = null,
+    onBotRemoved = null,
+    onPopulationChanged = null
+}) {
     const state = {
         botCount,
         botDifficulty,
@@ -43,6 +57,7 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
     return {
         ensureBots,
         getDiagnostics,
+        releaseSlotForHuman,
         update
     };
 
@@ -53,7 +68,19 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
             return;
         }
 
-        while (state.botIds.size < getTargetBotCount(state)) {
+        const targetBotCount = resolveActiveBotTarget(state, resolveBotCount);
+        let populationChanged = false;
+
+        while (state.botIds.size > targetBotCount) {
+            const botId = [...state.botIds].pop();
+
+            if (!removeManagedBot(state, players, territories, botId, onBotRemoved)) {
+                break;
+            }
+            populationChanged = true;
+        }
+
+        while (state.botIds.size < targetBotCount) {
             const bot = createBot(roomCode, players, territories, state.nextBotNumber++, state.botDifficulty, runtimeConfig);
 
             if (!bot) {
@@ -61,7 +88,26 @@ function createBotManager({ roomCode, players, territories, numberSystem, botCou
             }
 
             state.botIds.add(bot.id);
+            populationChanged = true;
         }
+
+        if (populationChanged && typeof onPopulationChanged === "function") {
+            onPopulationChanged();
+        }
+    }
+
+    function releaseSlotForHuman() {
+        pruneMissingBotIds(state, players);
+        const botId = [...state.botIds].pop();
+
+        if (!removeManagedBot(state, players, territories, botId, onBotRemoved)) {
+            return false;
+        }
+
+        if (typeof onPopulationChanged === "function") {
+            onPopulationChanged();
+        }
+        return true;
     }
 
     function getDiagnostics() {
@@ -215,6 +261,45 @@ function pruneMissingBotIds(state, players) {
             state.botIds.delete(botId);
         }
     }
+}
+
+function resolveActiveBotTarget(state, resolveBotCount) {
+    const configuredTarget = getTargetBotCount(state);
+
+    if (typeof resolveBotCount !== "function") {
+        return configuredTarget;
+    }
+
+    const resolvedTarget = Number(resolveBotCount(configuredTarget));
+
+    return Number.isInteger(resolvedTarget) && resolvedTarget >= 0
+        ? Math.min(configuredTarget, resolvedTarget)
+        : configuredTarget;
+}
+
+function removeManagedBot(state, players, territories, botId, onBotRemoved) {
+    if (!botId || !state.botIds.has(botId)) {
+        return false;
+    }
+
+    state.botIds.delete(botId);
+    state.pendingDecisionIds = state.pendingDecisionIds.filter(id => id !== botId);
+
+    if (!players.has(botId)) {
+        return false;
+    }
+
+    for (const player of players.values()) {
+        player.clearCatchEliminationTarget?.(botId);
+    }
+
+    players.delete(botId);
+    deletePlayerTerritory(territories, botId);
+
+    if (typeof onBotRemoved === "function") {
+        onBotRemoved(botId);
+    }
+    return true;
 }
 
 function getTargetBotCount(state = {}) {

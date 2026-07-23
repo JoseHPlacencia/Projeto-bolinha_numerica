@@ -2,7 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const config = require("../src/config/gameConfig");
 const roomManager = require("../src/core/roomManager");
-const { getBotPlayerCount } = require("../src/systems/botSystem");
+const { initializeRoomPlayer } = require("../src/core/roomPlayer");
+const {
+    getBotPlayerCount,
+    getHumanPlayerCount
+} = require("../src/systems/botSystem");
 const {
     createSocket,
     createMatchmakingIo
@@ -82,5 +86,109 @@ test("room population updates do not replace the public directory with the BOTS 
     } finally {
         roomManager.destroyRoom(backgroundRoomCode);
         roomManager.destroyRoom(regularRoomCode);
+    }
+});
+
+test("custom room bots share total capacity and preserve the final human slots", () => {
+    const roomCode = "BOTCAP";
+    const io = createMatchmakingIo(createSocket("directory-viewer"));
+
+    roomManager.destroyRoom(roomCode);
+
+    try {
+        const createResult = roomManager.createRoom(io, {
+            customOptions: {
+                botCount: 4,
+                maxPlayers: 4
+            },
+            roomCode
+        });
+
+        assert.equal(createResult.success, true);
+        assert.equal(createResult.room.targetBotCount, 4);
+        assert.equal(getBotPlayerCount(createResult.room.players), 2);
+        assert.equal(roomManager.listRooms().find(room => room.code === roomCode).occupiedCount, 2);
+
+        const firstJoin = joinAndInitialize(createResult.room, "human-1");
+
+        assert.ok(firstJoin.player);
+        assert.equal(getHumanPlayerCount(createResult.room.players), 1);
+        assert.equal(getBotPlayerCount(createResult.room.players), 1);
+
+        const secondJoin = joinAndInitialize(createResult.room, "human-2");
+        assert.equal(getHumanPlayerCount(createResult.room.players), 2);
+        assert.equal(getBotPlayerCount(createResult.room.players), 0);
+
+        roomManager.leaveRoom(secondJoin.socket);
+        assert.equal(getHumanPlayerCount(createResult.room.players), 1);
+        assert.equal(getBotPlayerCount(createResult.room.players), 1);
+
+        joinAndInitialize(createResult.room, "human-2b");
+        joinAndInitialize(createResult.room, "human-3");
+        joinAndInitialize(createResult.room, "human-4");
+        assert.equal(createResult.room.players.size, 4);
+
+        const fullResult = roomManager.joinRoom(roomCode, createSocket("human-5"));
+        assert.equal(fullResult.success, false);
+        assert.match(fullResult.message, /full/i);
+    } finally {
+        roomManager.destroyRoom(roomCode);
+    }
+
+    function joinAndInitialize(room, playerId) {
+        const socket = createSocket(playerId);
+        const joinResult = roomManager.joinRoom(room.code, socket);
+
+        assert.equal(joinResult.success, true);
+        return {
+            player: initializeRoomPlayer(
+                room,
+                socket.id,
+                joinResult.alreadyJoined,
+                { name: playerId },
+                joinResult.spawn
+            ),
+            socket
+        };
+    }
+});
+
+test("human joins replace bots when a very small room starts full", () => {
+    const roomCode = "BOTSM2";
+    const io = createMatchmakingIo(createSocket("directory-viewer"));
+
+    roomManager.destroyRoom(roomCode);
+
+    try {
+        const createResult = roomManager.createRoom(io, {
+            customOptions: {
+                botCount: 2,
+                maxPlayers: 2
+            },
+            roomCode
+        });
+
+        assert.equal(createResult.success, true);
+        assert.equal(getBotPlayerCount(createResult.room.players), 2);
+
+        for (const playerId of ["small-human-1", "small-human-2"]) {
+            const socket = createSocket(playerId);
+            const joinResult = roomManager.joinRoom(roomCode, socket);
+
+            assert.equal(joinResult.success, true);
+            assert.ok(initializeRoomPlayer(
+                createResult.room,
+                socket.id,
+                joinResult.alreadyJoined,
+                { name: playerId },
+                joinResult.spawn
+            ));
+        }
+
+        assert.equal(getHumanPlayerCount(createResult.room.players), 2);
+        assert.equal(getBotPlayerCount(createResult.room.players), 0);
+        assert.equal(createResult.room.players.size, createResult.room.maxPlayers);
+    } finally {
+        roomManager.destroyRoom(roomCode);
     }
 });

@@ -102,10 +102,10 @@ const numbers = Object.freeze({
     radius: 40,
     minDistanceBetween: 180,
     minDistanceFromPlayer: 220,
-    maxNumbers: 25,
-    respawnDelaySec: 4,
+    maxNumbers: 32,
+    respawnDelaySec: 3,
     maxSpawnAttempts: 80,
-    spawnRadiusRatio: 0.88
+    spawnRadiusRatio: 0.9
 });
 
 const player = Object.freeze({
@@ -306,7 +306,7 @@ const client = Object.freeze({
 
 const rooms = Object.freeze({
     maxRooms: 50,
-    maxPlayersPerRoom: 16,
+    maxPlayersPerRoom: 36,
     roomCodeCharset: "ABCDEFGHJKLMNPQRSTUVWXYZ23456789",
     roomCodeLength: 6,
     roomCodeMaxGenerationAttempts: 100,
@@ -318,12 +318,16 @@ const roomOptionMultipliers = Object.freeze([0.5, 0.75, 1, 1.5, 2]);
 
 const roomCustomOptions = Object.freeze({
     multipliers: roomOptionMultipliers,
+    bots: Object.freeze({
+        default: bots.count,
+        min: 0,
+        max: rooms.maxPlayersPerRoom
+    }),
     players: Object.freeze({
-        default: rooms.maxPlayersPerRoom,
+        default: 16,
         min: 1,
         max: rooms.maxPlayersPerRoom
     }),
-    allowBotsDefault: true,
     lives: Object.freeze({
         min: 1,
         max: 5
@@ -349,7 +353,6 @@ const roomCustomOptions = Object.freeze({
             options: Object.freeze([
                 Object.freeze({ id: "numberRespawn", label: "Tempo de reaparecimento", type: "multiplier" }),
                 Object.freeze({ id: "numberDensity", label: "Quantidade de numeros", type: "multiplier" }),
-                Object.freeze({ id: "numberSpread", label: "Distribuicao no mapa", type: "multiplier" }),
                 Object.freeze({ id: "themeDuration", label: "Duracao do tema", type: "multiplier" })
             ])
         }),
@@ -357,7 +360,9 @@ const roomCustomOptions = Object.freeze({
             id: "match",
             label: "Partida",
             options: Object.freeze([
-                Object.freeze({ id: "lives", label: "Vidas", type: "lives" })
+                Object.freeze({ id: "lives", label: "Vidas", type: "lives" }),
+                Object.freeze({ id: "maxPlayers", label: "Quantidade de jogadores", type: "integer" }),
+                Object.freeze({ id: "botCount", label: "Quantidade de bots", type: "integer" })
             ])
         })
     ])

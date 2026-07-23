@@ -209,11 +209,6 @@ try {
                             <strong data-value>1x</strong>
                             <input type="range" min="0" max="4" step="1" value="2">
                         </label>
-                        <label class="room-slider" data-option="numberSpread" data-type="multiplier">
-                            <span>Distribuição no mapa</span>
-                            <strong data-value>1x</strong>
-                            <input type="range" min="0" max="4" step="1" value="2">
-                        </label>
                         <label class="room-slider" data-option="themeDuration" data-type="multiplier">
                             <span>Duração do tema</span>
                             <strong data-value>1x</strong>
@@ -230,14 +225,16 @@ try {
                         <label class="room-number-option" for="roomMaxPlayersInput">
                             <span>
                                 <strong>Quantidade de jogadores</strong>
-                                <small>Limite de jogadores humanos</small>
+                                <small id="roomMaxPlayersHint">Limite da sala; máximo neste mapa: 16</small>
                             </span>
                             <input id="roomMaxPlayersInput" type="number" min="1" max="16" step="1" value="16" inputmode="numeric" required>
                         </label>
-                        <label class="room-toggle room-toggle--option">
-                            <input id="roomAllowBotsCheckbox" type="checkbox" checked>
-                            <span class="room-toggle__track"><span class="room-toggle__thumb"></span></span>
-                            <span class="room-toggle__label">Permitir bots</span>
+                        <label class="room-number-option" for="roomBotCountInput">
+                            <span>
+                                <strong>Quantidade de bots</strong>
+                                <small>O padrão é 2; jogadores reais têm prioridade nas vagas finais</small>
+                            </span>
+                            <input id="roomBotCountInput" type="number" min="0" max="16" step="1" value="2" inputmode="numeric" required>
                         </label>
                     </div>
                 </div>

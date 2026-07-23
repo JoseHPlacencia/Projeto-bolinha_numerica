@@ -464,12 +464,6 @@
     outline-offset: 1px;
 }
 
-.room-toggle--option {
-    border-top: 1px solid var(--border);
-    font-size: 13px;
-    padding-top: 10px;
-}
-
 .room-details {
     gap: 0;
 }
