@@ -17,7 +17,8 @@ const {
 const { resetSocketSnapshotState } = require("../src/core/snapshotState");
 const {
     createClientSnapshotState,
-    createSnapshot
+    createSnapshot,
+    createSnapshotSharedFrame
 } = require("../src/core/snapshotSerializer");
 const {
     createSocket,
@@ -59,6 +60,75 @@ test("snapshot reports incoming threat and outgoing counterattack risk", () => {
     assert.equal(ownerSnapshot.catchStatus.threatArmed, false);
     assert.ok(ownerSnapshot.catchStatus.threatRemainingMs > 0);
     assert.ok(ownerSnapshot.catchStatus.threatRemainingMs <= 800);
+});
+
+test("snapshot loop shares room-wide serialization without sharing client delta state", () => {
+    const first = new Player("first", { x: -200, y: 0 });
+    const second = new Player("second", { x: 200, y: 0 });
+    const players = new Map([
+        [first.id, first],
+        [second.id, second]
+    ]);
+    const territories = createTerritories();
+    const firstSocket = createSocket(first.id, { roomCode: "ROOM" });
+    const secondSocket = createSocket(second.id, { roomCode: "ROOM" });
+    const io = {
+        sockets: {
+            sockets: new Map([
+                [firstSocket.id, firstSocket],
+                [secondSocket.id, secondSocket]
+            ])
+        }
+    };
+    let serializeCalls = 0;
+    const serializedNumbers = { nums: [[1, 0, 0, "1", 1, 123]], theme: null };
+    const numberSystem = {
+        serialize() {
+            serializeCalls++;
+            return serializedNumbers;
+        }
+    };
+
+    initializePlayerTerritory(territories, first);
+    initializePlayerTerritory(territories, second);
+    sendSnapshot(io, players, territories, "ROOM", numberSystem, config);
+
+    const firstSnapshot = firstSocket.emitted.find(event => event.event === "gameState").payload;
+    const secondSnapshot = secondSocket.emitted.find(event => event.event === "gameState").payload;
+
+    assert.equal(serializeCalls, 1);
+    assert.equal(firstSnapshot.time, secondSnapshot.time);
+    assert.strictEqual(firstSnapshot.numbers, secondSnapshot.numbers);
+    assert.strictEqual(firstSnapshot.leaderboard, secondSnapshot.leaderboard);
+    assert.strictEqual(firstSnapshot.roomConfig, secondSnapshot.roomConfig);
+    assert.strictEqual(firstSnapshot.players[first.id], secondSnapshot.players[first.id]);
+    assert.notStrictEqual(firstSnapshot.playerInfo, secondSnapshot.playerInfo);
+    assert.notStrictEqual(firstSocket.data.snapshotState, secondSocket.data.snapshotState);
+});
+
+test("shared snapshot frame remains optional for direct serializer callers", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const numberSystem = { serialize: () => ({ nums: [], theme: null }) };
+
+    initializePlayerTerritory(territories, player);
+    const sharedFrame = createSnapshotSharedFrame(players, territories, numberSystem, config);
+    const snapshot = createSnapshot(
+        players,
+        territories,
+        player.id,
+        createClientSnapshotState(),
+        numberSystem,
+        config,
+        sharedFrame
+    );
+
+    assert.equal(Object.isFrozen(sharedFrame), true);
+    assert.equal(snapshot.time, sharedFrame.time);
+    assert.strictEqual(snapshot.numbers, sharedFrame.numbers);
+    assert.strictEqual(snapshot.leaderboard, sharedFrame.leaderboard);
+    assert.strictEqual(snapshot.roomConfig, sharedFrame.roomConfig);
 });
 
 test("snapshot uses hysteresis before explicitly removing territory and trail", () => {

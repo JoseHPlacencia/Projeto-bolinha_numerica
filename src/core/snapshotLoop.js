@@ -3,7 +3,8 @@ const config = require("../config/gameConfig");
 const {
     cloneClientSnapshotState,
     createClientSnapshotState,
-    createSnapshot
+    createSnapshot,
+    createSnapshotSharedFrame
 } = require("./snapshotSerializer");
 const {
     getSocketSnapshotEpoch,
@@ -53,6 +54,18 @@ function startSnapshotLoop(io, players, territories, roomCode, numberSystem, run
 
 function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
     const deferTerritoryGeometry = shouldDeferTerritoryGeometry(territories);
+    let sharedFrame = null;
+    const getSharedFrame = () => {
+        if (!sharedFrame) {
+            sharedFrame = createSnapshotSharedFrame(
+                players,
+                territories,
+                numberSystem,
+                runtimeConfig
+            );
+        }
+        return sharedFrame;
+    };
 
     for (const socket of getRoomSockets(io, roomCode)) {
         const isPlayerSocket = roomCode && socket.data.roomCode === roomCode && players.has(socket.id);
@@ -75,7 +88,17 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         }
 
         if (retryPendingReliableSnapshot(socket)) {
-            sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig, loopDiagnostics, roomDiagnostics);
+            sendVolatileSnapshotWhileReliablePending(
+                socket,
+                players,
+                territories,
+                numberSystem,
+                viewerId,
+                runtimeConfig,
+                loopDiagnostics,
+                roomDiagnostics,
+                getSharedFrame()
+            );
             continue;
         }
 
@@ -89,7 +112,9 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
                 runtimeConfig,
                 loopDiagnostics,
                 roomDiagnostics,
-                "volatile-territory-repair"
+                "volatile-territory-repair",
+                null,
+                getSharedFrame()
             );
             continue;
         }
@@ -102,7 +127,8 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
             nextSnapshotState,
             numberSystem,
             runtimeConfig,
-            isNetworkDiagnosticsEnabled(socket)
+            isNetworkDiagnosticsEnabled(socket),
+            getSharedFrame()
         );
         const snapshot = measuredSnapshot.snapshot;
         assignSnapshotSequence(socket, snapshot);
@@ -140,7 +166,17 @@ function retryPendingReliableSnapshot(socket) {
     return true;
 }
 
-function sendVolatileSnapshotWhileReliablePending(socket, players, territories, numberSystem, viewerId, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
+function sendVolatileSnapshotWhileReliablePending(
+    socket,
+    players,
+    territories,
+    numberSystem,
+    viewerId,
+    runtimeConfig = null,
+    loopDiagnostics = null,
+    roomDiagnostics = null,
+    sharedFrame = null
+) {
     if (config.network.volatileSnapshotsWhileReliablePendingEnabled === false) return;
     sendVolatileSnapshotWithoutReliableGeometry(
         socket,
@@ -152,7 +188,8 @@ function sendVolatileSnapshotWhileReliablePending(socket, players, territories, 
         loopDiagnostics,
         roomDiagnostics,
         "volatile-pending",
-        socket.data.pendingReliableSnapshot
+        socket.data.pendingReliableSnapshot,
+        sharedFrame
     );
 }
 
@@ -166,7 +203,8 @@ function sendVolatileSnapshotWithoutReliableGeometry(
     loopDiagnostics,
     roomDiagnostics,
     sendType,
-    pending = null
+    pending = null,
+    sharedFrame = null
 ) {
     const clientState = socket.data.snapshotState || createClientSnapshotState();
     const temporaryState = cloneClientSnapshotState(clientState);
@@ -177,7 +215,8 @@ function sendVolatileSnapshotWithoutReliableGeometry(
         temporaryState,
         numberSystem,
         runtimeConfig,
-        isNetworkDiagnosticsEnabled(socket)
+        isNetworkDiagnosticsEnabled(socket),
+        sharedFrame
     );
     const snapshot = measuredSnapshot.snapshot;
     assignSnapshotSequence(socket, snapshot);
@@ -393,9 +432,26 @@ function normalizeSnapshotCacheInvalidationDiagnostic(value, now) {
     };
 }
 
-function createMeasuredSnapshot(players, territories, viewerId, clientState, numberSystem, runtimeConfig, shouldMeasure = false) {
+function createMeasuredSnapshot(
+    players,
+    territories,
+    viewerId,
+    clientState,
+    numberSystem,
+    runtimeConfig,
+    shouldMeasure = false,
+    sharedFrame = null
+) {
     const startedAt = shouldMeasure ? performance.now() : null;
-    const snapshot = createSnapshot(players, territories, viewerId, clientState, numberSystem, runtimeConfig);
+    const snapshot = createSnapshot(
+        players,
+        territories,
+        viewerId,
+        clientState,
+        numberSystem,
+        runtimeConfig,
+        sharedFrame
+    );
 
     return {
         snapshot,

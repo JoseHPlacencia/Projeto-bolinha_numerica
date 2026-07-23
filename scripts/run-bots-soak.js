@@ -38,17 +38,26 @@ const {
     summarizeDistribution,
     summarizeMemorySamples
 } = require("./lib/botsSoakMetrics");
+const {
+    buildScenarioSnapshots,
+    createSyntheticPlayers,
+    shouldBuildSnapshots,
+    updateSyntheticPlayerInputs
+} = require("./lib/capacitySoakWorkload");
 
 const projectRoot = path.resolve(__dirname, "..");
 const defaultOutput = path.join(projectRoot, ".ai", "reports", "BOTS_SOAK_LATEST.json");
 const argumentNames = new Set([
     "bots",
     "difficulty",
+    "map-size",
     "output",
     "overlap-every",
     "pace",
+    "players",
     "sample-every",
     "seed",
+    "snapshots",
     "ticks",
     "top",
     "warmup",
@@ -257,7 +266,11 @@ async function runSoak(options, startedAt, realStartedAt) {
 }
 
 function createScenario(options) {
-    const runtimeConfig = createRoomRuntimeConfig(null, options.difficulty);
+    const runtimeConfig = createRoomRuntimeConfig({
+        botCount: options.botCount,
+        mapSize: options.mapSize,
+        maxPlayers: options.playerCount
+    }, options.difficulty);
 
     const players = new Map();
     const territories = createTerritories();
@@ -274,7 +287,11 @@ function createScenario(options) {
         restartRequested: false,
         roomCode: options.roomCode,
         runtimeConfig,
+        snapshotStates: new Map(),
+        snapshotsEnabled: options.snapshots,
+        syntheticPlayerIds: new Set(),
         targetBotCount: options.botCount,
+        tick: 0,
         territories
     };
 
@@ -288,10 +305,13 @@ function createScenario(options) {
         territories
     });
     scenario.botManager.ensureBots();
+    createSyntheticPlayers(scenario, options.playerCount - options.botCount, options.difficulty);
     return scenario;
 }
 
 function executeTick(scenario, now, deltaTime) {
+    scenario.tick++;
+    updateSyntheticPlayerInputs(scenario, now);
     const phases = {};
     const catchCombatFrame = createCatchCombatFrame(now);
     const context = {
@@ -308,6 +328,7 @@ function executeTick(scenario, now, deltaTime) {
     let botDiagnostics;
     let trailDiagnostics;
     let numberResult;
+    let snapshotResult = null;
     const tickStartedAt = performance.now();
 
     botDiagnostics = measurePhase(phases, "bots", () => scenario.botManager.update(now));
@@ -326,12 +347,24 @@ function executeTick(scenario, now, deltaTime) {
     measurePhase(phases, "catchCombat", () => {
         resolveCatchCombatFrame(scenario.players, scenario.territories, context);
     });
+    if (shouldBuildSnapshots(scenario)) {
+        snapshotResult = buildScenarioSnapshots(scenario);
+        phases.snapshots = snapshotResult.applicationBatchDurationMs;
+        phases.snapshotCompressionEstimate = snapshotResult.compressionBatchDurationMs;
+    }
+
+    const instrumentedDurationMs = performance.now() - tickStartedAt;
 
     return {
         botDiagnostics,
-        durationMs: performance.now() - tickStartedAt,
+        durationMs: Math.max(
+            0,
+            instrumentedDurationMs - (snapshotResult?.compressionBatchDurationMs || 0)
+        ),
+        instrumentedDurationMs,
         numberResult,
         phases,
+        snapshotResult,
         trailDiagnostics
     };
 }
@@ -346,6 +379,17 @@ function createSeries() {
             trailPoints: []
         },
         phases: new Map(),
+        instrumentedTickDurationMs: [],
+        snapshots: {
+            buildDurationMs: [],
+            compressedPayloadBytes: [],
+            compressionDurationMs: [],
+            payloadBytes: [],
+            serializeDurationMs: [],
+            totalCompressedPayloadBytes: 0,
+            totalPayloadBytes: 0,
+            viewerCount: []
+        },
         tickDurationMs: [],
         trailPhases: new Map()
     };
@@ -387,6 +431,7 @@ function resetMonotonicState(state) {
 
 function collectTickMetrics(result, tick, scenario, series, counters, slowestTicks, outlierLimit) {
     series.tickDurationMs.push(result.durationMs);
+    series.instrumentedTickDurationMs.push(result.instrumentedDurationMs);
     appendPhaseValues(series.phases, result.phases);
     appendPhaseValues(series.botPhases, result.botDiagnostics && result.botDiagnostics.phases);
     appendPhaseValues(series.trailPhases, result.trailDiagnostics && result.trailDiagnostics.phases);
@@ -418,6 +463,7 @@ function collectTickMetrics(result, tick, scenario, series, counters, slowestTic
         result.botDiagnostics && result.botDiagnostics.selfTrailSafety,
         botSafetyCounterNames
     );
+    collectSnapshotMetrics(series.snapshots, result.snapshotResult);
 
     keepSlowestSamples(slowestTicks, {
         activeTrails: countActiveTrails(scenario.players),
@@ -429,6 +475,21 @@ function collectTickMetrics(result, tick, scenario, series, counters, slowestTic
         tick,
         trailPoints: countTrailPoints(scenario.players).authoritative
     }, outlierLimit);
+}
+
+function collectSnapshotMetrics(series, result) {
+    if (!series || !result) {
+        return;
+    }
+
+    series.buildDurationMs.push(...result.buildDurations);
+    series.compressedPayloadBytes.push(...result.compressedPayloadBytes);
+    series.compressionDurationMs.push(...result.compressionDurations);
+    series.payloadBytes.push(...result.payloadBytes);
+    series.serializeDurationMs.push(...result.serializeDurations);
+    series.totalCompressedPayloadBytes += result.totalCompressedPayloadBytes;
+    series.totalPayloadBytes += result.totalPayloadBytes;
+    series.viewerCount.push(result.viewerCount);
 }
 
 function collectGeometrySample(scenario, tick, series, state) {
@@ -568,6 +629,11 @@ function createReport(context) {
             roomCode: options.roomCode,
             difficulty: options.difficulty,
             botCount: options.botCount,
+            mapSize: options.mapSize,
+            maxPlayers: options.runtimeMaxPlayers,
+            numberCount: options.runtimeNumberCount,
+            playerCount: options.playerCount,
+            syntheticPlayerCount: options.playerCount - options.botCount,
             seed: options.seed,
             tickRate: config.loop.tickRate,
             warmupTicks: options.warmupTicks,
@@ -576,14 +642,17 @@ function createReport(context) {
             realDurationMs: roundMetric(context.realDurationMs),
             sampleEveryTicks: options.sampleEvery,
             overlapEveryTicks: options.overlapEvery,
-            paced: options.pace
+            paced: options.pace,
+            snapshots: options.snapshots
         },
         timing: {
             tickDurationMs: summarizeDistribution(series.tickDurationMs),
+            instrumentedTickDurationMs: summarizeDistribution(series.instrumentedTickDurationMs),
             phases: summarizePhaseSeries(series.phases),
             botPhases: summarizePhaseSeries(series.botPhases),
             trailPhases: summarizePhaseSeries(series.trailPhases)
         },
+        snapshots: createSnapshotSummary(series.snapshots, options),
         memory,
         geometry: {
             activeTrails: summarizeDistribution(series.geometry.activeTrails),
@@ -616,6 +685,29 @@ function createReport(context) {
     };
 }
 
+function createSnapshotSummary(series, options) {
+    const simulatedDurationSec = options.ticks / config.loop.tickRate;
+
+    return {
+        enabled: options.snapshots,
+        batchCount: series.viewerCount.length,
+        buildDurationMs: summarizeDistribution(series.buildDurationMs),
+        compressedPayloadBytes: summarizeDistribution(series.compressedPayloadBytes),
+        compressionDurationMs: summarizeDistribution(series.compressionDurationMs),
+        serializeDurationMs: summarizeDistribution(series.serializeDurationMs),
+        payloadBytes: summarizeDistribution(series.payloadBytes),
+        viewerCount: summarizeDistribution(series.viewerCount),
+        totalPayloadBytes: series.totalPayloadBytes,
+        totalCompressedPayloadBytes: series.totalCompressedPayloadBytes,
+        payloadBytesPerSec: simulatedDurationSec > 0
+            ? roundMetric(series.totalPayloadBytes / simulatedDurationSec)
+            : null,
+        compressedPayloadBytesPerSec: simulatedDurationSec > 0
+            ? roundMetric(series.totalCompressedPayloadBytes / simulatedDurationSec)
+            : null
+    };
+}
+
 function writeReport(report, outputPath) {
     const absoluteOutput = path.resolve(projectRoot, outputPath || defaultOutput);
     const markdownOutput = absoluteOutput.replace(/\.json$/i, ".md");
@@ -637,7 +729,8 @@ Gerado em: ${report.generatedAt}
 Node: ${report.environment.node}  
 Kernel de diferença: ${report.environment.territoryDifferenceKernel.activeKernel} (${report.environment.territoryDifferenceKernel.status})<br>
 Seed: ${report.scenario.seed}  
-Bots: ${report.scenario.botCount} (${report.scenario.difficulty})  
+Mapa: ${report.scenario.mapSize}x (${report.scenario.maxPlayers} vagas, ${report.scenario.numberCount} números)<br>
+Jogadores: ${report.scenario.playerCount} (${report.scenario.botCount} bots, ${report.scenario.syntheticPlayerCount} simulados)<br>
 Ticks medidos: ${report.scenario.measuredTicks} (${report.scenario.simulatedDurationSec} s simulados)  
 Tempo real do diagnóstico: ${report.scenario.realDurationMs} ms
 
@@ -648,6 +741,17 @@ Tempo real do diagnóstico: ${report.scenario.realDurationMs} ms
 - p95: ${tick.p95} ms
 - p99: ${tick.p99} ms
 - máximo: ${tick.max} ms
+
+## Snapshots
+
+- habilitados: ${report.snapshots.enabled ? "sim" : "não"}
+- lotes medidos: ${report.snapshots.batchCount}
+- construção por cliente p95/p99: ${report.snapshots.buildDurationMs.p95} / ${report.snapshots.buildDurationMs.p99} ms
+- serialização por cliente p95/p99: ${report.snapshots.serializeDurationMs.p95} / ${report.snapshots.serializeDurationMs.p99} ms
+- compressão por cliente p95/p99: ${report.snapshots.compressionDurationMs.p95} / ${report.snapshots.compressionDurationMs.p99} ms
+- payload bruto por cliente p95/p99: ${formatBytes(report.snapshots.payloadBytes.p95)} / ${formatBytes(report.snapshots.payloadBytes.p99)}
+- payload comprimido por cliente p95/p99: ${formatBytes(report.snapshots.compressedPayloadBytes.p95)} / ${formatBytes(report.snapshots.compressedPayloadBytes.p99)}
+- vazão agregada bruta/comprimida: ${formatBytes(report.snapshots.payloadBytesPerSec)}/s / ${formatBytes(report.snapshots.compressedPayloadBytesPerSec)}/s
 
 ## Memória
 
@@ -688,6 +792,10 @@ function printSummary(report, outputPath) {
     console.log("");
     console.log(`BOTS soak complete: ${report.scenario.measuredTicks} measured ticks.`);
     console.log(`Tick p95/p99/max: ${tick.p95} / ${tick.p99} / ${tick.max} ms.`);
+    if (report.snapshots.enabled) {
+        console.log(`Snapshot build p95/p99: ${report.snapshots.buildDurationMs.p95} / ${report.snapshots.buildDurationMs.p99} ms per client.`);
+        console.log(`Snapshot aggregate payload raw/compressed: ${formatBytes(report.snapshots.payloadBytesPerSec)}/s / ${formatBytes(report.snapshots.compressedPayloadBytesPerSec)}/s.`);
+    }
     console.log(`Heap slope: ${formatBytes(report.memory.heapUsedSlopeBytesPer1000Ticks)} per 1000 ticks.`);
     console.log(`Territory/trail max points: ${report.geometry.territoryPoints.max} / ${report.geometry.trailPoints.max}.`);
     console.log(`Report: ${resolvedOutput}`);
@@ -719,21 +827,65 @@ function parseArguments(argumentsList) {
 
     const ticks = getPositiveInteger(values.get("ticks"), 18000, "ticks");
     const warmupTicks = getNonNegativeInteger(values.get("warmup"), 1800, "warmup");
+    const botCount = getNonNegativeInteger(
+        values.get("bots"),
+        config.menuBackground.botCount,
+        "bots"
+    );
+    const playerCount = getPositiveInteger(
+        values.get("players"),
+        Math.max(1, botCount),
+        "players"
+    );
+    const mapSize = getMapSize(values.get("map-size"));
+    const runtimeConfig = createRoomRuntimeConfig({
+        botCount,
+        mapSize,
+        maxPlayers: playerCount
+    });
+
+    if (botCount > playerCount) {
+        throw new Error("--bots cannot exceed --players.");
+    }
+    if (runtimeConfig.customOptions.maxPlayers < playerCount) {
+        throw new Error(
+            `--players cannot exceed ${runtimeConfig.customOptions.maxPlayers} for a ${mapSize}x map.`
+        );
+    }
 
     return {
-        botCount: getPositiveInteger(values.get("bots"), config.menuBackground.botCount, "bots"),
+        botCount,
         difficulty: getDifficulty(values.get("difficulty") || config.menuBackground.difficulty),
+        mapSize,
         output: values.get("output") || defaultOutput,
         overlapEvery: getPositiveInteger(values.get("overlap-every"), 600, "overlap-every"),
         pace: getBoolean(values.get("pace"), true, "pace"),
+        playerCount,
         roomCode: String(config.menuBackground.roomCode || "BOTS"),
+        runtimeMaxPlayers: runtimeConfig.customOptions.maxPlayers,
+        runtimeNumberCount: runtimeConfig.numbers.maxNumbers,
         sampleEvery: getPositiveInteger(values.get("sample-every"), 60, "sample-every"),
         seed: getSeed(values.get("seed"), 0xb075500),
+        snapshots: getBoolean(values.get("snapshots"), false, "snapshots"),
         ticks,
         topOutliers: getPositiveInteger(values.get("top"), 10, "top"),
         warmupTicks,
         yieldEvery: getPositiveInteger(values.get("yield-every"), 1, "yield-every")
     };
+}
+
+function getMapSize(value) {
+    if (value === undefined) {
+        return 1;
+    }
+
+    const parsed = Number(value);
+    const supported = config.roomCustomOptions.multipliers;
+
+    if (!supported.includes(parsed)) {
+        throw new Error(`--map-size must be one of: ${supported.join(", ")}.`);
+    }
+    return parsed;
 }
 
 function getPositiveInteger(value, fallback, name) {

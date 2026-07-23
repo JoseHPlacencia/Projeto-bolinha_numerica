@@ -32,9 +32,23 @@ const {
  * acknowledgement. Protocol invariants are documented in .ai/docs/SNAPSHOT_PROTOCOL.md.
  */
 
-function createSnapshot(players, territories, viewerId = null, clientState = createClientSnapshotState(), numberSystem = null, runtimeConfig = null) {
+function createSnapshot(
+    players,
+    territories,
+    viewerId = null,
+    clientState = createClientSnapshotState(),
+    numberSystem = null,
+    runtimeConfig = null,
+    sharedFrame = null
+) {
     const viewer = viewerId ? players.get(viewerId) : null;
-    const now = getServerTime();
+    const roomFrame = sharedFrame || createSnapshotSharedFrame(
+        players,
+        territories,
+        numberSystem,
+        runtimeConfig
+    );
+    const now = roomFrame.time;
     ensureVisibilityState(clientState);
     const interestBounds = createInterestBounds(viewer, config.network.interestMargin);
     const exitInterestBounds = createInterestBounds(viewer, getInterestExitMargin());
@@ -45,7 +59,8 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         interestBounds,
         exitInterestBounds,
         clientState.territoryVisibility,
-        now
+        now,
+        roomFrame.territoryBounds
     );
     const trailIds = getVisibleTrailIds(
         players,
@@ -53,7 +68,8 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         interestBounds,
         exitInterestBounds,
         clientState.trailVisibility,
-        now
+        now,
+        roomFrame.trailBounds
     );
     const payloadBudget = createSnapshotPayloadBudget();
 
@@ -87,7 +103,7 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
     const snapshot = {
         schema: 2,
         time: now,
-        players: serializePlayerPositions(players, playerIds),
+        players: serializePlayerPositions(players, playerIds, roomFrame.playerPositions),
         playerInfo: serializeChangedPlayerInfo(players, playerIds, clientState, now),
         territoryIds: territoryChanges.territoryIds,
         territoryVersions: territoryChanges.territoryVersions,
@@ -99,10 +115,10 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
         removedTrailIds: Object.keys(trailRemovals),
         trailRemovals,
         mode: config.gameMode.mode,
-        roomConfig: serializeRoomSettings(runtimeConfig),
+        roomConfig: roomFrame.roomConfig,
         catchStatus: serializeCatchStatus(players, viewerId, runtimeConfig, now),
-        leaderboard: createLeaderboard(players, territories, runtimeConfig),
-        numbers: numberSystem ? numberSystem.serialize() : null
+        leaderboard: roomFrame.leaderboard,
+        numbers: roomFrame.numbers
     };
 
     const payloadBudgetDiagnostics = serializeSnapshotPayloadBudget(payloadBudget);
@@ -119,7 +135,65 @@ function createSnapshot(players, territories, viewerId = null, clientState = cre
     return snapshot;
 }
 
-function serializePlayerPositions(players, playerIds) {
+/**
+ * Serializes room-wide values once for every snapshot-loop tick. The returned
+ * values are owned by this frame and must be treated as read-only because every
+ * socket snapshot created from it shares the same references.
+ */
+function createSnapshotSharedFrame(players, territories, numberSystem = null, runtimeConfig = null) {
+    return Object.freeze({
+        time: getServerTime(),
+        roomConfig: serializeRoomSettings(runtimeConfig),
+        leaderboard: createLeaderboard(players, territories, runtimeConfig),
+        numbers: numberSystem ? numberSystem.serialize() : null,
+        playerPositions: createPackedPlayerPositions(players),
+        territoryBounds: createTerritoryBounds(territories),
+        trailBounds: createTrailBounds(players)
+    });
+}
+
+function createPackedPlayerPositions(players) {
+    const positions = new Map();
+
+    for (const player of players.values()) {
+        positions.set(player.id, [
+            packCoordinate(player.x),
+            packCoordinate(player.y),
+            packAngle(player.angle)
+        ]);
+    }
+
+    return positions;
+}
+
+function createTerritoryBounds(territories) {
+    const bounds = new Map();
+
+    for (const [territoryId, territory] of territories.entries()) {
+        bounds.set(
+            territoryId,
+            territory && territory.bounds
+                ? territory.bounds
+                : getPolygonBounds(territory && territory.polygon)
+        );
+    }
+
+    return bounds;
+}
+
+function createTrailBounds(players) {
+    const bounds = new Map();
+
+    for (const player of players.values()) {
+        if (hasAnyTrail(player)) {
+            bounds.set(player.id, getTrailBounds(player));
+        }
+    }
+
+    return bounds;
+}
+
+function serializePlayerPositions(players, playerIds, packedPositions = null) {
     const serializedPlayers = {};
 
     for (const playerId of playerIds) {
@@ -129,11 +203,13 @@ function serializePlayerPositions(players, playerIds) {
             continue;
         }
 
-        serializedPlayers[player.id] = [
-            packCoordinate(player.x),
-            packCoordinate(player.y),
-            packAngle(player.angle)
-        ];
+        serializedPlayers[player.id] = packedPositions && packedPositions.has(player.id)
+            ? packedPositions.get(player.id)
+            : [
+                packCoordinate(player.x),
+                packCoordinate(player.y),
+                packAngle(player.angle)
+            ];
     }
 
     return serializedPlayers;
@@ -183,7 +259,12 @@ function createLeaderboard(players, territories, runtimeConfig = null) {
     return [...players.values()]
         .map(player => {
             const territory = territories.get(player.id);
-            const area = territory ? Math.max(0, calculatePolygonArea(territory.polygon)) : 0;
+            const cachedArea = territory && territory.area;
+            const area = territory
+                ? Math.max(0, Number.isFinite(cachedArea)
+                    ? cachedArea
+                    : calculatePolygonArea(territory.polygon))
+                : 0;
 
             return {
                 id: player.id,
@@ -306,12 +387,15 @@ function getVisibleTerritoryIds(
     interestBounds,
     exitInterestBounds,
     visibilityState,
-    now
+    now,
+    sharedBounds = null
 ) {
     const territoryIds = [];
 
     for (const [territoryId, territory] of territories.entries()) {
-        const bounds = getPolygonBounds(territory.polygon);
+        const bounds = sharedBounds && sharedBounds.has(territoryId)
+            ? sharedBounds.get(territoryId)
+            : getPolygonBounds(territory.polygon);
 
         if (shouldRetainVisibleEntity(
             territoryId,
@@ -334,7 +418,8 @@ function getVisibleTrailIds(
     interestBounds,
     exitInterestBounds,
     visibilityState,
-    now
+    now,
+    sharedBounds = null
 ) {
     const trailIds = [];
 
@@ -344,7 +429,9 @@ function getVisibleTrailIds(
             continue;
         }
 
-        const bounds = getTrailBounds(player);
+        const bounds = sharedBounds && sharedBounds.has(player.id)
+            ? sharedBounds.get(player.id)
+            : getTrailBounds(player);
 
         if (shouldRetainVisibleEntity(
             player.id,
@@ -500,5 +587,6 @@ function clamp(value, min, max) {
 module.exports = {
     cloneClientSnapshotState,
     createClientSnapshotState,
-    createSnapshot
+    createSnapshot,
+    createSnapshotSharedFrame
 };
