@@ -62,6 +62,7 @@ function createRoom(io, options = {}) {
         difficultyKey,
         runtimeConfig.numbers
     );
+    const snapshotRate = resolveRoomSnapshotRate(roomCode, isSystemRoom);
 
     const room = {
         code: roomCode,
@@ -78,6 +79,7 @@ function createRoom(io, options = {}) {
         gameLoopInterval: null,
         hiddenFromList: Boolean(options.hiddenFromList),
         snapshotLoopInterval: null,
+        snapshotRate,
         isPrivate,
         isSystemRoom,
         allowBots: targetBotCount > 0,
@@ -158,7 +160,16 @@ function createRoom(io, options = {}) {
             }
         }
     );
-    room.snapshotLoopInterval = startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig, room.diagnostics);
+    room.snapshotLoopInterval = startSnapshotLoop(
+        io,
+        players,
+        territories,
+        roomCode,
+        numberSystem,
+        runtimeConfig,
+        room.diagnostics,
+        { snapshotRate: room.snapshotRate }
+    );
 
     rooms.set(roomCode, room);
     return { success: true, room };
@@ -479,6 +490,17 @@ function normalizeRoomDifficulty(rawDifficulty) {
     return difficulty === "easy" || difficulty === "hard" ? difficulty : "medium";
 }
 
+function resolveRoomSnapshotRate(roomCode, isSystemRoom) {
+    const normalizedRoomCode = String(roomCode || "").trim().toUpperCase();
+    const backgroundRoomCode = String(
+        config.menuBackground.roomCode || "BOTS"
+    ).trim().toUpperCase();
+
+    return isSystemRoom && normalizedRoomCode === backgroundRoomCode
+        ? config.menuBackground.snapshotRate
+        : config.loop.snapshotRate;
+}
+
 module.exports = {
     createBackgroundRoom,
     createRoom,
@@ -487,6 +509,7 @@ module.exports = {
     joinRoom,
     leaveRoom,
     listRooms,
+    resolveRoomSnapshotRate,
     destroyRoom,
     rooms
 };

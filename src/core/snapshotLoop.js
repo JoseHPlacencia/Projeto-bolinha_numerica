@@ -27,11 +27,22 @@ const {
     getTerritoryOverlapRepairQueueDiagnostics
 } = require("../state/territories");
 
-function startSnapshotLoop(io, players, territories, roomCode, numberSystem, runtimeConfig = null, roomDiagnostics = null) {
-    const intervalMs = 1000 / config.loop.snapshotRate;
+function startSnapshotLoop(
+    io,
+    players,
+    territories,
+    roomCode,
+    numberSystem,
+    runtimeConfig = null,
+    roomDiagnostics = null,
+    options = {}
+) {
+    const snapshotRate = resolveSnapshotRate(options.snapshotRate);
+    const intervalMs = 1000 / snapshotRate;
     const loopDiagnostics = {
         expectedIntervalMs: intervalMs,
         lastTickAt: null,
+        snapshotRate,
         tick: 0,
         tickIntervalMs: null,
         tickDriftMs: null
@@ -50,6 +61,12 @@ function startSnapshotLoop(io, players, territories, roomCode, numberSystem, run
 
         sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig, loopDiagnostics, roomDiagnostics);
     }, intervalMs);
+}
+
+function resolveSnapshotRate(rawSnapshotRate) {
+    return Number.isInteger(rawSnapshotRate) && rawSnapshotRate > 0
+        ? rawSnapshotRate
+        : config.loop.snapshotRate;
 }
 
 function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeConfig = null, loopDiagnostics = null, roomDiagnostics = null) {
@@ -594,6 +611,7 @@ function finiteOrNull(value) {
 
 module.exports = startSnapshotLoop;
 module.exports.startSnapshotLoop = startSnapshotLoop;
+module.exports.resolveSnapshotRate = resolveSnapshotRate;
 module.exports.acknowledgeReliableSnapshot = acknowledgeReliableSnapshot;
 module.exports.assignSnapshotSequence = assignSnapshotSequence;
 module.exports.invalidateSnapshotCache = invalidateSnapshotCache;

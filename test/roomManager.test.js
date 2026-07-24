@@ -23,6 +23,7 @@ test("background BOTS room restarts when remaining bots are below half of the ta
         const createResult = roomManager.createBackgroundRoom(io);
 
         assert.equal(createResult.success, true);
+        assert.equal(createResult.room.snapshotRate, config.menuBackground.snapshotRate);
         assert.equal(getBotPlayerCount(createResult.room.players), config.menuBackground.botCount);
 
         const firstRoom = createResult.room;
@@ -71,6 +72,8 @@ test("room population updates do not replace the public directory with the BOTS 
 
         assert.equal(backgroundResult.success, true);
         assert.equal(regularResult.success, true);
+        assert.equal(backgroundResult.room.snapshotRate, config.menuBackground.snapshotRate);
+        assert.equal(regularResult.room.snapshotRate, config.loop.snapshotRate);
 
         io.emitted.length = 0;
         roomManager.handleRoomPopulationChanged(io, backgroundRoomCode);

@@ -1,4 +1,7 @@
 const { resolveServerCoreCount } = require("./serverRuntime");
+const {
+    resolveMenuBackgroundSnapshotRate
+} = require("./menuBackgroundRuntime");
 
 const socketTransports = Object.freeze(["polling", "websocket"]);
 
@@ -372,7 +375,9 @@ const menuBackground = Object.freeze({
     enabled: true,
     roomCode: "BOTS",
     difficulty: "hard",
-    botCount: 8
+    botCount: 8,
+    // The menu is cosmetic and shares the gateway with every spectator.
+    snapshotRate: resolveMenuBackgroundSnapshotRate()
 });
 
 module.exports = Object.freeze({
