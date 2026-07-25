@@ -1,4 +1,5 @@
 const { resolveServerCoreCount } = require("./serverRuntime");
+const { resolveSocketCompressionLevel } = require("./socketRuntime");
 const {
     resolveMenuBackgroundSnapshotRate
 } = require("./menuBackgroundRuntime");
@@ -38,7 +39,7 @@ const socket = Object.freeze({
     perMessageDeflate: Object.freeze({
         threshold: 256,
         zlibDeflateOptions: Object.freeze({
-            level: 6
+            level: resolveSocketCompressionLevel()
         })
     })
 });

@@ -107,4 +107,8 @@ function logServerStart() {
         `Runtime allocation: ${config.server.coreCount} cores `
         + `(gateway + BOTS, ${config.server.roomWorkerCount} room workers)`
     );
+    console.log(
+        "Socket compression: perMessageDeflate "
+        + `level ${config.socket.perMessageDeflate.zlibDeflateOptions.level}`
+    );
 }
