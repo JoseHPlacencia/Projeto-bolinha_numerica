@@ -2,6 +2,12 @@ const config = require("../config/gameConfig");
 const { invalidateSnapshotCache } = require("./snapshotLoop");
 const { resetSocketSnapshotState } = require("./snapshotState");
 const { createRateLimiter } = require("../utils/rateLimiter");
+const {
+    disableGatewayTransportDiagnostics,
+    recordGatewaySocketEmission,
+    setGatewayTransportDiagnosticsEnabled,
+    takeGatewayTransportDiagnostics
+} = require("./gatewayTransportDiagnostics");
 
 function registerDistributedSocket(io, coordinator) {
     coordinator.on("roomsChanged", () => {
@@ -35,6 +41,7 @@ function registerDistributedSocket(io, coordinator) {
         registerMenuBackgroundEvents(socket, io, coordinator);
 
         socket.on("disconnect", () => {
+            disableGatewayTransportDiagnostics(socket);
             leaveMenuBackground(socket);
             leaveDistributedRoom(socket, coordinator).catch(error => {
                 console.error("Failed to remove disconnected player from room worker:", error);
@@ -223,6 +230,7 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
 
         socket.data.networkDiagnosticsEnabled = enabled;
         socket.data.captureOverlapAuditEnabled = captureOverlapAudit;
+        setGatewayTransportDiagnosticsEnabled(socket, enabled);
         coordinator.updateConnectionData(socket, {
             captureOverlapAuditEnabled: captureOverlapAudit,
             networkDiagnosticsEnabled: enabled
@@ -232,6 +240,7 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
             acknowledge({
                 captureOverlapAudit,
                 enabled,
+                gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
                 serverTime: Date.now(),
                 transport: getSocketTransportName(socket),
                 workerDiagnostics: getWorkerDiagnostics(coordinator)
@@ -245,6 +254,7 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
             clientSentAt: rawPayload && rawPayload.clientSentAt,
             captureOverlapAudit: Boolean(socket.data.captureOverlapAuditEnabled),
             diagnosticsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
+            gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
             serverTime: Date.now(),
             transport: getSocketTransportName(socket),
             workerDiagnostics: getWorkerDiagnostics(coordinator)
@@ -363,31 +373,37 @@ function forwardWorkerEvent(io, coordinator, message) {
 function emitToSocket(socket, coordinator, workerId, emission, args) {
     if (emission.acknowledgementId) {
         if (emission.timeoutMs && typeof socket.timeout === "function") {
-            socket.timeout(emission.timeoutMs).emit(
-                emission.event,
-                ...args,
-                (error, acknowledgement) => {
+            recordGatewaySocketEmission(socket, emission.event, emission, () => (
+                socket.timeout(emission.timeoutMs).emit(
+                    emission.event,
+                    ...args,
+                    (error, acknowledgement) => {
+                        coordinator.acknowledge(workerId, {
+                            acknowledgement,
+                            acknowledgementId: emission.acknowledgementId,
+                            error: error ? { message: error.message || String(error) } : null
+                        });
+                    }
+                )
+            ));
+        } else {
+            recordGatewaySocketEmission(socket, emission.event, emission, () => (
+                socket.emit(emission.event, ...args, acknowledgement => {
                     coordinator.acknowledge(workerId, {
                         acknowledgement,
                         acknowledgementId: emission.acknowledgementId,
-                        error: error ? { message: error.message || String(error) } : null
+                        error: null
                     });
-                }
-            );
-        } else {
-            socket.emit(emission.event, ...args, acknowledgement => {
-                coordinator.acknowledge(workerId, {
-                    acknowledgement,
-                    acknowledgementId: emission.acknowledgementId,
-                    error: null
-                });
-            });
+                })
+            ));
         }
         return;
     }
 
     const emitter = emission.volatile && socket.volatile ? socket.volatile : socket;
-    emitter.emit(emission.event, ...args);
+    recordGatewaySocketEmission(socket, emission.event, emission, () => (
+        emitter.emit(emission.event, ...args)
+    ));
 }
 
 function acknowledgeMissingSocket(coordinator, workerId, emission) {

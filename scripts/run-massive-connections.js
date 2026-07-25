@@ -665,9 +665,79 @@ function createMassiveConnectionDiagnostic(options, plan) {
 
             if (currentStage) {
                 currentStage.series.pingRttMs.add(rtt);
+                recordGatewayTransportMetrics(
+                    currentStage,
+                    response && response.gatewayDiagnostics
+                );
                 recordWorkerIpcMetrics(currentStage, response && response.workerDiagnostics);
             }
         });
+    }
+
+    function recordGatewayTransportMetrics(stage, diagnostics) {
+        if (!diagnostics || typeof diagnostics !== "object") return;
+
+        const counters = diagnostics.counters || {};
+        const bytes = diagnostics.bytes || {};
+        stage.events.gatewayCompressionCalls += finiteCounter(
+            counters.compressionCallCount
+        );
+        stage.events.gatewayCompressionCount += finiteCounter(
+            counters.compressionCount
+        );
+        stage.events.gatewayCompressionErrors += finiteCounter(
+            counters.compressionErrorCount
+        );
+        stage.events.gatewaySnapshotEmitAttempts += finiteCounter(
+            counters.snapshotEmitAttempts
+        );
+        stage.events.gatewayTransportBusyPeriods += finiteCounter(
+            counters.transportBusyPeriods
+        );
+        stage.events.gatewayUnclassifiedCompressions += finiteCounter(
+            counters.unclassifiedCompressionCount
+        );
+        stage.events.gatewayVolatileDrops += finiteCounter(
+            counters.volatileDropCount
+        );
+        stage.events.gatewayCompressedSnapshotBytes += finiteCounter(
+            bytes.compressedSnapshotBytes
+        );
+        stage.events.gatewayPhysicalBytesWritten += finiteCounter(
+            bytes.physicalBytesWritten
+        );
+        stage.events.gatewayUncompressedSnapshotBytes += finiteCounter(
+            bytes.uncompressedSnapshotBytes
+        );
+
+        const compressionLevel = Number(diagnostics.compressionLevel);
+        if (Number.isInteger(compressionLevel)) {
+            stage.gatewayCompressionLevels.add(compressionLevel);
+        }
+        if (typeof diagnostics.transport === "string" && diagnostics.transport) {
+            stage.gatewayTransports.add(diagnostics.transport);
+        }
+
+        const samples = diagnostics.samples || {};
+        const mappings = {
+            compressionExecutionMs: "gatewayCompressionExecutionMs",
+            compressionQueueMs: "gatewayCompressionQueueMs",
+            compressionTotalMs: "gatewayCompressionTotalMs",
+            emitDurationMs: "gatewayEmitDurationMs",
+            engineWriteBufferLength: "gatewayEngineWriteBufferLength",
+            senderBufferedBytes: "gatewaySenderBufferedBytes",
+            senderQueueLength: "gatewaySenderQueueLength",
+            transportBusyDurationMs: "gatewayTransportBusyDurationMs",
+            webSocketBufferedBytes: "gatewayWebSocketBufferedBytes"
+        };
+
+        for (const [sourceName, seriesName] of Object.entries(mappings)) {
+            const values = samples[sourceName];
+            if (!Array.isArray(values)) continue;
+            for (const value of values) {
+                stage.series[seriesName].add(value);
+            }
+        }
     }
 
     function recordWorkerIpcMetrics(stage, workerDiagnostics) {
@@ -757,6 +827,16 @@ function createMassiveConnectionDiagnostic(options, plan) {
             countersAtStart: { ...counters },
             events: {
                 gameOvers: 0,
+                gatewayCompressedSnapshotBytes: 0,
+                gatewayCompressionCalls: 0,
+                gatewayCompressionCount: 0,
+                gatewayCompressionErrors: 0,
+                gatewayPhysicalBytesWritten: 0,
+                gatewaySnapshotEmitAttempts: 0,
+                gatewayTransportBusyPeriods: 0,
+                gatewayUnclassifiedCompressions: 0,
+                gatewayUncompressedSnapshotBytes: 0,
+                gatewayVolatileDrops: 0,
                 missingSnapshotSequences: 0,
                 monitorDiagnosticGaps: 0,
                 pingTimeouts: 0,
@@ -778,6 +858,8 @@ function createMassiveConnectionDiagnostic(options, plan) {
             health: [],
             healthFailures: new Map(),
             gamePhaseSeries: new Map(),
+            gatewayCompressionLevels: new Set(),
+            gatewayTransports: new Set(),
             generatorAtStart: createGeneratorSample(),
             plan: stagePlan,
             rampDurationMs,
@@ -792,18 +874,27 @@ function createMassiveConnectionDiagnostic(options, plan) {
         return {
             activePlayers: new MetricSeries({ sampleLimit: 10000, seed: seed ^ 1 }),
             gameTickMs: new MetricSeries({ seed: seed ^ 2 }),
-            loopDriftMs: new MetricSeries({ seed: seed ^ 3 }),
-            payloadBytes: new MetricSeries({ seed: seed ^ 4 }),
-            pingRttMs: new MetricSeries({ seed: seed ^ 5 }),
-            serverSendIntervalMs: new MetricSeries({ seed: seed ^ 6 }),
-            snapshotBuildMs: new MetricSeries({ seed: seed ^ 7 }),
-            snapshotInterArrivalMs: new MetricSeries({ seed: seed ^ 8 }),
-            snapshotLatencyMs: new MetricSeries({ seed: seed ^ 9 }),
-            snapshotStateDraftMs: new MetricSeries({ seed: seed ^ 10 }),
-            snapshotStateCommitMs: new MetricSeries({ seed: seed ^ 11 }),
-            snapshotStateTerritoryPointCount: new MetricSeries({ seed: seed ^ 12 }),
-            workerIpcEventsPerBatch: new MetricSeries({ seed: seed ^ 13 }),
-            workerIpcAcknowledgementsPerBatch: new MetricSeries({ seed: seed ^ 14 })
+            gatewayCompressionExecutionMs: new MetricSeries({ seed: seed ^ 3 }),
+            gatewayCompressionQueueMs: new MetricSeries({ seed: seed ^ 4 }),
+            gatewayCompressionTotalMs: new MetricSeries({ seed: seed ^ 5 }),
+            gatewayEmitDurationMs: new MetricSeries({ seed: seed ^ 6 }),
+            gatewayEngineWriteBufferLength: new MetricSeries({ seed: seed ^ 7 }),
+            gatewaySenderBufferedBytes: new MetricSeries({ seed: seed ^ 8 }),
+            gatewaySenderQueueLength: new MetricSeries({ seed: seed ^ 9 }),
+            gatewayTransportBusyDurationMs: new MetricSeries({ seed: seed ^ 10 }),
+            gatewayWebSocketBufferedBytes: new MetricSeries({ seed: seed ^ 11 }),
+            loopDriftMs: new MetricSeries({ seed: seed ^ 12 }),
+            payloadBytes: new MetricSeries({ seed: seed ^ 13 }),
+            pingRttMs: new MetricSeries({ seed: seed ^ 14 }),
+            serverSendIntervalMs: new MetricSeries({ seed: seed ^ 15 }),
+            snapshotBuildMs: new MetricSeries({ seed: seed ^ 16 }),
+            snapshotInterArrivalMs: new MetricSeries({ seed: seed ^ 17 }),
+            snapshotLatencyMs: new MetricSeries({ seed: seed ^ 18 }),
+            snapshotStateDraftMs: new MetricSeries({ seed: seed ^ 19 }),
+            snapshotStateCommitMs: new MetricSeries({ seed: seed ^ 20 }),
+            snapshotStateTerritoryPointCount: new MetricSeries({ seed: seed ^ 21 }),
+            workerIpcEventsPerBatch: new MetricSeries({ seed: seed ^ 22 }),
+            workerIpcAcknowledgementsPerBatch: new MetricSeries({ seed: seed ^ 23 })
         };
     }
 
@@ -873,6 +964,18 @@ function createMassiveConnectionDiagnostic(options, plan) {
             metrics.gamePhases[name] = series.summarize();
         }
         metrics.generator = summarizeGenerator(stage.generatorAtStart);
+        metrics.gatewayTransport = {
+            compressedToUncompressedRatio: stage.events.gatewayUncompressedSnapshotBytes > 0
+                ? round(
+                    stage.events.gatewayCompressedSnapshotBytes
+                    / stage.events.gatewayUncompressedSnapshotBytes
+                )
+                : null,
+            compressionLevels: [...stage.gatewayCompressionLevels].sort((left, right) => (
+                left - right
+            )),
+            transports: [...stage.gatewayTransports].sort()
+        };
         stage.events.snapshotSequenceLossRatio = round(
             calculateSequenceLossRatio(stage.events)
         );
@@ -1313,7 +1416,10 @@ function createMarkdownReport(report) {
         `| ${stage.targetPlayers} | ${stage.roomCount} | ${stage.metrics.activePlayers.min ?? "-"} `
         + `| ${stage.metrics.pingRttMs.p99 ?? "-"} | `
         + `${stage.metrics.snapshotInterArrivalMs.p99 ?? "-"} | `
-        + `${stage.metrics.gameTickMs.p99 ?? "-"} | ${stage.assessment.status} |`
+        + `${stage.metrics.gameTickMs.p99 ?? "-"} | `
+        + `${stage.metrics.gatewayCompressionTotalMs.p99 ?? "-"} | `
+        + `${stage.metrics.gatewayTransportBusyDurationMs.p99 ?? "-"} | `
+        + `${stage.assessment.status} |`
     )).join("\n");
 
     return `# Diagnóstico de conexões massivas
@@ -1325,9 +1431,9 @@ Limite por arena: ${report.plan.arenaCapacity}
 Limite planejado: ${report.plan.maximumPlayers} jogadores em ${report.plan.maxRooms} arenas  
 Interrupção automática: ${report.abortReason || "não"}
 
-| Jogadores | Arenas | Ativos mín. | RTT p99 ms | Snapshot p99 ms | Tick p99 ms | Estado |
-| ---: | ---: | ---: | ---: | ---: | ---: | --- |
-${rows || "| - | - | - | - | - | - | sem estágios concluídos |"}
+| Jogadores | Arenas | Ativos mín. | RTT p99 ms | Snapshot p99 ms | Tick p99 ms | Zlib total p99 ms | Transporte ocupado p99 ms | Estado |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+${rows || "| - | - | - | - | - | - | - | - | sem estágios concluídos |"}
 
 O gerador cria jogadores reais do protocolo, confirma snapshots confiáveis, envia
 viewport e mudanças graduais de direção, e distribui a carga sem ultrapassar o
@@ -1343,6 +1449,9 @@ function printSummary(report, output) {
             + `RTT p99 ${stage.metrics.pingRttMs.p99 ?? "n/a"} ms, `
             + `snapshot p99 ${stage.metrics.snapshotInterArrivalMs.p99 ?? "n/a"} ms, `
             + `tick p99 ${stage.metrics.gameTickMs.p99 ?? "n/a"} ms, `
+            + `zlib p99 ${stage.metrics.gatewayCompressionTotalMs.p99 ?? "n/a"} ms, `
+            + `transport busy p99 `
+            + `${stage.metrics.gatewayTransportBusyDurationMs.p99 ?? "n/a"} ms, `
             + `${stage.assessment.status}.\n`
         );
     }

@@ -5,6 +5,11 @@ const { initializeRoomPlayer } = require("./roomPlayer");
 const { applyPlayerInput } = require("./playerInput");
 const { createRateLimiter } = require("../utils/rateLimiter");
 const { redirectSpectatorsAfterPlayerExit } = require("../systems/spectatorSystem");
+const {
+    disableGatewayTransportDiagnostics,
+    setGatewayTransportDiagnosticsEnabled,
+    takeGatewayTransportDiagnostics
+} = require("./gatewayTransportDiagnostics");
 
 function registerSocket(io, roomManager) {
     if (roomManager && roomManager.isDistributedRoomCoordinator === true) {
@@ -21,6 +26,7 @@ function registerSocket(io, roomManager) {
         registerMenuBackgroundEvents(socket, io, roomManager);
 
         socket.on("disconnect", () => {
+            disableGatewayTransportDiagnostics(socket);
             const roomCode = socket.data && socket.data.roomCode;
             leaveMenuBackground(socket);
 
@@ -60,11 +66,13 @@ function registerNetworkDiagnosticsEvents(socket) {
             && rawOptions.captureOverlapAudit === true;
         socket.data.networkDiagnosticsEnabled = enabled;
         socket.data.captureOverlapAuditEnabled = captureOverlapAudit;
+        setGatewayTransportDiagnosticsEnabled(socket, enabled);
 
         if (typeof acknowledge === "function") {
             acknowledge({
                 captureOverlapAudit,
                 enabled,
+                gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
                 serverTime: Date.now(),
                 transport: getSocketTransportName(socket)
             });
@@ -78,6 +86,7 @@ function registerNetworkDiagnosticsEvents(socket) {
             clientSentAt: rawPayload && rawPayload.clientSentAt,
             captureOverlapAudit: Boolean(socket.data.captureOverlapAuditEnabled),
             diagnosticsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
+            gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
             serverTime: Date.now(),
             transport: getSocketTransportName(socket)
         });
