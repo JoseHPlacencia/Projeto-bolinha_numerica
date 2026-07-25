@@ -1,5 +1,8 @@
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
-import { createSnapshotSocketAuth } from "./snapshotProtocol.js";
+import {
+    RELIABLE_GAME_STATE_EVENT,
+    createSnapshotSocketAuth
+} from "./snapshotProtocol.js";
 import { createWorldRenderer } from "./worldRenderer.js";
 import { createRenderFrameLimiter } from "./renderSettings.js";
 
@@ -61,17 +64,27 @@ export function createMenuBackground(gameConfig) {
         }
     });
 
+    socket.on(RELIABLE_GAME_STATE_EVENT, (snapshot, acknowledge) => {
+        const snapshotFollowId = getSnapshotFollowId(snapshot);
+        if (snapshotFollowId) setFollowId(snapshotFollowId);
+
+        const applyResult = processSnapshotSafely(snapshot);
+
+        acknowledgeSnapshot(acknowledge, applyResult);
+        if (applyResult && applyResult.applied === false) {
+            return;
+        }
+
+        renderer.processSnapshot(snapshot);
+    });
+
     socket.on("gameState", (snapshot, acknowledge) => {
         const snapshotFollowId = getSnapshotFollowId(snapshot);
         if (snapshotFollowId) setFollowId(snapshotFollowId);
 
         const applyResult = processSnapshotSafely(snapshot);
 
-        if (typeof acknowledge === "function") {
-            acknowledge(createSnapshotAcknowledgement(applyResult));
-        } else if (applyResult && applyResult.applied === false) {
-            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
-        }
+        acknowledgeSnapshot(acknowledge, applyResult);
 
         if (applyResult && applyResult.applied === false) {
             return;
@@ -253,6 +266,14 @@ export function createMenuBackground(gameConfig) {
 
         context.setTransform(1, 0, 0, 1, 0, 0);
         context.clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function acknowledgeSnapshot(acknowledge, applyResult) {
+        if (typeof acknowledge === "function") {
+            acknowledge(createSnapshotAcknowledgement(applyResult));
+        } else if (applyResult && applyResult.applied === false) {
+            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
+        }
     }
 
     function processSnapshotSafely(snapshot) {

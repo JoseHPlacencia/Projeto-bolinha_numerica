@@ -1,6 +1,7 @@
 const { performance } = require("node:perf_hooks");
 
 const config = require("../config/gameConfig");
+const { RELIABLE_GAME_STATE_EVENT } = require("./snapshotChannels");
 
 const PER_MESSAGE_DEFLATE_EXTENSION = "permessage-deflate";
 const states = new WeakMap();
@@ -58,7 +59,7 @@ function recordGatewaySocketEmission(socket, eventName, options, emit) {
     if (
         !state
         || !state.enabled
-        || eventName !== "gameState"
+        || !isSnapshotEventName(eventName)
         || typeof emit !== "function"
     ) {
         return typeof emit === "function" ? emit() : undefined;
@@ -71,12 +72,6 @@ function recordGatewaySocketEmission(socket, eventName, options, emit) {
     const writableBefore = !transport || transport.writable !== false;
 
     state.interval.counters.snapshotEmitAttempts++;
-    if (options && options.adaptiveCompressionBypass) {
-        state.interval.counters.adaptiveCompressionBypassCount++;
-        state.interval.bytes.bypassedSnapshotBytes += finiteNonNegative(
-            options.snapshotPayloadBytes
-        );
-    }
     if (volatile && !writableBefore) {
         state.interval.counters.volatileDropCount++;
     }
@@ -104,12 +99,12 @@ function takeGatewayTransportDiagnostics(socket) {
 
     return {
         bytes: {
-            bypassedSnapshotBytes: interval.bytes.bypassedSnapshotBytes,
             compressedSnapshotBytes: interval.bytes.compressedSnapshotBytes,
             physicalBytesWritten,
             uncompressedSnapshotBytes: interval.bytes.uncompressedSnapshotBytes
         },
         compressionLevel: config.socket.perMessageDeflate.zlibDeflateOptions.level,
+        compressionThreshold: config.socket.perMessageDeflate.threshold,
         counters: { ...interval.counters },
         instrumentation: describeInstrumentation(state),
         samples: copySamples(interval.samples),
@@ -121,16 +116,23 @@ function takeGatewayTransportDiagnostics(socket) {
 function describeInstrumentation(state) {
     const webSocket = state.transport && state.transport.socket;
     const extensions = webSocket && webSocket._extensions;
+    const compressionExtension = extensions
+        && extensions[PER_MESSAGE_DEFLATE_EXTENSION];
 
     return {
-        adaptiveSnapshotCompressionEnabled: Boolean(
-            config.socket.adaptiveSnapshotCompressionEnabled
-        ),
         compressionHooked: Boolean(state.compressionHook),
+        compressionParameters: compressionExtension
+            && compressionExtension.params
+            && typeof compressionExtension.params === "object"
+            ? { ...compressionExtension.params }
+            : null,
         extensionNames: extensions && typeof extensions === "object"
             ? Object.keys(extensions)
             : [],
-        hasWebSocket: Boolean(webSocket)
+        hasWebSocket: Boolean(webSocket),
+        serverNoContextTakeover: Boolean(
+            config.socket.perMessageDeflate.serverNoContextTakeover
+        )
     };
 }
 
@@ -345,7 +347,13 @@ function readPhysicalBytesWritten(transport) {
 
 function isSnapshotFrame(data) {
     const prefix = getFramePrefix(data);
-    return prefix.includes('["gameState",');
+    return prefix.includes('["gameState",')
+        || prefix.includes(`["${RELIABLE_GAME_STATE_EVENT}",`);
+}
+
+function isSnapshotEventName(eventName) {
+    return eventName === "gameState"
+        || eventName === RELIABLE_GAME_STATE_EVENT;
 }
 
 function getFramePrefix(data) {
@@ -368,12 +376,10 @@ function getByteLength(value) {
 function createInterval() {
     return {
         bytes: {
-            bypassedSnapshotBytes: 0,
             compressedSnapshotBytes: 0,
             uncompressedSnapshotBytes: 0
         },
         counters: {
-            adaptiveCompressionBypassCount: 0,
             compressionCallCount: 0,
             compressionCount: 0,
             compressionErrorCount: 0,
@@ -404,11 +410,6 @@ function copySamples(samples) {
 
 function addFiniteSample(target, value) {
     if (Number.isFinite(Number(value))) target.push(Number(value));
-}
-
-function finiteNonNegative(value) {
-    const numericValue = Number(value);
-    return Number.isFinite(numericValue) && numericValue >= 0 ? numericValue : 0;
 }
 
 module.exports = {

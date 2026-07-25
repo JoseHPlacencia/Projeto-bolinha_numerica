@@ -4,7 +4,8 @@ const {
     applySocketSnapshotProtocol,
     getSocketSnapshotSchema,
     normalizeSnapshotSchema,
-    supportsCachedSnapshotGlobals
+    supportsCachedSnapshotGlobals,
+    supportsSeparatedReliableState
 } = require("../src/core/snapshotProtocol");
 
 test("snapshot protocol keeps unadvertised clients on schema 2", () => {
@@ -18,7 +19,7 @@ test("snapshot protocol keeps unadvertised clients on schema 2", () => {
     assert.equal(supportsCachedSnapshotGlobals(socket.data.snapshotSchema), false);
 });
 
-test("snapshot protocol negotiates schema 3 and caps future versions", () => {
+test("snapshot protocol preserves schema 3 and caps future versions at schema 4", () => {
     const socket = {
         data: {},
         handshake: {
@@ -29,7 +30,9 @@ test("snapshot protocol negotiates schema 3 and caps future versions", () => {
     assert.equal(applySocketSnapshotProtocol(socket), 3);
     assert.equal(getSocketSnapshotSchema(socket), 3);
     assert.equal(supportsCachedSnapshotGlobals(socket.data.snapshotSchema), true);
-    assert.equal(normalizeSnapshotSchema(99), 3);
+    assert.equal(supportsSeparatedReliableState(socket.data.snapshotSchema), false);
+    assert.equal(normalizeSnapshotSchema(99), 4);
+    assert.equal(supportsSeparatedReliableState(4), true);
 });
 
 test("snapshot protocol rejects invalid or ambiguous schema values", () => {

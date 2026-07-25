@@ -11,6 +11,9 @@ const { MetricSeries } = require("./lib/metricSeries");
 const {
     MAX_SNAPSHOT_SCHEMA
 } = require("../src/core/snapshotProtocol");
+const {
+    RELIABLE_GAME_STATE_EVENT
+} = require("../src/core/snapshotChannels");
 
 const projectRoot = path.resolve(__dirname, "..");
 const defaultOutput = path.join(
@@ -270,6 +273,10 @@ function createMassiveConnectionDiagnostic(options, plan) {
         };
 
         socket.on("joinRoomResult", result => handleJoinResult(state, result));
+        socket.on(RELIABLE_GAME_STATE_EVENT, (snapshot, acknowledge) => {
+            if (typeof acknowledge === "function") acknowledge(ACKNOWLEDGEMENT);
+            handleSnapshot(state, snapshot);
+        });
         socket.on("gameState", (snapshot, acknowledge) => {
             if (typeof acknowledge === "function") acknowledge(ACKNOWLEDGEMENT);
             handleSnapshot(state, snapshot);
@@ -412,7 +419,10 @@ function createMassiveConnectionDiagnostic(options, plan) {
     }
 
     function enableNetworkDiagnostics(state) {
-        state.socket.emit("networkDiagnostics", { enabled: true }, response => {
+        state.socket.emit("networkDiagnostics", {
+            enabled: true,
+            snapshotDetails: false
+        }, response => {
             if (
                 response
                 && Number.isFinite(response.serverTime)
@@ -686,12 +696,6 @@ function createMassiveConnectionDiagnostic(options, plan) {
         const counters = diagnostics.counters || {};
         const bytes = diagnostics.bytes || {};
         const instrumentation = diagnostics.instrumentation || {};
-        stage.events.gatewayAdaptiveCompressionBypasses += finiteCounter(
-            counters.adaptiveCompressionBypassCount
-        );
-        stage.events.gatewayBypassedSnapshotBytes += finiteCounter(
-            bytes.bypassedSnapshotBytes
-        );
         stage.events.gatewayCompressionCalls += finiteCounter(
             counters.compressionCallCount
         );
@@ -727,15 +731,18 @@ function createMassiveConnectionDiagnostic(options, plan) {
         if (Number.isInteger(compressionLevel)) {
             stage.gatewayCompressionLevels.add(compressionLevel);
         }
+        const compressionThreshold = Number(diagnostics.compressionThreshold);
+        if (Number.isInteger(compressionThreshold)) {
+            stage.gatewayCompressionThresholds.add(compressionThreshold);
+        }
+        if (typeof instrumentation.serverNoContextTakeover === "boolean") {
+            stage.gatewayNoContextTakeoverModes.add(
+                instrumentation.serverNoContextTakeover
+            );
+        }
         if (typeof diagnostics.transport === "string" && diagnostics.transport) {
             stage.gatewayTransports.add(diagnostics.transport);
         }
-        if (typeof instrumentation.adaptiveSnapshotCompressionEnabled === "boolean") {
-            stage.gatewayAdaptiveCompressionModes.add(
-                instrumentation.adaptiveSnapshotCompressionEnabled
-            );
-        }
-
         const samples = diagnostics.samples || {};
         const mappings = {
             compressionExecutionMs: "gatewayCompressionExecutionMs",
@@ -845,8 +852,6 @@ function createMassiveConnectionDiagnostic(options, plan) {
             countersAtStart: { ...counters },
             events: {
                 gameOvers: 0,
-                gatewayAdaptiveCompressionBypasses: 0,
-                gatewayBypassedSnapshotBytes: 0,
                 gatewayCompressedSnapshotBytes: 0,
                 gatewayCompressionCalls: 0,
                 gatewayCompressionCount: 0,
@@ -878,8 +883,9 @@ function createMassiveConnectionDiagnostic(options, plan) {
             health: [],
             healthFailures: new Map(),
             gamePhaseSeries: new Map(),
-            gatewayAdaptiveCompressionModes: new Set(),
             gatewayCompressionLevels: new Set(),
+            gatewayCompressionThresholds: new Set(),
+            gatewayNoContextTakeoverModes: new Set(),
             gatewayTransports: new Set(),
             generatorAtStart: createGeneratorSample(),
             plan: stagePlan,
@@ -986,37 +992,27 @@ function createMassiveConnectionDiagnostic(options, plan) {
         }
         metrics.generator = summarizeGenerator(stage.generatorAtStart);
         metrics.gatewayTransport = {
-            adaptiveBypassRatio: stage.events.gatewaySnapshotEmitAttempts > 0
-                ? round(
-                    stage.events.gatewayAdaptiveCompressionBypasses
-                    / stage.events.gatewaySnapshotEmitAttempts
-                )
-                : null,
-            adaptiveCompressionEnabled: [...stage.gatewayAdaptiveCompressionModes],
-            compressedToUncompressedRatio: stage.events.gatewayUncompressedSnapshotBytes > 0
+            compressedPayloadRatio: stage.events.gatewayUncompressedSnapshotBytes > 0
                 ? round(
                     stage.events.gatewayCompressedSnapshotBytes
                     / stage.events.gatewayUncompressedSnapshotBytes
                 )
                 : null,
-            estimatedWireToLogicalRatio: (
-                stage.events.gatewayUncompressedSnapshotBytes
-                + stage.events.gatewayBypassedSnapshotBytes
-            ) > 0
+            compressedSnapshotRatio:
+                stage.events.gatewaySnapshotEmitAttempts > 0
                 ? round(
-                    (
-                        stage.events.gatewayCompressedSnapshotBytes
-                        + stage.events.gatewayBypassedSnapshotBytes
-                    )
-                    / (
-                        stage.events.gatewayUncompressedSnapshotBytes
-                        + stage.events.gatewayBypassedSnapshotBytes
-                    )
+                    stage.events.gatewayCompressionCount
+                    / stage.events.gatewaySnapshotEmitAttempts
                 )
                 : null,
             compressionLevels: [...stage.gatewayCompressionLevels].sort((left, right) => (
                 left - right
             )),
+            compressionThresholds: [...stage.gatewayCompressionThresholds].sort((
+                left,
+                right
+            ) => left - right),
+            serverNoContextTakeover: [...stage.gatewayNoContextTakeoverModes],
             transports: [...stage.gatewayTransports].sort()
         };
         stage.events.snapshotSequenceLossRatio = round(

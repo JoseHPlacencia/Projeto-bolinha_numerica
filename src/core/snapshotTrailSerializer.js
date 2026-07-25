@@ -9,7 +9,8 @@ const {
     shouldSendForcedFullSync
 } = require("./snapshotSerializationPrimitives");
 const {
-    supportsCompactTrailUpdates
+    supportsCompactTrailUpdates,
+    supportsSeparatedReliableState
 } = require("./snapshotProtocol");
 const {
     compactTrailUpdate
@@ -38,6 +39,12 @@ function serializeTrailUpdates(players, trailIds, viewerId, clientState, now, pa
         const knownTrail = clientState.trails.get(playerId);
         const includeKnownTrail = Boolean(knownTrail);
         const shouldSendFull = shouldSendFullTrail(player, stats, knownTrail, now);
+
+        if (shouldDeferTrailCheckpoint(clientState, knownTrail, shouldSendFull, now)) {
+            includedTrailIds.push(playerId);
+            continue;
+        }
+
         const serialized = shouldSendFull
             ? serializeFullTrail(player)
             : serializeTrailPatch(player, knownTrail);
@@ -46,7 +53,8 @@ function serializeTrailUpdates(players, trailIds, viewerId, clientState, now, pa
         if (!shouldSendFull && getTrailUpdatePointCount(update) === 0) {
             clientState.trails.set(playerId, {
                 ...serialized.state,
-                lastFullSentAt: knownTrail.lastFullSentAt
+                lastFullSentAt: knownTrail.lastFullSentAt,
+                lastUpdateSentAt: knownTrail.lastUpdateSentAt
             });
             includedTrailIds.push(playerId);
             continue;
@@ -66,7 +74,8 @@ function serializeTrailUpdates(players, trailIds, viewerId, clientState, now, pa
             : update;
         clientState.trails.set(playerId, {
             ...serialized.state,
-            lastFullSentAt: shouldSendFull ? now : knownTrail.lastFullSentAt
+            lastFullSentAt: shouldSendFull ? now : knownTrail.lastFullSentAt,
+            lastUpdateSentAt: now
         });
         includedTrailIds.push(playerId);
     }
@@ -75,6 +84,23 @@ function serializeTrailUpdates(players, trailIds, viewerId, clientState, now, pa
         trailIds: includedTrailIds,
         trails: serializedTrails
     };
+}
+
+function shouldDeferTrailCheckpoint(clientState, knownTrail, shouldSendFull, now) {
+    if (
+        shouldSendFull
+        || !knownTrail
+        || !supportsSeparatedReliableState(clientState.snapshotSchema)
+    ) {
+        return false;
+    }
+
+    const intervalMs = Number(config.network.trailCheckpointIntervalMs);
+
+    return Number.isFinite(intervalMs)
+        && intervalMs > 0
+        && Number.isFinite(knownTrail.lastUpdateSentAt)
+        && now - knownTrail.lastUpdateSentAt < intervalMs;
 }
 
 function shouldSendFullTrail(player, stats, knownTrail, now) {

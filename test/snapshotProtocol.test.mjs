@@ -685,6 +685,54 @@ test("schema 3 retains compact global fields when later snapshots omit them", ()
     ]);
 });
 
+test("schema 4 retains an atomic reliable frame across later transient ticks", () => {
+    const interpolator = createInterpolator();
+    const reliableSnapshot = createSnapshot(1, 1000, {
+        schema: 4,
+        leaderboard: [["player", "Player", 12.5, 2]],
+        mode: "sets",
+        playerInfo: {
+            player: ["#00ffff", 5, 6, 1, "Player", 2, 3, 3, 1]
+        },
+        territoryIds: ["player"],
+        territoryVersions: { player: 1 },
+        territories: {
+            player: createTerritory(1, 20)
+        }
+    });
+    const transientSnapshot = createSnapshot(2, 2000, {
+        schema: 4,
+        players: ["player", 15, 18, 0.75],
+        territoryIds: ["player"]
+    });
+
+    for (const field of [
+        "leaderboard",
+        "mode",
+        "playerInfo",
+        "territories",
+        "territoryOps",
+        "territoryVersions",
+        "removedTerritoryIds",
+        "trails",
+        "trailRemovals",
+        "removedTrailIds"
+    ]) {
+        delete transientSnapshot[field];
+    }
+
+    assert.equal(interpolator.processSnapshot(reliableSnapshot).applied, true);
+    assert.equal(interpolator.processSnapshot(transientSnapshot).applied, true);
+
+    const state = interpolator.getRenderState();
+
+    assert.equal(state.players.player.name, "Player");
+    assert.equal(state.players.player.x, 15);
+    assert.equal(state.territories.player.version, 1);
+    assert.equal(state.leaderboard[0].id, "player");
+    assert.equal(state.mode, "sets");
+});
+
 test("failed schema 3 geometry does not commit a global delta", () => {
     const interpolator = createInterpolator();
 

@@ -70,22 +70,9 @@ test("gateway diagnostics measure snapshot emission, zlib and transport pressure
         () => undefined
     );
     fixture.transport.writable = true;
-    recordGatewaySocketEmission(
-        fixture.socket,
-        "gameState",
-        {
-            adaptiveCompressionBypass: true,
-            snapshotPayloadBytes: 321,
-            volatile: true
-        },
-        () => undefined
-    );
-
     const dropped = takeGatewayTransportDiagnostics(fixture.socket);
-    assert.equal(dropped.counters.snapshotEmitAttempts, 2);
+    assert.equal(dropped.counters.snapshotEmitAttempts, 1);
     assert.equal(dropped.counters.volatileDropCount, 1);
-    assert.equal(dropped.counters.adaptiveCompressionBypassCount, 1);
-    assert.equal(dropped.bytes.bypassedSnapshotBytes, 321);
 
     disableGatewayTransportDiagnostics(fixture.socket);
     assert.equal(fixture.extension.compress, originalCompress);

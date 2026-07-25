@@ -3,10 +3,6 @@ const { invalidateSnapshotCache } = require("./snapshotLoop");
 const { resetSocketSnapshotState } = require("./snapshotState");
 const { createRateLimiter } = require("../utils/rateLimiter");
 const {
-    prepareSocketEmission,
-    resetAdaptiveSnapshotCompression
-} = require("./adaptiveSnapshotCompression");
-const {
     disableGatewayTransportDiagnostics,
     recordGatewaySocketEmission,
     setGatewayTransportDiagnosticsEnabled,
@@ -48,7 +44,6 @@ function registerDistributedSocket(io, coordinator) {
 
         socket.on("disconnect", () => {
             disableGatewayTransportDiagnostics(socket);
-            resetAdaptiveSnapshotCompression(socket);
             leaveMenuBackground(socket);
             leaveDistributedRoom(socket, coordinator).catch(error => {
                 console.error("Failed to remove disconnected player from room worker:", error);
@@ -231,16 +226,19 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
     socket.on("networkDiagnostics", (rawOptions, acknowledge) => {
         if (!diagnosticsGuard.canHandleInput()) return;
         const enabled = !(rawOptions && rawOptions.enabled === false);
+        const snapshotDetailsEnabled = enabled
+            && !(rawOptions && rawOptions.snapshotDetails === false);
         const captureOverlapAudit = enabled
             && rawOptions
             && rawOptions.captureOverlapAudit === true;
 
-        socket.data.networkDiagnosticsEnabled = enabled;
+        socket.data.networkDiagnosticsEnabled = snapshotDetailsEnabled;
+        socket.data.networkTransportDiagnosticsEnabled = enabled;
         socket.data.captureOverlapAuditEnabled = captureOverlapAudit;
         setGatewayTransportDiagnosticsEnabled(socket, enabled);
         coordinator.updateConnectionData(socket, {
             captureOverlapAuditEnabled: captureOverlapAudit,
-            networkDiagnosticsEnabled: enabled
+            networkDiagnosticsEnabled: snapshotDetailsEnabled
         });
 
         if (typeof acknowledge === "function") {
@@ -248,6 +246,7 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
                 captureOverlapAudit,
                 enabled,
                 gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
+                snapshotDetailsEnabled,
                 serverTime: Date.now(),
                 transport: getSocketTransportName(socket),
                 workerDiagnostics: getWorkerDiagnostics(coordinator)
@@ -260,8 +259,9 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
         acknowledge({
             clientSentAt: rawPayload && rawPayload.clientSentAt,
             captureOverlapAudit: Boolean(socket.data.captureOverlapAuditEnabled),
-            diagnosticsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
+            diagnosticsEnabled: Boolean(socket.data.networkTransportDiagnosticsEnabled),
             gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
+            snapshotDetailsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
             serverTime: Date.now(),
             transport: getSocketTransportName(socket),
             workerDiagnostics: getWorkerDiagnostics(coordinator)
@@ -302,7 +302,6 @@ async function leaveDistributedRoom(socket, coordinator) {
     const result = await coordinator.leaveRoom(socket);
 
     socket.data.playerActive = false;
-    resetAdaptiveSnapshotCompression(socket);
     delete socket.data.remoteRoom;
     delete socket.data.roomCode;
     delete socket.data.spectatorRoomCode;
@@ -408,30 +407,13 @@ function emitToSocket(socket, coordinator, workerId, emission, args) {
         return;
     }
 
-    const socketEmission = prepareSocketEmission(socket, {
-        adaptiveCompressionEnabled: config.socket.adaptiveSnapshotCompressionEnabled,
-        eventName: emission.event,
-        volatile: emission.volatile
-    });
+    const emitter = emission.volatile ? socket.volatile : socket;
     const diagnosticOptions = {
-        adaptiveCompressionBypass: socketEmission.compressionBypassed,
-        snapshotPayloadBytes: getSnapshotPayloadBytes(args),
         volatile: emission.volatile
     };
     recordGatewaySocketEmission(socket, emission.event, diagnosticOptions, () => (
-        socketEmission.emitter.emit(emission.event, ...args)
+        emitter.emit(emission.event, ...args)
     ));
-}
-
-function getSnapshotPayloadBytes(args) {
-    const snapshot = Array.isArray(args) ? args[0] : null;
-    const payloadBytes = Number(
-        snapshot
-        && snapshot.networkDiagnostics
-        && snapshot.networkDiagnostics.basePayloadBytes
-    );
-
-    return Number.isFinite(payloadBytes) && payloadBytes >= 0 ? payloadBytes : 0;
 }
 
 function acknowledgeMissingSocket(coordinator, workerId, emission) {

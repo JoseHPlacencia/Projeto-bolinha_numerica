@@ -187,7 +187,8 @@ function synchronizeSocketData(target, source) {
         "captureOverlapAuditEnabled",
         "networkDiagnosticsEnabled",
         "networkDiagnosticsSnapshotCacheInvalidationCount",
-        "networkDiagnosticsSnapshotResyncCount"
+        "networkDiagnosticsSnapshotResyncCount",
+        "snapshotSchema"
     ]) {
         if (Object.prototype.hasOwnProperty.call(source, key)) {
             target[key] = source[key];

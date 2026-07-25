@@ -39,3 +39,14 @@ test("virtual socket forwards reliable acknowledgements to the worker callback",
     assert.equal(received.error, null);
     assert.deepEqual(received.acknowledgement, { applied: true });
 });
+
+test("virtual socket preserves negotiated snapshot schema for room workers", () => {
+    const transport = createVirtualSocketIo();
+    const socket = transport.ensureSocket("player", {
+        networkDiagnosticsEnabled: true,
+        snapshotSchema: 4
+    });
+
+    assert.equal(socket.data.networkDiagnosticsEnabled, true);
+    assert.equal(socket.data.snapshotSchema, 4);
+});

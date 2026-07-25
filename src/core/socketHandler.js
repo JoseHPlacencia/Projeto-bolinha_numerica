@@ -63,10 +63,13 @@ function registerNetworkDiagnosticsEvents(socket) {
         if (!diagnosticsGuard.canHandleInput()) return;
 
         const enabled = !(rawOptions && rawOptions.enabled === false);
+        const snapshotDetailsEnabled = enabled
+            && !(rawOptions && rawOptions.snapshotDetails === false);
         const captureOverlapAudit = enabled
             && rawOptions
             && rawOptions.captureOverlapAudit === true;
-        socket.data.networkDiagnosticsEnabled = enabled;
+        socket.data.networkDiagnosticsEnabled = snapshotDetailsEnabled;
+        socket.data.networkTransportDiagnosticsEnabled = enabled;
         socket.data.captureOverlapAuditEnabled = captureOverlapAudit;
         setGatewayTransportDiagnosticsEnabled(socket, enabled);
 
@@ -75,6 +78,7 @@ function registerNetworkDiagnosticsEvents(socket) {
                 captureOverlapAudit,
                 enabled,
                 gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
+                snapshotDetailsEnabled,
                 serverTime: Date.now(),
                 transport: getSocketTransportName(socket)
             });
@@ -87,8 +91,9 @@ function registerNetworkDiagnosticsEvents(socket) {
         acknowledge({
             clientSentAt: rawPayload && rawPayload.clientSentAt,
             captureOverlapAudit: Boolean(socket.data.captureOverlapAuditEnabled),
-            diagnosticsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
+            diagnosticsEnabled: Boolean(socket.data.networkTransportDiagnosticsEnabled),
             gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
+            snapshotDetailsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
             serverTime: Date.now(),
             transport: getSocketTransportName(socket)
         });

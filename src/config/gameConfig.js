@@ -1,7 +1,7 @@
 const { resolveServerCoreCount } = require("./serverRuntime");
 const {
-    resolveAdaptiveSnapshotCompressionEnabled,
-    resolveSocketCompressionLevel
+    resolveSocketCompressionLevel,
+    resolveSocketCompressionThreshold
 } = require("./socketRuntime");
 const {
     resolveMenuBackgroundSnapshotRate
@@ -38,10 +38,11 @@ const server = Object.freeze({
 });
 
 const socket = Object.freeze({
-    adaptiveSnapshotCompressionEnabled: resolveAdaptiveSnapshotCompressionEnabled(),
     transports: socketTransports,
     perMessageDeflate: Object.freeze({
-        threshold: 256,
+        // ws applies threshold only when context takeover is disabled.
+        serverNoContextTakeover: true,
+        threshold: resolveSocketCompressionThreshold(),
         zlibDeflateOptions: Object.freeze({
             level: resolveSocketCompressionLevel()
         })
@@ -238,7 +239,10 @@ const network = Object.freeze({
     viewportReportIntervalMs: 250,
     trailPredictionEnabled: true,
     trailPredictionMinPointDistance: territory.trailPointSpacing,
-    trailPredictionMaxPointDistance: world.playerSize * 1.25,
+    trailPredictionMaxPointDistance: Math.max(
+        world.playerSize * 1.25,
+        movement.speed * 0.2
+    ),
     trailPredictionPlayerHalfWidth: world.playerSize / 2,
     diagnosticsHistoryLimit: 240,
     diagnosticsPingIntervalMs: 1000,
@@ -272,6 +276,9 @@ const network = Object.freeze({
     playerInfoFullSyncIntervalMs: 5000,
     territoryFullSyncIntervalMs: 10000,
     trailFullSyncIntervalMs: 4000,
+    // Schema 4 clients predict the live tail between reliable checkpoints.
+    // This lowers gateway compression frequency without changing server physics.
+    trailCheckpointIntervalMs: 150,
     trailUpdateMaxPoints: 512,
     trailPatchFullRatio: 0.85,
     resyncRequestIntervalMs: 1000

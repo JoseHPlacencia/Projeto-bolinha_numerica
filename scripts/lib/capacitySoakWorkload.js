@@ -15,6 +15,12 @@ const {
 const {
     MAX_SNAPSHOT_SCHEMA
 } = require("../../src/core/snapshotProtocol");
+const {
+    createTransientStateSnapshot
+} = require("../../src/core/snapshotChannels");
+const {
+    shouldSendReliably
+} = require("../../src/core/snapshotLoop");
 const { createPlayer } = require("../../src/entities/player");
 const { initializePlayerTerritory } = require("../../src/state/territories");
 
@@ -119,7 +125,7 @@ function buildScenarioSnapshots(scenario) {
     const buildDurations = [];
     const compressedPayloadBytes = [];
     const compressionDurations = [];
-    const payloads = [];
+    const payloadGroups = [];
     const payloadBytes = [];
     const serializeDurations = [];
     let totalCompressedPayloadBytes = 0;
@@ -155,19 +161,27 @@ function buildScenarioSnapshots(scenario) {
         buildDurations.push(performance.now() - buildStartedAt);
 
         const serializeStartedAt = performance.now();
-        const payload = Buffer.from(JSON.stringify(snapshot));
+        const payloadGroup = createSnapshotPayloadGroup(snapshot);
+        const clientPayloadBytes = payloadGroup.reduce(
+            (total, item) => total + item.payload.byteLength,
+            0
+        );
         serializeDurations.push(performance.now() - serializeStartedAt);
-        payloadBytes.push(payload.byteLength);
-        payloads.push(payload);
-        totalPayloadBytes += payload.byteLength;
+        payloadBytes.push(clientPayloadBytes);
+        payloadGroups.push(payloadGroup);
+        totalPayloadBytes += clientPayloadBytes;
     }
 
     const applicationBatchDurationMs = performance.now() - applicationStartedAt;
     const compressionStartedAt = performance.now();
 
-    for (const payload of payloads) {
+    for (const payloadGroup of payloadGroups) {
         const itemStartedAt = performance.now();
-        const compressedBytes = compressSnapshotPayload(payload);
+        let compressedBytes = 0;
+
+        for (const item of payloadGroup) {
+            compressedBytes += compressSnapshotPayload(item.payload);
+        }
         compressionDurations.push(performance.now() - itemStartedAt);
         compressedPayloadBytes.push(compressedBytes);
         totalCompressedPayloadBytes += compressedBytes;
@@ -185,6 +199,20 @@ function buildScenarioSnapshots(scenario) {
         totalPayloadBytes,
         viewerCount: scenario.players.size
     };
+}
+
+function createSnapshotPayloadGroup(snapshot) {
+    if (shouldSendReliably(snapshot)) {
+        return [{
+            payload: Buffer.from(JSON.stringify(snapshot))
+        }];
+    }
+
+    return [{
+        payload: Buffer.from(JSON.stringify(
+            createTransientStateSnapshot(snapshot)
+        ))
+    }];
 }
 
 function pruneSnapshotStates(scenario) {

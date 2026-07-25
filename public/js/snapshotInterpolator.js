@@ -18,7 +18,7 @@ import {
 } from "./snapshotGeometry.js";
 
 /**
- * Applies schema-2/3 snapshots transactionally and exposes an interpolated view.
+ * Applies negotiated snapshots transactionally and exposes an interpolated view.
  * Cache mutations are staged until the whole snapshot is valid; sequence,
  * epoch, territory version and trail generation must remain monotonic.
  * See .ai/docs/SNAPSHOT_PROTOCOL.md.
@@ -201,7 +201,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function expandSnapshot(rawSnapshot, applyResult) {
         if (
             rawSnapshot
-            && (rawSnapshot.schema === 2 || rawSnapshot.schema === 3)
+            && Number.isSafeInteger(rawSnapshot.schema)
+            && rawSnapshot.schema >= 2
         ) {
             return expandCompactSnapshot(rawSnapshot, applyResult);
         }
@@ -736,7 +737,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function updateGlobalCache(rawSnapshot) {
-        if (!rawSnapshot || rawSnapshot.schema !== 3) {
+        if (!rawSnapshot || rawSnapshot.schema < 3) {
             entityCache.globals = {
                 leaderboard: Array.isArray(rawSnapshot && rawSnapshot.leaderboard)
                     ? rawSnapshot.leaderboard

@@ -12,14 +12,21 @@ test("room coordinator runs a normal room in a worker and keeps its directory gl
         workerCount: 1
     });
     const socket = {
-        data: {},
+        data: { snapshotSchema: 4 },
         id: "coordinator-player"
     };
+    let reliableStateReceived = false;
     let snapshotReceived = false;
 
     function handleWorkerEvent(event, workerId) {
-        if (event.event !== "gameState" || event.socketId !== socket.id) return;
-        snapshotReceived = true;
+        if (event.socketId !== socket.id) return;
+        if (event.event === "gameReliableState") {
+            reliableStateReceived = true;
+        } else if (event.event === "gameState") {
+            snapshotReceived = true;
+        } else {
+            return;
+        }
         if (event.acknowledgementId) {
             coordinator.acknowledge(workerId, {
                 acknowledgement: { applied: true },
@@ -51,7 +58,7 @@ test("room coordinator runs a normal room in a worker and keeps its directory gl
         assert.equal(coordinator.listRooms()[0].playerCount, 1);
         assert.equal(coordinator.sendInput(socket, "direction", { angle: 0, source: "keyboard" }), true);
 
-        await waitFor(() => snapshotReceived, 1500);
+        await waitFor(() => reliableStateReceived && snapshotReceived, 1500);
         const leaveResult = await coordinator.leaveRoom(socket);
         assert.equal(leaveResult.destroyed, true);
         await waitFor(() => coordinator.listRooms().length === 0, 500);

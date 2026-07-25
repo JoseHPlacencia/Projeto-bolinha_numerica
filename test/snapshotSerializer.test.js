@@ -192,6 +192,38 @@ test("schema 2 keeps the legacy global snapshot shape", () => {
     assert.ok(secondSnapshot.roomConfig);
 });
 
+test("schema 4 alternates atomic reliable frames with compact transient state", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const socket = createSocket(player.id, {
+        roomCode: "ROOM",
+        snapshotSchema: 4
+    });
+    const io = { sockets: { sockets: new Map([[socket.id, socket]]) } };
+    initializePlayerTerritory(territories, player);
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    assert.equal(socket.emitted.length, 1);
+    assert.equal(socket.emitted[0].event, "gameReliableState");
+    assert.ok(socket.emitted[0].payload.territories[player.id]);
+    assert.ok(socket.emitted[0].payload.playerInfo[player.id]);
+    assert.ok(socket.emitted[0].payload.roomConfig);
+    assert.ok(Array.isArray(socket.emitted[0].payload.players));
+    assert.equal(Object.hasOwn(socket.emitted[0].payload, "numbers"), true);
+
+    player.x = 25;
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    assert.equal(socket.emitted[1].event, "gameState");
+    assert.equal(socket.emitted[1].payload.schema, 4);
+    assert.ok(Array.isArray(socket.emitted[1].payload.players));
+    assert.equal(Object.hasOwn(socket.emitted[1].payload, "numbers"), true);
+    assert.deepEqual(socket.emitted[1].payload.territoryIds, [player.id]);
+    assert.equal(Object.hasOwn(socket.emitted[1].payload, "territories"), false);
+    assert.equal(Object.hasOwn(socket.emitted[1].payload, "playerInfo"), false);
+});
+
 test("snapshot loop commits transactional state only after reliable acknowledgement", () => {
     const player = new Player("viewer", { x: 0, y: 0 });
     const players = new Map([[player.id, player]]);
@@ -646,6 +678,69 @@ test("ending a trail emits a generation tombstone", () => {
 
     assert.ok(snapshot.removedTrailIds.includes(viewer.id));
     assert.equal(snapshot.trailRemovals[viewer.id], previousGeneration + 1);
+});
+
+test("schema 4 accumulates trail points between reliable checkpoints", () => {
+    const viewer = new Player("viewer", { x: 30, y: 0 });
+    const players = new Map([[viewer.id, viewer]]);
+    const territories = createTerritories();
+    const clientState = createClientSnapshotState({ snapshotSchema: 4 });
+
+    initializePlayerTerritory(territories, viewer);
+    viewer.trailLeftSegments = [[
+        { x: 0, y: -20 },
+        { x: 15, y: -20 }
+    ]];
+    viewer.trailRightSegments = [[
+        { x: 0, y: 20 },
+        { x: 15, y: 20 }
+    ]];
+    viewer.trailLeftFillPath = [...viewer.trailLeftSegments[0]];
+    viewer.trailRightFillPath = [...viewer.trailRightSegments[0]];
+
+    const initial = createSnapshot(
+        players,
+        territories,
+        viewer.id,
+        clientState,
+        null,
+        config
+    );
+
+    assert.ok(initial.trails[viewer.id]);
+
+    const nextLeft = { x: 30, y: -18 };
+    const nextRight = { x: 30, y: 22 };
+    viewer.trailLeftSegments[0].push(nextLeft);
+    viewer.trailRightSegments[0].push(nextRight);
+    viewer.trailLeftFillPath.push(nextLeft);
+    viewer.trailRightFillPath.push(nextRight);
+
+    const deferred = createSnapshot(
+        players,
+        territories,
+        viewer.id,
+        clientState,
+        null,
+        config
+    );
+
+    assert.equal(Object.hasOwn(deferred.trails, viewer.id), false);
+    assert.ok(deferred.trailIds.includes(viewer.id));
+
+    clientState.trails.get(viewer.id).lastUpdateSentAt = (
+        Date.now() - config.network.trailCheckpointIntervalMs - 1
+    );
+    const checkpoint = createSnapshot(
+        players,
+        territories,
+        viewer.id,
+        clientState,
+        null,
+        config
+    );
+
+    assert.ok(checkpoint.trails[viewer.id]);
 });
 
 test("large trails finish their initial sync and continue with patches", () => {

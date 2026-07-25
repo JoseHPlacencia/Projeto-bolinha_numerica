@@ -13,7 +13,14 @@ const {
     getSocketSnapshotEpoch,
     resetSocketSnapshotState
 } = require("./snapshotState");
-const { getSocketSnapshotSchema } = require("./snapshotProtocol");
+const {
+    getSocketSnapshotSchema,
+    supportsSeparatedReliableState
+} = require("./snapshotProtocol");
+const {
+    RELIABLE_GAME_STATE_EVENT,
+    createTransientStateSnapshot
+} = require("./snapshotChannels");
 const {
     countArrayItems,
     countInvalidations,
@@ -168,7 +175,12 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         }
 
         if (shouldSendReliably(snapshot)) {
-            queueReliableSnapshot(socket, snapshot, nextSnapshotState, sendDiagnostics);
+            queueReliableSnapshot(
+                socket,
+                snapshot,
+                nextSnapshotState,
+                sendDiagnostics
+            );
             continue;
         }
 
@@ -279,15 +291,20 @@ function shouldDeferTerritoryGeometry(territories) {
 }
 
 function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
+    const separatedReliableState = supportsSeparatedReliableState(snapshot.schema);
     const volatileSnapshot = {
         ...snapshot,
         playerInfo: {},
-        territoryIds: filterKnownIds(snapshot.territoryIds, clientState.territories),
+        territoryIds: separatedReliableState
+            ? snapshot.territoryIds
+            : filterKnownIds(snapshot.territoryIds, clientState.territories),
         territoryVersions: {},
         territories: {},
         territoryOps: {},
         removedTerritoryIds: [],
-        trailIds: filterKnownIds(snapshot.trailIds, clientState.trails),
+        trailIds: separatedReliableState
+            ? snapshot.trailIds
+            : filterKnownIds(snapshot.trailIds, clientState.trails),
         trails: {},
         removedTrailIds: [],
         trailRemovals: {},
@@ -338,6 +355,7 @@ function queueReliableSnapshot(socket, snapshot, nextSnapshotState, sendDiagnost
     };
     socket.data.pendingReliableSnapshot = pending;
     sendReliableSnapshot(socket, pending);
+    return pending;
 }
 
 function sendReliableSnapshot(socket, pending) {
@@ -348,7 +366,22 @@ function sendReliableSnapshot(socket, pending) {
     const emitter = typeof socket.timeout === "function"
         ? socket.timeout(getReliableSnapshotAckTimeoutMs())
         : socket;
-    emitter.emit("gameState", createSnapshotForNetworkSend(socket, pending.snapshot, sendType, pending, pending.sendDiagnostics), (error, acknowledgement) => {
+    const separatedReliableState = supportsSeparatedReliableState(
+        pending.snapshot && pending.snapshot.schema
+    );
+    const eventName = separatedReliableState
+        ? RELIABLE_GAME_STATE_EVENT
+        : "gameState";
+    const payload = pending.snapshot;
+
+    emitter.emit(eventName, createSnapshotForNetworkSend(
+        socket,
+        payload,
+        sendType,
+        pending,
+        pending.sendDiagnostics,
+        separatedReliableState ? "reliable-state" : "game-state"
+    ), (error, acknowledgement) => {
         if (error) {
             pending.ackTimeouts = (pending.ackTimeouts || 0) + 1;
             pending.lastAckErrorAt = Date.now();
@@ -397,21 +430,50 @@ function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { appl
 }
 
 function emitVolatileSnapshot(socket, snapshot, sendType, pending = null, sendDiagnostics = null) {
-    socket.volatile.emit("gameState", createSnapshotForNetworkSend(socket, snapshot, sendType, pending, sendDiagnostics));
+    const transientSnapshot = createTransientStateSnapshot(snapshot);
+    const payload = createSnapshotForNetworkSend(
+        socket,
+        transientSnapshot,
+        sendType,
+        pending,
+        sendDiagnostics
+    );
+    socket.volatile.emit("gameState", payload);
 }
 
-function createSnapshotForNetworkSend(socket, snapshot, sendType, pending = null, sendDiagnostics = null) {
+function createSnapshotForNetworkSend(
+    socket,
+    snapshot,
+    sendType,
+    pending = null,
+    sendDiagnostics = null,
+    diagnosticChannel = "game-state"
+) {
     if (!isNetworkDiagnosticsEnabled(socket)) {
         return snapshot;
     }
 
     return {
         ...snapshot,
-        networkDiagnostics: createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending, sendDiagnostics)
+        networkDiagnostics: createNetworkDiagnosticsSnapshot(
+            socket,
+            snapshot,
+            sendType,
+            pending,
+            sendDiagnostics,
+            diagnosticChannel
+        )
     };
 }
 
-function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = null, sendDiagnostics = null) {
+function createNetworkDiagnosticsSnapshot(
+    socket,
+    snapshot,
+    sendType,
+    pending = null,
+    sendDiagnostics = null,
+    diagnosticChannel = "game-state"
+) {
     const payloadMeasurement = measureSnapshotPayload(snapshot);
     const snapshotBreakdown = createSnapshotBreakdown(snapshot, {
         includePayloadOutlier: isPayloadOutlier(payloadMeasurement.bytes),
@@ -428,6 +490,7 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
 
     return {
         schema: 2,
+        channel: diagnosticChannel,
         sequence,
         sendType,
         serverSentAt: now,

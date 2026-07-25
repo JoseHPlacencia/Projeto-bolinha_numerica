@@ -6,7 +6,10 @@ import { createNetworkDiagnostics } from "./networkDiagnostics.js";
 import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createRoomUi } from "./roomUi.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
-import { createSnapshotSocketAuth } from "./snapshotProtocol.js";
+import {
+    RELIABLE_GAME_STATE_EVENT,
+    createSnapshotSocketAuth
+} from "./snapshotProtocol.js";
 import { createWorldRenderer } from "./worldRenderer.js";
 import { createRenderFrameLimiter } from "./renderSettings.js";
 
@@ -83,15 +86,27 @@ export function startClient(gameConfig, options = {}) {
         }
     });
 
+    socket.on(RELIABLE_GAME_STATE_EVENT, (snapshot, acknowledge) => {
+        syncSpectatorFromSnapshot(snapshot);
+        const applyResult = processSnapshotSafely(snapshot);
+
+        acknowledgeSnapshot(acknowledge, applyResult);
+        if (applyResult && applyResult.applied === false) {
+            return;
+        }
+
+        applyRoomConfig(snapshot && snapshot.roomConfig);
+        if (snapshot.numbers && snapshot.numbers.theme) {
+            numberHud.updateTheme(snapshot.numbers.theme, snapshot.numbers.themeEndsIn || 0);
+        }
+        renderer.processSnapshot(snapshot);
+    });
+
     socket.on("gameState", (snapshot, acknowledge) => {
         syncSpectatorFromSnapshot(snapshot);
         const applyResult = processSnapshotSafely(snapshot);
 
-        if (typeof acknowledge === "function") {
-            acknowledge(createSnapshotAcknowledgement(applyResult));
-        } else if (applyResult && !applyResult.applied) {
-            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
-        }
+        acknowledgeSnapshot(acknowledge, applyResult);
 
         if (applyResult && applyResult.applied === false) {
             return;
@@ -340,6 +355,14 @@ export function startClient(gameConfig, options = {}) {
                     trails: []
                 }
         };
+    }
+
+    function acknowledgeSnapshot(acknowledge, applyResult) {
+        if (typeof acknowledge === "function") {
+            acknowledge(createSnapshotAcknowledgement(applyResult));
+        } else if (applyResult && !applyResult.applied) {
+            socket.emit("snapshotCacheInvalid", applyResult.invalidations);
+        }
     }
 
     function processSnapshotSafely(snapshot) {

@@ -1,6 +1,7 @@
 const CACHED_GLOBALS_SNAPSHOT_SCHEMA = 3;
+const SEPARATED_RELIABLE_STATE_SNAPSHOT_SCHEMA = 4;
 const LEGACY_SNAPSHOT_SCHEMA = 2;
-const MAX_SNAPSHOT_SCHEMA = CACHED_GLOBALS_SNAPSHOT_SCHEMA;
+const MAX_SNAPSHOT_SCHEMA = SEPARATED_RELIABLE_STATE_SNAPSHOT_SCHEMA;
 
 function applySocketSnapshotProtocol(socket) {
     if (!socket || typeof socket !== "object") {
@@ -48,14 +49,20 @@ function supportsCompactTransientState(schema) {
     return normalizeSnapshotSchema(schema) >= CACHED_GLOBALS_SNAPSHOT_SCHEMA;
 }
 
+function supportsSeparatedReliableState(schema) {
+    return normalizeSnapshotSchema(schema) >= SEPARATED_RELIABLE_STATE_SNAPSHOT_SCHEMA;
+}
+
 module.exports = {
     CACHED_GLOBALS_SNAPSHOT_SCHEMA,
     LEGACY_SNAPSHOT_SCHEMA,
     MAX_SNAPSHOT_SCHEMA,
+    SEPARATED_RELIABLE_STATE_SNAPSHOT_SCHEMA,
     applySocketSnapshotProtocol,
     getSocketSnapshotSchema,
     normalizeSnapshotSchema,
     supportsCachedSnapshotGlobals,
     supportsCompactTrailUpdates,
-    supportsCompactTransientState
+    supportsCompactTransientState,
+    supportsSeparatedReliableState
 };
