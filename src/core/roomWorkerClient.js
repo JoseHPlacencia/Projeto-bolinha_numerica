@@ -5,6 +5,7 @@ const { workerMessageTypes } = require("./roomWorkerProtocol");
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const DEFAULT_START_TIMEOUT_MS = 15000;
+const DEFAULT_ACKNOWLEDGEMENT_BATCH_DELAY_MS = 2;
 
 class RoomWorkerClient extends EventEmitter {
     constructor(options = {}) {
@@ -13,8 +14,13 @@ class RoomWorkerClient extends EventEmitter {
         this.workerPath = options.workerPath || path.join(__dirname, "..", "workers", "roomWorker.js");
         this.requestTimeoutMs = options.requestTimeoutMs || DEFAULT_REQUEST_TIMEOUT_MS;
         this.startTimeoutMs = options.startTimeoutMs || DEFAULT_START_TIMEOUT_MS;
+        this.acknowledgementBatchDelayMs = Number.isFinite(options.acknowledgementBatchDelayMs)
+            ? Math.max(0, options.acknowledgementBatchDelayMs)
+            : DEFAULT_ACKNOWLEDGEMENT_BATCH_DELAY_MS;
         this.nextRequestId = 1;
         this.pendingRequests = new Map();
+        this.pendingAcknowledgements = [];
+        this.acknowledgementBatchTimer = null;
         this.worker = null;
         this.closing = false;
         this.ready = false;
@@ -89,9 +95,34 @@ class RoomWorkerClient extends EventEmitter {
 
     acknowledge(acknowledgement) {
         if (!this.worker || !this.ready) return false;
+        this.pendingAcknowledgements.push(acknowledgement);
+        this.scheduleAcknowledgementBatch();
+        return true;
+    }
+
+    scheduleAcknowledgementBatch() {
+        if (this.acknowledgementBatchTimer) return;
+        this.acknowledgementBatchTimer = setTimeout(
+            () => this.flushAcknowledgementBatch(),
+            this.acknowledgementBatchDelayMs
+        );
+        this.acknowledgementBatchTimer.unref?.();
+    }
+
+    flushAcknowledgementBatch() {
+        if (this.acknowledgementBatchTimer) {
+            clearTimeout(this.acknowledgementBatchTimer);
+            this.acknowledgementBatchTimer = null;
+        }
+        if (this.pendingAcknowledgements.length === 0) return false;
+
+        const acknowledgements = this.pendingAcknowledgements;
+        this.pendingAcknowledgements = [];
+        if (!this.worker || !this.ready) return false;
+
         this.worker.postMessage({
-            ...acknowledgement,
-            type: workerMessageTypes.ACKNOWLEDGEMENT
+            acknowledgements,
+            type: workerMessageTypes.ACKNOWLEDGEMENT_BATCH
         });
         return true;
     }
@@ -105,8 +136,24 @@ class RoomWorkerClient extends EventEmitter {
         return true;
     }
 
+    confirmEventDeliveries(deliveryIds) {
+        if (!this.worker || !this.ready || !Array.isArray(deliveryIds)) {
+            return false;
+        }
+
+        const normalizedIds = [...new Set(deliveryIds.filter(Boolean))];
+        if (normalizedIds.length === 0) return false;
+
+        this.worker.postMessage({
+            deliveryIds: normalizedIds,
+            type: workerMessageTypes.EVENTS_DELIVERED
+        });
+        return true;
+    }
+
     async close() {
         this.closing = true;
+        this.flushAcknowledgementBatch();
         this.ready = false;
         this.rejectPending(new Error(`Room worker ${this.id} is shutting down.`));
 
@@ -159,12 +206,18 @@ class RoomWorkerClient extends EventEmitter {
             return;
         }
 
+        if (message.type === workerMessageTypes.EVENT_BATCH) {
+            this.emit("workerEventBatch", Array.isArray(message.events) ? message.events : []);
+            return;
+        }
+
         if (message.type === workerMessageTypes.METRICS) {
             this.emit("metrics", message.metrics || {});
         }
     }
 
     handleFailure(error) {
+        this.discardPendingAcknowledgements();
         if (!this.ready) this.emit("startFailure", error);
         this.rejectPending(error);
         this.emit("workerError", error);
@@ -176,6 +229,7 @@ class RoomWorkerClient extends EventEmitter {
         this.ready = false;
         this.worker = null;
         this.startPromise = null;
+        this.discardPendingAcknowledgements();
         const error = new Error(`Room worker ${this.id} exited with code ${code}.`);
         this.rejectPending(error);
         if (!wasReady && !wasClosing) this.emit("startFailure", error);
@@ -188,6 +242,14 @@ class RoomWorkerClient extends EventEmitter {
             pending.reject(error);
         }
         this.pendingRequests.clear();
+    }
+
+    discardPendingAcknowledgements() {
+        if (this.acknowledgementBatchTimer) {
+            clearTimeout(this.acknowledgementBatchTimer);
+            this.acknowledgementBatchTimer = null;
+        }
+        this.pendingAcknowledgements.length = 0;
     }
 }
 

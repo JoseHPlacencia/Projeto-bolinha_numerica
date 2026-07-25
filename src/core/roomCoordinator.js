@@ -186,6 +186,22 @@ class RoomCoordinator extends EventEmitter {
         return worker ? worker.confirmEventDelivery(deliveryId) : false;
     }
 
+    confirmEventDeliveries(workerId, deliveryIds) {
+        const worker = this.workers.get(workerId);
+        if (!worker || !Array.isArray(deliveryIds) || deliveryIds.length === 0) {
+            return false;
+        }
+        if (typeof worker.confirmEventDeliveries === "function") {
+            return worker.confirmEventDeliveries(deliveryIds);
+        }
+
+        let confirmed = false;
+        for (const deliveryId of deliveryIds) {
+            confirmed = worker.confirmEventDelivery(deliveryId) || confirmed;
+        }
+        return confirmed;
+    }
+
     hasActivePlayer(socket) {
         return Boolean(
             socket
@@ -214,6 +230,9 @@ class RoomCoordinator extends EventEmitter {
 
         worker.on("directory", rooms => this.updateWorkerDirectory(workerId, rooms));
         worker.on("workerEvent", event => this.emit("workerEvent", { event, workerId }));
+        worker.on("workerEventBatch", events => {
+            this.emit("workerEventBatch", { events, workerId });
+        });
         worker.on("metrics", metrics => this.workerMetrics.set(workerId, metrics));
         worker.on("workerError", error => this.emit("workerError", { error, workerId }));
         worker.on("workerExit", details => this.handleWorkerExit(workerId, worker, details));

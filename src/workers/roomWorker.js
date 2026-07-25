@@ -11,7 +11,22 @@ const workerId = Number(workerData && workerData.workerId) || 0;
 const volatileDeliveries = new Map();
 const volatileDeliverySockets = new Map();
 const pendingVolatileEvents = new Map();
+let pendingEventBatch = [];
+let eventBatchScheduled = false;
 let nextVolatileDeliveryId = 1;
+const ipcMetrics = {
+    acknowledgementBatchCount: 0,
+    acknowledgementCount: 0,
+    eventBatchCount: 0,
+    eventCount: 0,
+    lastAcknowledgementBatchSize: 0,
+    lastEventBatchSize: 0,
+    maxAcknowledgementBatchSize: 0,
+    maxEventBatchSize: 0,
+    volatileDeferredEventCount: 0,
+    volatileDeliveredEventCount: 0,
+    volatileReplacedEventCount: 0
+};
 const runtime = createRoomWorkerRuntime({
     publishDirectory: rooms => parentPort.postMessage({
         rooms,
@@ -55,7 +70,12 @@ async function handleMessage(message) {
     }
 
     if (message.type === workerMessageTypes.ACKNOWLEDGEMENT) {
-        runtime.acknowledge(message);
+        acknowledgeBatch([message]);
+        return;
+    }
+
+    if (message.type === workerMessageTypes.ACKNOWLEDGEMENT_BATCH) {
+        acknowledgeBatch(message.acknowledgements);
         return;
     }
 
@@ -64,9 +84,15 @@ async function handleMessage(message) {
         return;
     }
 
+    if (message.type === workerMessageTypes.EVENTS_DELIVERED) {
+        handleEventsDelivered(message.deliveryIds);
+        return;
+    }
+
     if (message.type === workerMessageTypes.SHUTDOWN) {
         clearInterval(metricsInterval);
         runtime.close();
+        flushEventBatch();
         process.exitCode = 0;
         parentPort.close();
     }
@@ -74,10 +100,36 @@ async function handleMessage(message) {
 
 function publishMetrics() {
     parentPort.postMessage({
-        metrics: runtime.getMetrics(),
+        metrics: {
+            ...runtime.getMetrics(),
+            ipc: {
+                ...ipcMetrics,
+                pendingEventBatchSize: pendingEventBatch.length,
+                pendingVolatileEventCount: pendingVolatileEvents.size,
+                volatileInFlightCount: volatileDeliveries.size
+            }
+        },
         type: workerMessageTypes.METRICS,
         workerId
     });
+}
+
+function acknowledgeBatch(acknowledgements) {
+    if (!Array.isArray(acknowledgements) || acknowledgements.length === 0) {
+        return;
+    }
+
+    ipcMetrics.acknowledgementBatchCount++;
+    ipcMetrics.acknowledgementCount += acknowledgements.length;
+    ipcMetrics.lastAcknowledgementBatchSize = acknowledgements.length;
+    ipcMetrics.maxAcknowledgementBatchSize = Math.max(
+        ipcMetrics.maxAcknowledgementBatchSize,
+        acknowledgements.length
+    );
+
+    for (const acknowledgement of acknowledgements) {
+        runtime.acknowledge(acknowledgement);
+    }
 }
 
 function publishEvent(event) {
@@ -87,6 +139,10 @@ function publishEvent(event) {
     }
 
     if (volatileDeliveries.has(event.socketId)) {
+        ipcMetrics.volatileDeferredEventCount++;
+        if (pendingVolatileEvents.has(event.socketId)) {
+            ipcMetrics.volatileReplacedEventCount++;
+        }
         pendingVolatileEvents.set(event.socketId, event);
         return;
     }
@@ -102,9 +158,32 @@ function postVolatileEvent(event) {
 }
 
 function postEvent(event) {
+    pendingEventBatch.push(event);
+    scheduleEventBatch();
+}
+
+function scheduleEventBatch() {
+    if (eventBatchScheduled) return;
+    eventBatchScheduled = true;
+    queueMicrotask(flushEventBatch);
+}
+
+function flushEventBatch() {
+    eventBatchScheduled = false;
+    if (pendingEventBatch.length === 0) return;
+
+    const events = pendingEventBatch;
+    pendingEventBatch = [];
+    ipcMetrics.eventBatchCount++;
+    ipcMetrics.eventCount += events.length;
+    ipcMetrics.lastEventBatchSize = events.length;
+    ipcMetrics.maxEventBatchSize = Math.max(
+        ipcMetrics.maxEventBatchSize,
+        events.length
+    );
     parentPort.postMessage({
-        event,
-        type: workerMessageTypes.EVENT,
+        events,
+        type: workerMessageTypes.EVENT_BATCH,
         workerId
     });
 }
@@ -115,11 +194,19 @@ function handleEventDelivered(deliveryId) {
 
     volatileDeliverySockets.delete(deliveryId);
     volatileDeliveries.delete(socketId);
+    ipcMetrics.volatileDeliveredEventCount++;
     const pendingEvent = pendingVolatileEvents.get(socketId);
     if (!pendingEvent) return;
 
     pendingVolatileEvents.delete(socketId);
     postVolatileEvent(pendingEvent);
+}
+
+function handleEventsDelivered(deliveryIds) {
+    if (!Array.isArray(deliveryIds)) return;
+    for (const deliveryId of deliveryIds) {
+        handleEventDelivered(deliveryId);
+    }
 }
 
 function isCoalescibleVolatileEvent(event) {

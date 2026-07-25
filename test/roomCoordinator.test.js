@@ -17,7 +17,7 @@ test("room coordinator runs a normal room in a worker and keeps its directory gl
     };
     let snapshotReceived = false;
 
-    coordinator.on("workerEvent", ({ event, workerId }) => {
+    function handleWorkerEvent(event, workerId) {
         if (event.event !== "gameState" || event.socketId !== socket.id) return;
         snapshotReceived = true;
         if (event.acknowledgementId) {
@@ -25,6 +25,15 @@ test("room coordinator runs a normal room in a worker and keeps its directory gl
                 acknowledgement: { applied: true },
                 acknowledgementId: event.acknowledgementId
             });
+        }
+    }
+
+    coordinator.on("workerEvent", ({ event, workerId }) => {
+        handleWorkerEvent(event, workerId);
+    });
+    coordinator.on("workerEventBatch", ({ events, workerId }) => {
+        for (const event of events) {
+            handleWorkerEvent(event, workerId);
         }
     });
 
@@ -94,6 +103,84 @@ test("room coordinator preserves private-room validation across the worker bound
         await coordinator.leaveRoom(guest);
         const ownerLeave = await coordinator.leaveRoom(owner);
         assert.equal(ownerLeave.destroyed, true);
+    } finally {
+        await coordinator.close();
+    }
+});
+
+test("room worker batch preserves shared snapshot frame references across IPC", async () => {
+    const coordinator = createRoomCoordinator({
+        localRoomManager: { createBackgroundRoom() {} },
+        workerCount: 1
+    });
+    const owner = { data: {}, id: "batch-owner" };
+    const guest = { data: {}, id: "batch-guest" };
+    let sharedSnapshots = null;
+
+    coordinator.on("workerEventBatch", ({ events, workerId }) => {
+        const deliveryIds = [];
+
+        for (const event of events) {
+            if (event.deliveryId) {
+                deliveryIds.push(event.deliveryId);
+            }
+            if (event.acknowledgementId) {
+                coordinator.acknowledge(workerId, {
+                    acknowledgement: { applied: true },
+                    acknowledgementId: event.acknowledgementId
+                });
+            }
+        }
+
+        if (deliveryIds.length > 0) {
+            coordinator.confirmEventDeliveries(workerId, deliveryIds);
+        }
+
+        const snapshots = events
+            .filter(event => (
+                event.event === "gameState"
+                && (event.socketId === owner.id || event.socketId === guest.id)
+            ))
+            .map(event => event.args[0]);
+
+        if (snapshots.length === 2 && snapshots[0].time === snapshots[1].time) {
+            sharedSnapshots = snapshots;
+        }
+    });
+
+    try {
+        await coordinator.start();
+        const created = await coordinator.createAndJoinRoom(owner, {
+            playerOptions: { name: "Owner" },
+            roomOptions: { difficulty: "medium", isPrivate: false }
+        });
+
+        assert.equal(created.success, true);
+        owner.data.playerActive = true;
+        owner.data.roomCode = created.room.code;
+
+        const joined = await coordinator.joinRoom(
+            guest,
+            created.room.code,
+            "",
+            { name: "Guest" }
+        );
+
+        assert.equal(joined.success, true);
+        guest.data.playerActive = true;
+        guest.data.roomCode = created.room.code;
+
+        await waitFor(() => sharedSnapshots !== null, 1500);
+
+        const [first, second] = sharedSnapshots;
+
+        assert.strictEqual(first.leaderboard, second.leaderboard);
+        assert.strictEqual(first.numbers, second.numbers);
+        assert.strictEqual(first.roomConfig, second.roomConfig);
+        assert.strictEqual(first.players[owner.id], second.players[owner.id]);
+
+        await coordinator.leaveRoom(guest);
+        await coordinator.leaveRoom(owner);
     } finally {
         await coordinator.close();
     }

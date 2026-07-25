@@ -17,6 +17,9 @@ function registerDistributedSocket(io, coordinator) {
             );
         }
     });
+    coordinator.on("workerEventBatch", message => {
+        forwardWorkerEventBatch(io, coordinator, message);
+    });
     coordinator.on("workerUnavailable", message => {
         handleWorkerUnavailable(io, message);
     });
@@ -230,7 +233,8 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
                 captureOverlapAudit,
                 enabled,
                 serverTime: Date.now(),
-                transport: getSocketTransportName(socket)
+                transport: getSocketTransportName(socket),
+                workerDiagnostics: getWorkerDiagnostics(coordinator)
             });
         }
     });
@@ -242,7 +246,8 @@ function registerNetworkDiagnosticsEvents(socket, coordinator) {
             captureOverlapAudit: Boolean(socket.data.captureOverlapAuditEnabled),
             diagnosticsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
             serverTime: Date.now(),
-            transport: getSocketTransportName(socket)
+            transport: getSocketTransportName(socket),
+            workerDiagnostics: getWorkerDiagnostics(coordinator)
         });
     });
 }
@@ -297,6 +302,30 @@ function leaveMenuBackground(socket) {
     delete socket.data.spectatorRoomCode;
     delete socket.data.spectatorFollowId;
     resetSocketSnapshotState(socket);
+}
+
+function forwardWorkerEventBatch(io, coordinator, message) {
+    const workerId = message && message.workerId;
+    const events = Array.isArray(message && message.events)
+        ? message.events
+        : [];
+    const deliveryIds = [];
+
+    for (const event of events) {
+        try {
+            forwardWorkerEvent(io, coordinator, { event, workerId });
+        } catch (error) {
+            console.error(`Failed to forward room worker ${workerId} event:`, error);
+        }
+
+        if (event && event.deliveryId) {
+            deliveryIds.push(event.deliveryId);
+        }
+    }
+
+    if (deliveryIds.length > 0) {
+        coordinator.confirmEventDeliveries(workerId, deliveryIds);
+    }
 }
 
 function forwardWorkerEvent(io, coordinator, message) {
@@ -460,6 +489,12 @@ function getSocketTransportName(socket) {
         && socket.conn.transport.name
         ? socket.conn.transport.name
         : null;
+}
+
+function getWorkerDiagnostics(coordinator) {
+    return coordinator && typeof coordinator.getWorkerDiagnostics === "function"
+        ? coordinator.getWorkerDiagnostics()
+        : [];
 }
 
 module.exports = registerDistributedSocket;

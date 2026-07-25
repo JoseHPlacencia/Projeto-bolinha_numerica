@@ -663,8 +663,93 @@ function createMassiveConnectionDiagnostic(options, plan) {
                     : state.serverOffsetMs * 0.8 + offset * 0.2;
             }
 
-            if (currentStage) currentStage.series.pingRttMs.add(rtt);
+            if (currentStage) {
+                currentStage.series.pingRttMs.add(rtt);
+                recordWorkerIpcMetrics(currentStage, response && response.workerDiagnostics);
+            }
         });
+    }
+
+    function recordWorkerIpcMetrics(stage, workerDiagnostics) {
+        if (!Array.isArray(workerDiagnostics)) return;
+
+        for (const worker of workerDiagnostics) {
+            const workerId = Number(worker && worker.id);
+            const metrics = worker && worker.metrics;
+            const ipc = metrics && metrics.ipc;
+
+            if (!Number.isInteger(workerId) || !ipc || typeof ipc !== "object") {
+                continue;
+            }
+
+            const current = {
+                acknowledgementBatchCount: finiteCounter(ipc.acknowledgementBatchCount),
+                acknowledgementCount: finiteCounter(ipc.acknowledgementCount),
+                eventBatchCount: finiteCounter(ipc.eventBatchCount),
+                eventCount: finiteCounter(ipc.eventCount),
+                lastAcknowledgementBatchSize: finiteCounter(ipc.lastAcknowledgementBatchSize),
+                lastEventBatchSize: finiteCounter(ipc.lastEventBatchSize),
+                maxEventBatchSize: finiteCounter(ipc.maxEventBatchSize),
+                updatedAt: finiteCounter(metrics.updatedAt),
+                volatileDeferredEventCount: finiteCounter(ipc.volatileDeferredEventCount),
+                volatileDeliveredEventCount: finiteCounter(ipc.volatileDeliveredEventCount),
+                volatileReplacedEventCount: finiteCounter(ipc.volatileReplacedEventCount)
+            };
+            const previous = stage.workerIpcCounters.get(workerId);
+
+            if (
+                previous
+                && current.updatedAt > previous.updatedAt
+                && current.eventBatchCount >= previous.eventBatchCount
+                && current.eventCount >= previous.eventCount
+            ) {
+                const batchDelta = current.eventBatchCount - previous.eventBatchCount;
+                const eventDelta = current.eventCount - previous.eventCount;
+                const acknowledgementBatchDelta = counterDelta(
+                    current.acknowledgementBatchCount,
+                    previous.acknowledgementBatchCount
+                );
+                const acknowledgementDelta = counterDelta(
+                    current.acknowledgementCount,
+                    previous.acknowledgementCount
+                );
+
+                stage.events.workerIpcAcknowledgementBatches += acknowledgementBatchDelta;
+                stage.events.workerIpcAcknowledgements += acknowledgementDelta;
+                stage.events.workerIpcBatches += batchDelta;
+                stage.events.workerIpcEvents += eventDelta;
+                stage.events.workerIpcVolatileDeferred += counterDelta(
+                    current.volatileDeferredEventCount,
+                    previous.volatileDeferredEventCount
+                );
+                stage.events.workerIpcVolatileDelivered += counterDelta(
+                    current.volatileDeliveredEventCount,
+                    previous.volatileDeliveredEventCount
+                );
+                stage.events.workerIpcVolatileReplaced += counterDelta(
+                    current.volatileReplacedEventCount,
+                    previous.volatileReplacedEventCount
+                );
+                stage.events.workerIpcMaxBatchSize = Math.max(
+                    stage.events.workerIpcMaxBatchSize,
+                    current.lastEventBatchSize
+                );
+                stage.events.workerIpcMaxAcknowledgementBatchSize = Math.max(
+                    stage.events.workerIpcMaxAcknowledgementBatchSize,
+                    current.lastAcknowledgementBatchSize
+                );
+                if (acknowledgementBatchDelta > 0) {
+                    stage.series.workerIpcAcknowledgementsPerBatch.add(
+                        acknowledgementDelta / acknowledgementBatchDelta
+                    );
+                }
+                if (batchDelta > 0) {
+                    stage.series.workerIpcEventsPerBatch.add(eventDelta / batchDelta);
+                }
+            }
+
+            stage.workerIpcCounters.set(workerId, current);
+        }
     }
 
     function createStageState(stagePlan, rampDurationMs) {
@@ -679,7 +764,16 @@ function createMassiveConnectionDiagnostic(options, plan) {
                 reliableRetries: 0,
                 sequenceGapEvents: 0,
                 snapshots: 0,
-                unexpectedDisconnects: 0
+                unexpectedDisconnects: 0,
+                workerIpcAcknowledgementBatches: 0,
+                workerIpcAcknowledgements: 0,
+                workerIpcBatches: 0,
+                workerIpcEvents: 0,
+                workerIpcMaxAcknowledgementBatchSize: 0,
+                workerIpcMaxBatchSize: 0,
+                workerIpcVolatileDeferred: 0,
+                workerIpcVolatileDelivered: 0,
+                workerIpcVolatileReplaced: 0
             },
             health: [],
             healthFailures: new Map(),
@@ -688,7 +782,8 @@ function createMassiveConnectionDiagnostic(options, plan) {
             plan: stagePlan,
             rampDurationMs,
             series: createStageSeries(stagePlan.index),
-            startedAt: new Date().toISOString()
+            startedAt: new Date().toISOString(),
+            workerIpcCounters: new Map()
         };
     }
 
@@ -706,7 +801,9 @@ function createMassiveConnectionDiagnostic(options, plan) {
             snapshotLatencyMs: new MetricSeries({ seed: seed ^ 9 }),
             snapshotStateDraftMs: new MetricSeries({ seed: seed ^ 10 }),
             snapshotStateCommitMs: new MetricSeries({ seed: seed ^ 11 }),
-            snapshotStateTerritoryPointCount: new MetricSeries({ seed: seed ^ 12 })
+            snapshotStateTerritoryPointCount: new MetricSeries({ seed: seed ^ 12 }),
+            workerIpcEventsPerBatch: new MetricSeries({ seed: seed ^ 13 }),
+            workerIpcAcknowledgementsPerBatch: new MetricSeries({ seed: seed ^ 14 })
         };
     }
 
@@ -1323,4 +1420,13 @@ function delay(durationMs) {
 
 function round(value) {
     return Number.isFinite(value) ? Math.round(value * 1000) / 1000 : null;
+}
+
+function finiteCounter(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+function counterDelta(current, previous) {
+    return Math.max(0, finiteCounter(current) - finiteCounter(previous));
 }
