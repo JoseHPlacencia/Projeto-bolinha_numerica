@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test --test-concurrency=1 \"test/*.test.js\" \"test/*.test.mjs\"",
+    "test": "node scripts/run-tests.js",
     "benchmark:bots": "node --expose-gc scripts/run-bots-soak.js",
     "benchmark:capacity": "node scripts/run-capacity-matrix.js",
     "diagnostic:connections": "node scripts/run-massive-connections.js",
