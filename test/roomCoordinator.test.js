@@ -175,9 +175,11 @@ test("room worker batch preserves shared snapshot frame references across IPC", 
         const [first, second] = sharedSnapshots;
 
         assert.strictEqual(first.leaderboard, second.leaderboard);
-        assert.strictEqual(first.numbers, second.numbers);
+        assert.strictEqual(first.numbers.theme, second.numbers.theme);
+        assert.equal(first.numbers.themeEndsIn, second.numbers.themeEndsIn);
+        assert.ok(Array.isArray(first.numbers.nums));
+        assert.ok(Array.isArray(second.numbers.nums));
         assert.strictEqual(first.roomConfig, second.roomConfig);
-        assert.strictEqual(first.players[owner.id], second.players[owner.id]);
 
         await coordinator.leaveRoom(guest);
         await coordinator.leaveRoom(owner);

@@ -118,7 +118,7 @@ function createSnapshot(
         roomConfig: roomFrame.roomConfig,
         catchStatus: serializeCatchStatus(players, viewerId, runtimeConfig, now),
         leaderboard: roomFrame.leaderboard,
-        numbers: roomFrame.numbers
+        numbers: serializeVisibleNumbers(roomFrame.numbers, interestBounds)
     };
 
     const payloadBudgetDiagnostics = serializeSnapshotPayloadBudget(payloadBudget);
@@ -213,6 +213,58 @@ function serializePlayerPositions(players, playerIds, packedPositions = null) {
     }
 
     return serializedPlayers;
+}
+
+/**
+ * Numbers are transient and each snapshot replaces the visible list entirely.
+ * Sending a complete interest-area subset therefore remains safe after a
+ * volatile drop and does not require tombstones or client-side delta state.
+ */
+function serializeVisibleNumbers(serializedNumbers, interestBounds) {
+    const numbers = serializedNumbers && serializedNumbers.nums;
+
+    if (
+        config.network.cullNumbersByViewport === false
+        || !interestBounds
+        || !Array.isArray(numbers)
+    ) {
+        return serializedNumbers;
+    }
+
+    const visibleNumbers = numbers.filter(number => (
+        isPackedNumberNearBounds(number, interestBounds)
+    ));
+
+    if (visibleNumbers.length === numbers.length) {
+        return serializedNumbers;
+    }
+
+    return {
+        ...serializedNumbers,
+        nums: visibleNumbers
+    };
+}
+
+function isPackedNumberNearBounds(number, bounds) {
+    if (!Array.isArray(number)) {
+        return false;
+    }
+
+    const x = Number(number[1]);
+    const y = Number(number[2]);
+
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return false;
+    }
+
+    const radius = Number.isFinite(config.numbers.radius)
+        ? Math.max(0, config.numbers.radius)
+        : 0;
+
+    return x + radius >= bounds.minX
+        && x - radius <= bounds.maxX
+        && y + radius >= bounds.minY
+        && y - radius <= bounds.maxY;
 }
 
 function serializeChangedPlayerInfo(players, playerIds, clientState, now) {

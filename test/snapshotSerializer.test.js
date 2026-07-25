@@ -253,6 +253,51 @@ test("shared snapshot frame remains optional for direct serializer callers", () 
     assert.strictEqual(snapshot.roomConfig, sharedFrame.roomConfig);
 });
 
+test("snapshot interest culling excludes remote positions and numbers", () => {
+    const viewer = new Player("viewer", { x: 0, y: 0 });
+    const nearby = new Player("nearby", { x: 1000, y: 0 });
+    const remote = new Player("remote", { x: 4000, y: 0 });
+    const players = new Map([
+        [viewer.id, viewer],
+        [nearby.id, nearby],
+        [remote.id, remote]
+    ]);
+    const territories = createTerritories();
+    const numberSystem = {
+        serialize: () => ({
+            nums: [
+                [1, 1200, 0, "1", 1, 100],
+                [2, 4000, 0, "2", 2, 200]
+            ],
+            theme: null,
+            themeEndsIn: 30
+        })
+    };
+
+    initializePlayerTerritory(territories, viewer);
+    initializePlayerTerritory(territories, nearby);
+    initializePlayerTerritory(territories, remote);
+
+    const snapshot = createSnapshot(
+        players,
+        territories,
+        viewer.id,
+        createClientSnapshotState(),
+        numberSystem,
+        config
+    );
+
+    assert.ok(snapshot.players[viewer.id]);
+    assert.ok(snapshot.players[nearby.id]);
+    assert.equal(snapshot.players[remote.id], undefined);
+    assert.deepEqual(
+        snapshot.numbers.nums.map(number => number[0]),
+        [1]
+    );
+    assert.equal(snapshot.leaderboard.length, 3);
+    assert.equal(snapshot.numbers.themeEndsIn, 30);
+});
+
 test("snapshot uses hysteresis before explicitly removing territory and trail", () => {
     const viewer = new Player("viewer", { x: 0, y: 0 });
     const remote = new Player("remote", { x: 1400, y: 0 });
