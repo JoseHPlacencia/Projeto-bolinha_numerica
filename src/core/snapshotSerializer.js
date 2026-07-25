@@ -13,8 +13,14 @@ const {
 const {
     packAngle,
     packCoordinate,
+    roundToPrecision,
     shouldSendVersionedState
 } = require("./snapshotSerializationPrimitives");
+const {
+    normalizeSnapshotSchema,
+    supportsCachedSnapshotGlobals,
+    supportsCompactTransientState
+} = require("./snapshotProtocol");
 const {
     removeUnselectedTerritoryStates,
     serializeChangedTerritoryState
@@ -27,7 +33,7 @@ const {
 } = require("./snapshotTrailSerializer");
 
 /**
- * Builds schema-2 snapshots against a per-socket confirmed state.
+ * Builds negotiated snapshots against a per-socket confirmed state.
  * The caller clones that state before reliable sends and commits it only after
  * acknowledgement. Protocol invariants are documented in .ai/docs/SNAPSHOT_PROTOCOL.md.
  */
@@ -72,6 +78,7 @@ function createSnapshot(
         roomFrame.trailBounds
     );
     const payloadBudget = createSnapshotPayloadBudget();
+    const snapshotSchema = normalizeSnapshotSchema(clientState.snapshotSchema);
 
     prunePlayerInfoState(clientState, players);
     const removedTerritoryIds = removeUnselectedTerritoryStates(
@@ -101,9 +108,14 @@ function createSnapshot(
         new Set(trailIds)
     );
     const snapshot = {
-        schema: 2,
+        schema: snapshotSchema,
         time: now,
-        players: serializePlayerPositions(players, playerIds, roomFrame.playerPositions),
+        players: serializePlayerPositions(
+            players,
+            playerIds,
+            roomFrame.playerPositions,
+            snapshotSchema
+        ),
         playerInfo: serializeChangedPlayerInfo(players, playerIds, clientState, now),
         territoryIds: territoryChanges.territoryIds,
         territoryVersions: territoryChanges.territoryVersions,
@@ -114,12 +126,16 @@ function createSnapshot(
         trails: trailUpdates.trails,
         removedTrailIds: Object.keys(trailRemovals),
         trailRemovals,
-        mode: config.gameMode.mode,
-        roomConfig: roomFrame.roomConfig,
-        catchStatus: serializeCatchStatus(players, viewerId, runtimeConfig, now),
-        leaderboard: roomFrame.leaderboard,
+        catchStatus: serializeCatchStatus(
+            players,
+            viewerId,
+            runtimeConfig,
+            now,
+            snapshotSchema
+        ),
         numbers: serializeVisibleNumbers(roomFrame.numbers, interestBounds)
     };
+    assignSnapshotGlobals(snapshot, roomFrame, clientState, snapshotSchema);
 
     const payloadBudgetDiagnostics = serializeSnapshotPayloadBudget(payloadBudget);
     if (payloadBudgetDiagnostics) {
@@ -141,15 +157,76 @@ function createSnapshot(
  * socket snapshot created from it shares the same references.
  */
 function createSnapshotSharedFrame(players, territories, numberSystem = null, runtimeConfig = null) {
+    const roomConfig = serializeRoomSettings(runtimeConfig);
+    const leaderboard = createLeaderboard(players, territories, runtimeConfig);
+    const compactLeaderboard = compactLeaderboardEntries(leaderboard);
+    const mode = config.gameMode.mode;
+
     return Object.freeze({
+        compactLeaderboard,
+        leaderboard,
+        leaderboardSignature: JSON.stringify(compactLeaderboard),
+        mode,
+        roomConfig,
+        roomMetadataSignature: JSON.stringify([mode, roomConfig]),
         time: getServerTime(),
-        roomConfig: serializeRoomSettings(runtimeConfig),
-        leaderboard: createLeaderboard(players, territories, runtimeConfig),
         numbers: numberSystem ? numberSystem.serialize() : null,
         playerPositions: createPackedPlayerPositions(players),
         territoryBounds: createTerritoryBounds(territories),
         trailBounds: createTrailBounds(players)
     });
+}
+
+function assignSnapshotGlobals(snapshot, roomFrame, clientState, snapshotSchema) {
+    if (!supportsCachedSnapshotGlobals(snapshotSchema)) {
+        snapshot.mode = roomFrame.mode;
+        snapshot.roomConfig = roomFrame.roomConfig;
+        snapshot.leaderboard = roomFrame.leaderboard;
+        return;
+    }
+
+    const globalState = ensureGlobalSnapshotState(clientState);
+    const knownRoomMetadata = globalState.get("roomMetadata");
+
+    if (
+        !knownRoomMetadata
+        || knownRoomMetadata.signature !== roomFrame.roomMetadataSignature
+    ) {
+        snapshot.mode = roomFrame.mode;
+        snapshot.roomConfig = roomFrame.roomConfig;
+        globalState.set("roomMetadata", {
+            signature: roomFrame.roomMetadataSignature
+        });
+    }
+
+    const knownLeaderboard = globalState.get("leaderboard");
+
+    if (
+        !knownLeaderboard
+        || knownLeaderboard.signature !== roomFrame.leaderboardSignature
+    ) {
+        snapshot.leaderboard = roomFrame.compactLeaderboard;
+        globalState.set("leaderboard", {
+            signature: roomFrame.leaderboardSignature
+        });
+    }
+}
+
+function ensureGlobalSnapshotState(clientState) {
+    if (!(clientState.globalState instanceof Map)) {
+        clientState.globalState = new Map();
+    }
+
+    return clientState.globalState;
+}
+
+function compactLeaderboardEntries(leaderboard) {
+    return (leaderboard || []).map(entry => [
+        entry.id,
+        entry.name,
+        roundToPrecision(entry.areaPercent, 1000),
+        entry.eliminations
+    ]);
 }
 
 function createPackedPlayerPositions(players) {
@@ -193,8 +270,14 @@ function createTrailBounds(players) {
     return bounds;
 }
 
-function serializePlayerPositions(players, playerIds, packedPositions = null) {
-    const serializedPlayers = {};
+function serializePlayerPositions(
+    players,
+    playerIds,
+    packedPositions = null,
+    snapshotSchema = 2
+) {
+    const compact = supportsCompactTransientState(snapshotSchema);
+    const serializedPlayers = compact ? [] : {};
 
     for (const playerId of playerIds) {
         const player = players.get(playerId);
@@ -203,13 +286,19 @@ function serializePlayerPositions(players, playerIds, packedPositions = null) {
             continue;
         }
 
-        serializedPlayers[player.id] = packedPositions && packedPositions.has(player.id)
+        const packedPosition = packedPositions && packedPositions.has(player.id)
             ? packedPositions.get(player.id)
             : [
                 packCoordinate(player.x),
                 packCoordinate(player.y),
                 packAngle(player.angle)
             ];
+
+        if (compact) {
+            serializedPlayers.push(player.id, ...packedPosition);
+        } else {
+            serializedPlayers[player.id] = packedPosition;
+        }
     }
 
     return serializedPlayers;
@@ -338,7 +427,13 @@ function createLeaderboard(players, territories, runtimeConfig = null) {
         }));
 }
 
-function serializeCatchStatus(players, viewerId, runtimeConfig, now) {
+function serializeCatchStatus(
+    players,
+    viewerId,
+    runtimeConfig,
+    now,
+    snapshotSchema = 2
+) {
     const viewer = viewerId ? players.get(viewerId) : null;
 
     if (!viewer) {
@@ -370,7 +465,7 @@ function serializeCatchStatus(players, viewerId, runtimeConfig, now) {
         ))
     );
 
-    return {
+    const status = {
         counterTargetCount: outgoingTargets.length,
         counterRiskArmed: outgoingTargets.length > 0 && outgoingRemainingMs === 0,
         counterRiskRemainingMs: outgoingRemainingMs,
@@ -378,6 +473,19 @@ function serializeCatchStatus(players, viewerId, runtimeConfig, now) {
         threatArmed: incomingMarkers.length > 0 && incomingRemainingMs === 0,
         threatRemainingMs: incomingRemainingMs
     };
+
+    if (!supportsCompactTransientState(snapshotSchema)) {
+        return status;
+    }
+
+    return [
+        status.counterTargetCount,
+        status.counterRiskArmed ? 1 : 0,
+        status.counterRiskRemainingMs,
+        status.threatCount,
+        status.threatArmed ? 1 : 0,
+        status.threatRemainingMs
+    ];
 }
 
 function getCounterattackRemainingMs(marker, targetId, now, graceMs) {

@@ -1,8 +1,11 @@
 const SNAPSHOT_STATE_DRAFT = Symbol("snapshotStateDraft");
+const { normalizeSnapshotSchema } = require("./snapshotProtocol");
 
-function createClientSnapshotState() {
+function createClientSnapshotState(options = {}) {
     return {
+        globalState: new Map(),
         playerInfo: new Map(),
+        snapshotSchema: normalizeSnapshotSchema(options.snapshotSchema),
         territories: new Map(),
         trails: new Map(),
         territoryVisibility: new Map(),
@@ -26,7 +29,9 @@ function createClientSnapshotStateDraft(clientState = createClientSnapshotState(
         : clientState;
 
     return {
+        globalState: new SnapshotStateMapDraft(confirmedState.globalState),
         playerInfo: new SnapshotStateMapDraft(confirmedState.playerInfo),
+        snapshotSchema: normalizeSnapshotSchema(confirmedState.snapshotSchema),
         territories: new SnapshotStateMapDraft(confirmedState.territories),
         trails: new SnapshotStateMapDraft(confirmedState.trails),
         territoryVisibility: new SnapshotStateMapDraft(confirmedState.territoryVisibility),
@@ -45,7 +50,9 @@ function materializeClientSnapshotStateDraft(clientState) {
     }
 
     return {
+        globalState: materializeMap(clientState.globalState),
         playerInfo: materializeMap(clientState.playerInfo),
+        snapshotSchema: normalizeSnapshotSchema(clientState.snapshotSchema),
         territories: materializeMap(clientState.territories),
         trails: materializeMap(clientState.trails),
         territoryVisibility: materializeMap(clientState.territoryVisibility),
@@ -63,7 +70,9 @@ function isClientSnapshotStateDraft(clientState) {
 
 function cloneClientSnapshotState(clientState = createClientSnapshotState()) {
     return {
+        globalState: cloneMap(clientState.globalState, cloneVersionedState),
         playerInfo: cloneMap(clientState.playerInfo, cloneVersionedState),
+        snapshotSchema: normalizeSnapshotSchema(clientState.snapshotSchema),
         territories: cloneMap(clientState.territories, cloneVersionedState),
         trails: cloneMap(clientState.trails, cloneTrailState),
         territoryVisibility: new Map(clientState.territoryVisibility || []),

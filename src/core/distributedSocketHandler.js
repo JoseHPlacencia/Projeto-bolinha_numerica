@@ -12,6 +12,7 @@ const {
     setGatewayTransportDiagnosticsEnabled,
     takeGatewayTransportDiagnostics
 } = require("./gatewayTransportDiagnostics");
+const { applySocketSnapshotProtocol } = require("./snapshotProtocol");
 
 function registerDistributedSocket(io, coordinator) {
     coordinator.on("roomsChanged", () => {
@@ -38,6 +39,7 @@ function registerDistributedSocket(io, coordinator) {
     });
 
     io.on("connection", socket => {
+        applySocketSnapshotProtocol(socket);
         socket.emit("roomsList", coordinator.listRooms());
         registerRoomEvents(socket, io, coordinator);
         registerInputEvents(socket, coordinator);

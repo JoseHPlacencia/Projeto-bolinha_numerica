@@ -112,11 +112,7 @@ function expandBounds(bounds, margin) {
 }
 
 function drawPolygonFill(context, polygon, fillAlpha, viewportBounds) {
-    const rings = viewportBounds
-        ? clipPolygonRingsToBounds(polygon.rings, viewportBounds)
-        : polygon.rings;
-
-    if (rings.length === 0 || !polygon.color) {
+    if (!polygon.color) {
         return;
     }
 
@@ -124,25 +120,31 @@ function drawPolygonFill(context, polygon, fillAlpha, viewportBounds) {
     context.globalAlpha = fillAlpha;
     context.fillStyle = polygon.color;
 
-    if (!viewportBounds && polygon.fillPath) {
+    // Path2D is immutable and cached by territory version. Let the canvas clip
+    // it natively instead of rebuilding a clipped polygon in JavaScript on
+    // every rendered frame.
+    if (polygon.fillPath) {
         context.fill(polygon.fillPath, "evenodd");
-    } else {
-        const path = createPath(rings);
-
-        if (path) {
-            context.fill(path, "evenodd");
-            context.restore();
-            return;
-        }
-
-        context.beginPath();
-
-        for (const ring of rings) {
-            traceRing(context, ring);
-        }
-
-        context.fill("evenodd");
+        context.restore();
+        return;
     }
+
+    const rings = viewportBounds
+        ? clipPolygonRingsToBounds(polygon.rings, viewportBounds)
+        : polygon.rings;
+
+    if (rings.length === 0) {
+        context.restore();
+        return;
+    }
+
+    context.beginPath();
+
+    for (const ring of rings) {
+        traceRing(context, ring);
+    }
+
+    context.fill("evenodd");
 
     context.restore();
 }
@@ -153,7 +155,9 @@ function drawTerritoryBorder(context, polygon, gameConfig, viewportBounds) {
     }
 
     const lineWidth = gameConfig.territory.baseBorderWidth;
-    const borderSegments = viewportBounds
+    const borderSegments = polygon.borderPath
+        ? polygon.borderRings
+        : viewportBounds
         ? clipBorderRingsToViewport(polygon.borderRings, viewportBounds, lineWidth)
         : polygon.borderRings;
 
@@ -193,7 +197,7 @@ function drawTerritoryBorder(context, polygon, gameConfig, viewportBounds) {
 }
 
 function strokeTerritoryBorder(context, polygon, borderSegments, viewportBounds) {
-    if (!viewportBounds && polygon.borderPath) {
+    if (polygon.borderPath) {
         context.stroke(polygon.borderPath);
         return;
     }

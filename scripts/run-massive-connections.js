@@ -8,6 +8,9 @@ const {
     createConnectionLoadPlan
 } = require("./lib/connectionLoadPlan");
 const { MetricSeries } = require("./lib/metricSeries");
+const {
+    MAX_SNAPSHOT_SCHEMA
+} = require("../src/core/snapshotProtocol");
 
 const projectRoot = path.resolve(__dirname, "..");
 const defaultOutput = path.join(
@@ -226,6 +229,9 @@ function createMassiveConnectionDiagnostic(options, plan) {
 
     function createClientState(index, room) {
         const socket = io(options.url, {
+            auth: {
+                snapshotSchema: MAX_SNAPSHOT_SCHEMA
+            },
             autoConnect: false,
             forceNew: true,
             reconnection: false,

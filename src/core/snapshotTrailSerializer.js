@@ -8,6 +8,12 @@ const {
     packPoints,
     shouldSendForcedFullSync
 } = require("./snapshotSerializationPrimitives");
+const {
+    supportsCompactTrailUpdates
+} = require("./snapshotProtocol");
+const {
+    compactTrailUpdate
+} = require("./snapshotTrailWireFormat");
 
 /**
  * Incremental trail full-sync, patch, partial update and tombstone state.
@@ -55,7 +61,9 @@ function serializeTrailUpdates(players, trailIds, viewerId, clientState, now, pa
             continue;
         }
 
-        serializedTrails[playerId] = update;
+        serializedTrails[playerId] = supportsCompactTrailUpdates(clientState.snapshotSchema)
+            ? compactTrailUpdate(update)
+            : update;
         clientState.trails.set(playerId, {
             ...serialized.state,
             lastFullSentAt: shouldSendFull ? now : knownTrail.lastFullSentAt

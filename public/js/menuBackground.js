@@ -1,4 +1,5 @@
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
+import { createSnapshotSocketAuth } from "./snapshotProtocol.js";
 import { createWorldRenderer } from "./worldRenderer.js";
 import { createRenderFrameLimiter } from "./renderSettings.js";
 
@@ -12,6 +13,7 @@ export function createMenuBackground(gameConfig) {
     }
 
     const socket = io({
+        auth: createSnapshotSocketAuth(),
         transports: gameConfig.socket.transports,
         autoConnect: false,
         reconnection: false
@@ -183,10 +185,18 @@ export function createMenuBackground(gameConfig) {
         }
 
         if (!followId && snapshot && snapshot.players) {
-            return Object.keys(snapshot.players)[0] || null;
+            return getFirstSnapshotPlayerId(snapshot.players);
         }
 
         return followId;
+    }
+
+    function getFirstSnapshotPlayerId(players) {
+        if (Array.isArray(players)) {
+            return typeof players[0] === "string" ? players[0] : null;
+        }
+
+        return Object.keys(players || {})[0] || null;
     }
 
     function setFollowId(nextFollowId) {

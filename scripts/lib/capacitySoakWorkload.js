@@ -12,6 +12,9 @@ const {
     createClientSnapshotStateDraft,
     materializeClientSnapshotStateDraft
 } = require("../../src/core/snapshotClientState");
+const {
+    MAX_SNAPSHOT_SCHEMA
+} = require("../../src/core/snapshotProtocol");
 const { createPlayer } = require("../../src/entities/player");
 const { initializePlayerTerritory } = require("../../src/state/territories");
 
@@ -196,7 +199,9 @@ function getSnapshotState(scenario, playerId) {
     let clientState = scenario.snapshotStates.get(playerId);
 
     if (!clientState) {
-        clientState = createClientSnapshotState();
+        clientState = createClientSnapshotState({
+            snapshotSchema: MAX_SNAPSHOT_SCHEMA
+        });
         scenario.snapshotStates.set(playerId, clientState);
     }
     return clientState;

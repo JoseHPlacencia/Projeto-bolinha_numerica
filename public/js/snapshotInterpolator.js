@@ -18,7 +18,7 @@ import {
 } from "./snapshotGeometry.js";
 
 /**
- * Applies schema-2 snapshots transactionally and exposes an interpolated view.
+ * Applies schema-2/3 snapshots transactionally and exposes an interpolated view.
  * Cache mutations are staged until the whole snapshot is valid; sequence,
  * epoch, territory version and trail generation must remain monotonic.
  * See .ai/docs/SNAPSHOT_PROTOCOL.md.
@@ -27,6 +27,7 @@ import {
 export function createSnapshotInterpolator(networkConfig, options = {}) {
     const snapshots = [];
     const entityCache = {
+        globals: createEmptyGlobalCache(),
         playerInfo: {}
     };
     const networkState = {
@@ -78,6 +79,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
     function resetSnapshotContinuity() {
         snapshots.length = 0;
+        entityCache.globals = createEmptyGlobalCache();
         entityCache.playerInfo = {};
         geometryApplication.reset();
         networkState.bufferMs = networkConfig.initialBufferMs;
@@ -197,7 +199,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function expandSnapshot(rawSnapshot, applyResult) {
-        if (rawSnapshot && rawSnapshot.schema === 2) {
+        if (
+            rawSnapshot
+            && (rawSnapshot.schema === 2 || rawSnapshot.schema === 3)
+        ) {
             return expandCompactSnapshot(rawSnapshot, applyResult);
         }
 
@@ -205,8 +210,10 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     }
 
     function expandCompactSnapshot(rawSnapshot, applyResult) {
+        const globalCheckpoint = entityCache.globals;
         const playerInfoCheckpoint = { ...entityCache.playerInfo };
 
+        updateGlobalCache(rawSnapshot);
         updatePlayerInfoCache(rawSnapshot.playerInfo, rawSnapshot.sequence);
         const geometry = geometryApplication.applySnapshotGeometry(
             rawSnapshot,
@@ -220,6 +227,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         const players = expandPlayers(rawSnapshot.players, rawSnapshot.debug);
 
         if (!applyResult.applied) {
+            entityCache.globals = globalCheckpoint;
             entityCache.playerInfo = playerInfoCheckpoint;
         }
 
@@ -236,8 +244,8 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
             trailIds: geometry.trailIds,
             preserveTrails: Boolean(rawSnapshot.preserveTrails),
             catchStatus: normalizeCatchStatus(rawSnapshot.catchStatus),
-            leaderboard: rawSnapshot.leaderboard || [],
-            mode: rawSnapshot.mode || null,
+            leaderboard: entityCache.globals.leaderboard,
+            mode: entityCache.globals.mode,
             numbers: rawSnapshot.numbers || null
         };
     }
@@ -665,7 +673,7 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
     function expandPlayers(players, debug) {
         const expandedPlayers = {};
 
-        for (const [id, player] of Object.entries(players || {})) {
+        for (const [id, player] of iteratePackedPlayers(players)) {
             const info = entityCache.playerInfo[id] || {};
 
             expandedPlayers[id] = {
@@ -727,6 +735,38 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
         options.onResyncNeeded();
     }
 
+    function updateGlobalCache(rawSnapshot) {
+        if (!rawSnapshot || rawSnapshot.schema !== 3) {
+            entityCache.globals = {
+                leaderboard: Array.isArray(rawSnapshot && rawSnapshot.leaderboard)
+                    ? rawSnapshot.leaderboard
+                    : [],
+                mode: rawSnapshot && rawSnapshot.mode || null
+            };
+            return;
+        }
+
+        let nextGlobals = entityCache.globals;
+
+        if (hasOwn(rawSnapshot, "leaderboard")) {
+            nextGlobals = {
+                ...nextGlobals,
+                leaderboard: expandCompactLeaderboard(rawSnapshot.leaderboard)
+            };
+        }
+
+        if (hasOwn(rawSnapshot, "mode")) {
+            nextGlobals = {
+                ...nextGlobals,
+                mode: typeof rawSnapshot.mode === "string"
+                    ? rawSnapshot.mode
+                    : null
+            };
+        }
+
+        entityCache.globals = nextGlobals;
+    }
+
     function recordResyncSuppressed(reason, details, now, interval) {
         recordNetworkDiagnosticsEvent({
             type: "resyncSuppressed",
@@ -747,7 +787,50 @@ export function createSnapshotInterpolator(networkConfig, options = {}) {
 
 }
 
+function createEmptyGlobalCache() {
+    return {
+        leaderboard: [],
+        mode: null
+    };
+}
+
+function expandCompactLeaderboard(entries) {
+    const leaderboard = [];
+
+    for (const entry of entries || []) {
+        if (!Array.isArray(entry) || typeof entry[0] !== "string" || !entry[0]) {
+            continue;
+        }
+
+        leaderboard.push({
+            id: entry[0],
+            name: typeof entry[1] === "string" ? entry[1] : "Jogador",
+            areaPercent: Number.isFinite(entry[2]) ? entry[2] : 0,
+            eliminations: Number.isFinite(entry[3]) ? entry[3] : 0,
+            rank: leaderboard.length + 1
+        });
+    }
+
+    return leaderboard;
+}
+
+function hasOwn(value, key) {
+    return Boolean(value)
+        && Object.prototype.hasOwnProperty.call(value, key);
+}
+
 function normalizeCatchStatus(status) {
+    if (Array.isArray(status)) {
+        return {
+            counterTargetCount: normalizeNonNegativeInteger(status[0]),
+            counterRiskArmed: Boolean(status[1]),
+            counterRiskRemainingMs: normalizeRemainingMs(status[2]),
+            threatCount: normalizeNonNegativeInteger(status[3]),
+            threatArmed: Boolean(status[4]),
+            threatRemainingMs: normalizeRemainingMs(status[5])
+        };
+    }
+
     const value = status && typeof status === "object" ? status : {};
 
     return {
@@ -758,6 +841,30 @@ function normalizeCatchStatus(status) {
         threatArmed: Boolean(value.threatArmed),
         threatRemainingMs: normalizeRemainingMs(value.threatRemainingMs)
     };
+}
+
+function* iteratePackedPlayers(players) {
+    if (!Array.isArray(players)) {
+        yield* Object.entries(players || {});
+        return;
+    }
+
+    for (let index = 0; index + 3 < players.length; index += 4) {
+        const id = players[index];
+
+        if (typeof id !== "string" || !id) {
+            continue;
+        }
+
+        yield [
+            id,
+            [
+                players[index + 1],
+                players[index + 2],
+                players[index + 3]
+            ]
+        ];
+    }
 }
 
 function normalizeSnapshotEpoch(value) {

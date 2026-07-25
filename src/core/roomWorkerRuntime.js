@@ -218,7 +218,11 @@ function createRoomWorkerRuntime(options = {}) {
         const socket = virtualTransport.getSocket(payload.socketId);
         if (!socket || !payload.data || typeof payload.data !== "object") return false;
 
-        for (const key of ["captureOverlapAuditEnabled", "networkDiagnosticsEnabled"]) {
+        for (const key of [
+            "captureOverlapAuditEnabled",
+            "networkDiagnosticsEnabled",
+            "snapshotSchema"
+        ]) {
             if (Object.prototype.hasOwnProperty.call(payload.data, key)) {
                 socket.data[key] = payload.data[key];
             }

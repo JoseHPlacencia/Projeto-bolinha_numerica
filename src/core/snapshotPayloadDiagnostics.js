@@ -1,6 +1,9 @@
 const { performance } = require("node:perf_hooks");
 
 const config = require("../config/gameConfig");
+const {
+    expandCompactTrailUpdate
+} = require("./snapshotTrailWireFormat");
 
 function measureSnapshotPayload(snapshot) {
     const startedAt = performance.now();
@@ -52,7 +55,9 @@ function createSnapshotBreakdown(snapshot, options = {}) {
             + countArrayItems(operation.trailTailPoints);
     }
 
-    for (const trail of trailValues) {
+    for (const rawTrail of trailValues) {
+        const trail = expandCompactTrailUpdate(rawTrail);
+
         if (!trail) {
             continue;
         }
@@ -78,7 +83,7 @@ function createSnapshotBreakdown(snapshot, options = {}) {
     }
 
     const breakdown = {
-        playerPositionCount: countObjectKeys(snapshot && snapshot.players),
+        playerPositionCount: countPlayerPositions(snapshot && snapshot.players),
         playerInfoCount: countObjectKeys(snapshot && snapshot.playerInfo),
         territoryVersionCount: countObjectKeys(snapshot && snapshot.territoryVersions),
         territoryPayloadCount: countObjectKeys(territories),
@@ -114,6 +119,12 @@ function isPayloadOutlier(bytes) {
 
 function countObjectKeys(value) {
     return value && typeof value === "object" ? Object.keys(value).length : 0;
+}
+
+function countPlayerPositions(value) {
+    return Array.isArray(value)
+        ? Math.floor(value.length / 4)
+        : countObjectKeys(value);
 }
 
 function countArrayItems(value) {
@@ -201,29 +212,36 @@ function createTrailPayloadDetail(playerId, trail) {
         return null;
     }
 
-    const leftPatchPointCount = countPatchPoints(trail.leftPatches);
-    const rightPatchPointCount = countPatchPoints(trail.rightPatches);
-    const leftFillPointCount = countArrayItems(trail.leftFillPoints);
-    const rightFillPointCount = countArrayItems(trail.rightFillPoints);
-    const leftSegmentPointCount = countPackedSegmentsPoints(trail.leftSegments);
-    const rightSegmentPointCount = countPackedSegmentsPoints(trail.rightSegments);
-    const leftFillPathPointCount = countArrayItems(trail.leftFillPath);
-    const rightFillPathPointCount = countArrayItems(trail.rightFillPath);
+    const rawTrail = trail;
+    const expandedTrail = expandCompactTrailUpdate(rawTrail);
+
+    if (!expandedTrail) {
+        return null;
+    }
+
+    const leftPatchPointCount = countPatchPoints(expandedTrail.leftPatches);
+    const rightPatchPointCount = countPatchPoints(expandedTrail.rightPatches);
+    const leftFillPointCount = countArrayItems(expandedTrail.leftFillPoints);
+    const rightFillPointCount = countArrayItems(expandedTrail.rightFillPoints);
+    const leftSegmentPointCount = countPackedSegmentsPoints(expandedTrail.leftSegments);
+    const rightSegmentPointCount = countPackedSegmentsPoints(expandedTrail.rightSegments);
+    const leftFillPathPointCount = countArrayItems(expandedTrail.leftFillPath);
+    const rightFillPathPointCount = countArrayItems(expandedTrail.rightFillPath);
     const patchPointCount = leftPatchPointCount + rightPatchPointCount + leftFillPointCount + rightFillPointCount;
     const fullPointCount = leftSegmentPointCount + rightSegmentPointCount + leftFillPathPointCount + rightFillPathPointCount;
 
     return {
         playerId,
-        bytes: measureJsonBytes(trail),
-        full: Boolean(trail.full),
-        partial: Boolean(trail.partial),
-        pointBudget: finiteOrNull(trail.pointBudget),
-        pointCount: trail.full ? fullPointCount : patchPointCount,
+        bytes: measureJsonBytes(rawTrail),
+        full: Boolean(expandedTrail.full),
+        partial: Boolean(expandedTrail.partial),
+        pointBudget: finiteOrNull(expandedTrail.pointBudget),
+        pointCount: expandedTrail.full ? fullPointCount : patchPointCount,
         patchPointCount,
-        remainingPointCount: finiteOrNull(trail.remainingPointCount),
+        remainingPointCount: finiteOrNull(expandedTrail.remainingPointCount),
         fullPointCount,
-        leftPatchCount: countArrayItems(trail.leftPatches),
-        rightPatchCount: countArrayItems(trail.rightPatches),
+        leftPatchCount: countArrayItems(expandedTrail.leftPatches),
+        rightPatchCount: countArrayItems(expandedTrail.rightPatches),
         leftPatchPointCount,
         rightPatchPointCount,
         leftFillPointCount,
@@ -335,6 +353,7 @@ module.exports = {
     countArrayItems,
     countInvalidations,
     countObjectKeys,
+    countPlayerPositions,
     createSnapshotBreakdown,
     isPayloadOutlier,
     measureSnapshotPayload

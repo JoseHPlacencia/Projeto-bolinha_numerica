@@ -5,6 +5,7 @@ const { initializeRoomPlayer } = require("./roomPlayer");
 const { applyPlayerInput } = require("./playerInput");
 const { createRateLimiter } = require("../utils/rateLimiter");
 const { redirectSpectatorsAfterPlayerExit } = require("../systems/spectatorSystem");
+const { applySocketSnapshotProtocol } = require("./snapshotProtocol");
 const {
     disableGatewayTransportDiagnostics,
     setGatewayTransportDiagnosticsEnabled,
@@ -18,6 +19,7 @@ function registerSocket(io, roomManager) {
     }
 
     io.on("connection", socket => {
+        applySocketSnapshotProtocol(socket);
         socket.emit("roomsList", buildRoomsList(roomManager));
 
         registerRoomEvents(socket, io, roomManager);

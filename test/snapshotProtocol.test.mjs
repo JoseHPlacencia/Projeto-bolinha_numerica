@@ -48,6 +48,13 @@ const rawSnapshotGeometryApplicationSource = await readFile(
     snapshotGeometryApplicationPath,
     "utf8"
 );
+const snapshotTrailWireFormatPath = new URL(
+    "../public/js/snapshotTrailWireFormat.js",
+    import.meta.url
+);
+const snapshotTrailWireFormatSource = (
+    await readFile(snapshotTrailWireFormatPath, "utf8")
+).replaceAll("export function ", "function ");
 const snapshotGeometryImportMatch = source.match(
     /import\s*\{([^}]*)\}\s*from\s*"\.\/snapshotGeometry\.js";/
 );
@@ -79,6 +86,10 @@ const snapshotGeometryApplicationSource = rawSnapshotGeometryApplicationSource
     .replace(
         /import\s*\{[^}]*\}\s*from\s*"\.\/copyOnWriteTransaction\.js";/,
         copyOnWriteTransactionSource
+    )
+    .replace(
+        /import\s*\{[^}]*\}\s*from\s*"\.\/snapshotTrailWireFormat\.js";/,
+        snapshotTrailWireFormatSource
     )
     .replace(/import\s*\{[^}]*\}\s*from\s*"\.\/snapshotGeometry\.js";/, "");
 const testableSource = source.replace(
@@ -633,6 +644,76 @@ test("catch status is normalized and exposed in render state", () => {
         threatArmed: false,
         threatRemainingMs: 743
     });
+});
+
+test("schema 3 retains compact global fields when later snapshots omit them", () => {
+    const interpolator = createInterpolator();
+
+    const initialResult = interpolator.processSnapshot(createSnapshot(1, 1000, {
+        schema: 3,
+        mode: "sets",
+        leaderboard: [
+            ["leader", "Líder", 12.345, 4],
+            ["second", "Segundo", 8, 1]
+        ]
+    }));
+    const deltaSnapshot = createSnapshot(2, 1100, {
+        schema: 3
+    });
+    delete deltaSnapshot.leaderboard;
+    const deltaResult = interpolator.processSnapshot(deltaSnapshot);
+    const state = interpolator.getRenderState();
+
+    assert.equal(initialResult.applied, true);
+    assert.equal(deltaResult.applied, true);
+    assert.equal(state.mode, "sets");
+    assert.deepEqual(state.leaderboard, [
+        {
+            id: "leader",
+            name: "Líder",
+            areaPercent: 12.345,
+            eliminations: 4,
+            rank: 1
+        },
+        {
+            id: "second",
+            name: "Segundo",
+            areaPercent: 8,
+            eliminations: 1,
+            rank: 2
+        }
+    ]);
+});
+
+test("failed schema 3 geometry does not commit a global delta", () => {
+    const interpolator = createInterpolator();
+
+    interpolator.processSnapshot(createSnapshot(1, 1000, {
+        schema: 3,
+        mode: "sets",
+        leaderboard: [["leader", "Líder", 10, 1]]
+    }));
+    const failedResult = interpolator.processSnapshot(createSnapshot(2, 1100, {
+        schema: 3,
+        leaderboard: [["other", "Outro", 20, 2]],
+        territoryIds: ["missing"],
+        territoryVersions: { missing: 2 },
+        territoryOps: {
+            missing: {
+                type: "trailCapture",
+                baseVersion: 1,
+                version: 2,
+                trailGeneration: 1,
+                trailSide: "left",
+                trailSegmentIndex: 0,
+                trailSegmentLength: 2
+            }
+        }
+    }));
+    const state = interpolator.getRenderState();
+
+    assert.equal(failedResult.applied, false);
+    assert.deepEqual(state.leaderboard.map(entry => entry.id), ["leader"]);
 });
 
 test("invalid snapshots are not inserted into the render buffer", () => {
@@ -1433,6 +1514,92 @@ test("server and client keep a large growing trail monotonic across chunked upda
     }
 
     assert.equal(previousRenderedLength, initialPointCount + 80);
+});
+
+test("schema 3 compact trail updates preserve continuous client geometry", () => {
+    const player = new Player("player", { x: 30.75, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const serverState = createClientSnapshotState({ snapshotSchema: 3 });
+    const interpolator = createInterpolator();
+    const leftPoints = [
+        { x: 0.125, y: -20 },
+        { x: 15.25, y: -19.5 },
+        { x: 30.75, y: -18.25 }
+    ];
+    const rightPoints = [
+        { x: 0.125, y: 20 },
+        { x: 15.25, y: 20.5 },
+        { x: 30.75, y: 21.75 }
+    ];
+
+    initializePlayerTerritory(territories, player);
+    player.trailLeftSegments = [[...leftPoints]];
+    player.trailRightSegments = [[...rightPoints]];
+    player.trailLeftFillPath = [...leftPoints];
+    player.trailRightFillPath = [...rightPoints];
+
+    const fullSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        serverState,
+        null,
+        serverConfig
+    );
+
+    fullSnapshot.sequence = 1;
+    fullSnapshot.snapshotEpoch = 1;
+    assert.equal(Array.isArray(fullSnapshot.trails[player.id]), true);
+    assert.equal(fullSnapshot.trails[player.id][0], 1);
+    assert.equal(interpolator.processSnapshot(fullSnapshot).applied, true);
+
+    let renderState = interpolator.getRenderState();
+    let renderedTrail = renderState.trails[player.id];
+
+    assert.equal(renderState.players[player.id].x, 30.8);
+    assert.deepEqual(
+        renderedTrail.leftSegments[0].map(point => [point.x, point.y]),
+        [
+            [0.1, -20],
+            [15.3, -19.5],
+            [30.8, -18.2]
+        ]
+    );
+
+    const nextLeft = { x: 46.875, y: -16.75 };
+    const nextRight = { x: 46.875, y: 23.25 };
+
+    player.trailLeftSegments[0].push(nextLeft);
+    player.trailRightSegments[0].push(nextRight);
+    player.trailLeftFillPath.push(nextLeft);
+    player.trailRightFillPath.push(nextRight);
+
+    const patchSnapshot = createServerSnapshot(
+        players,
+        territories,
+        player.id,
+        serverState,
+        null,
+        serverConfig
+    );
+
+    patchSnapshot.sequence = 2;
+    patchSnapshot.snapshotEpoch = 1;
+    assert.equal(patchSnapshot.trails[player.id][0], 0);
+    assert.equal(interpolator.processSnapshot(patchSnapshot).applied, true);
+
+    renderState = interpolator.getRenderState();
+    renderedTrail = renderState.trails[player.id];
+    assert.deepEqual(
+        renderedTrail.leftSegments[0].at(-1),
+        { x: 46.9, y: -16.7 }
+    );
+    assert.deepEqual(
+        renderedTrail.rightSegments[0].at(-1),
+        { x: 46.9, y: 23.3 }
+    );
+    assert.equal(renderedTrail.fillPolygon.rings[0].length, 9);
 });
 
 test("deterministic snapshot soak recovers from dropped and reordered geometry updates", () => {

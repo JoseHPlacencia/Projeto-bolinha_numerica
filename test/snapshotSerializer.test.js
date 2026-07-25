@@ -12,7 +12,8 @@ const {
     acknowledgeReliableSnapshot,
     assignSnapshotSequence,
     sendSnapshot,
-    shouldDeferTerritoryGeometry
+    shouldDeferTerritoryGeometry,
+    shouldSendReliably
 } = require("../src/core/snapshotLoop");
 const { resetSocketSnapshotState } = require("../src/core/snapshotState");
 const {
@@ -109,6 +110,88 @@ test("snapshot loop shares room-wide serialization without sharing client delta 
     assert.notStrictEqual(firstSocket.data.snapshotState, secondSocket.data.snapshotState);
 });
 
+test("schema 3 caches room metadata and sends a compact leaderboard only when it changes", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const clientState = createClientSnapshotState({ snapshotSchema: 3 });
+
+    initializePlayerTerritory(territories, player);
+
+    const firstSnapshot = createSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        config
+    );
+    const unchangedSnapshot = createSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        config
+    );
+
+    assert.equal(firstSnapshot.schema, 3);
+    assert.equal(Array.isArray(firstSnapshot.players), true);
+    assert.equal(firstSnapshot.players[0], player.id);
+    assert.equal(Array.isArray(firstSnapshot.catchStatus), true);
+    assert.ok(Array.isArray(firstSnapshot.leaderboard[0]));
+    assert.deepEqual(firstSnapshot.leaderboard[0].slice(0, 2), [player.id, player.name]);
+    assert.equal(typeof firstSnapshot.mode, "string");
+    assert.ok(firstSnapshot.roomConfig);
+    assert.equal(Object.hasOwn(unchangedSnapshot, "leaderboard"), false);
+    assert.equal(Object.hasOwn(unchangedSnapshot, "mode"), false);
+    assert.equal(Object.hasOwn(unchangedSnapshot, "roomConfig"), false);
+
+    player.eliminations++;
+    const changedSnapshot = createSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        config
+    );
+
+    assert.equal(changedSnapshot.leaderboard[0][3], 1);
+    assert.equal(Object.hasOwn(changedSnapshot, "mode"), false);
+    assert.equal(shouldSendReliably(changedSnapshot), true);
+});
+
+test("schema 2 keeps the legacy global snapshot shape", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const clientState = createClientSnapshotState({ snapshotSchema: 2 });
+
+    initializePlayerTerritory(territories, player);
+    const firstSnapshot = createSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        config
+    );
+    const secondSnapshot = createSnapshot(
+        players,
+        territories,
+        player.id,
+        clientState,
+        null,
+        config
+    );
+
+    assert.equal(firstSnapshot.schema, 2);
+    assert.equal(Array.isArray(firstSnapshot.leaderboard[0]), false);
+    assert.ok(secondSnapshot.leaderboard);
+    assert.ok(secondSnapshot.roomConfig);
+});
+
 test("snapshot loop commits transactional state only after reliable acknowledgement", () => {
     const player = new Player("viewer", { x: 0, y: 0 });
     const players = new Map([[player.id, player]]);
@@ -157,6 +240,54 @@ test("snapshot loop commits transactional state only after reliable acknowledgem
     assert.equal(isClientSnapshotStateDraft(socket.data.snapshotState), false);
     assert.equal(socket.data.snapshotState.territories.has(player.id), true);
     assert.ok(socket.data.snapshotState.territoryPoints.size > 0);
+});
+
+test("schema 3 global deltas wait for reliable acknowledgement", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const socket = createSocket(player.id, {
+        roomCode: "ROOM",
+        snapshotSchema: 3
+    });
+    const io = { sockets: { sockets: new Map([[socket.id, socket]]) } };
+    const emissions = [];
+    let acknowledge = null;
+
+    socket.emit = (event, payload, callback) => {
+        emissions.push({ event, payload, volatile: false });
+        if (typeof callback === "function") {
+            acknowledge = callback;
+        }
+    };
+    socket.volatile = {
+        emit(event, payload) {
+            emissions.push({ event, payload, volatile: true });
+        }
+    };
+
+    initializePlayerTerritory(territories, player);
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    assert.equal(emissions[0].payload.schema, 3);
+    assert.ok(emissions[0].payload.leaderboard);
+    assert.ok(emissions[0].payload.roomConfig);
+    assert.equal(socket.data.snapshotState.globalState.size, 0);
+
+    player.x = 25;
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    const volatileSnapshot = emissions.at(-1).payload;
+
+    assert.equal(emissions.at(-1).volatile, true);
+    assert.equal(Object.hasOwn(volatileSnapshot, "leaderboard"), false);
+    assert.equal(Object.hasOwn(volatileSnapshot, "mode"), false);
+    assert.equal(Object.hasOwn(volatileSnapshot, "roomConfig"), false);
+
+    acknowledge(null, { applied: true });
+
+    assert.equal(socket.data.snapshotState.globalState.has("leaderboard"), true);
+    assert.equal(socket.data.snapshotState.globalState.has("roomMetadata"), true);
 });
 
 test("selective rejection invalidates materialized transactional geometry", () => {

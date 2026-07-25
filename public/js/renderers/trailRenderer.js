@@ -49,38 +49,32 @@ function drawTrailFill(context, polygon, color, fillAlpha, viewportBounds) {
         return;
     }
 
+    context.save();
+    context.globalAlpha = fillAlpha;
+    context.fillStyle = color;
+
+    if (polygon.path) {
+        context.fill(polygon.path, "evenodd");
+        context.restore();
+        return;
+    }
+
     const rings = viewportBounds
         ? clipPolygonRingsToBounds(polygon.rings, viewportBounds)
         : polygon.rings;
 
     if (rings.length === 0) {
+        context.restore();
         return;
     }
 
-    context.save();
-    context.globalAlpha = fillAlpha;
-    context.fillStyle = color;
+    context.beginPath();
 
-    if (!viewportBounds && polygon.path) {
-        context.fill(polygon.path, "evenodd");
-    } else {
-        const path = createFillPath(rings);
-
-        if (path) {
-            context.fill(path, "evenodd");
-            context.restore();
-            return;
-        }
-
-        context.beginPath();
-
-        for (const ring of rings) {
-            traceRing(context, ring);
-        }
-
-        context.fill("evenodd");
+    for (const ring of rings) {
+        traceRing(context, ring);
     }
 
+    context.fill("evenodd");
     context.restore();
 }
 
@@ -89,7 +83,9 @@ function drawTrailEdges(context, edge, color, lineWidth, viewportBounds, gameCon
         return;
     }
 
-    const segments = viewportBounds
+    const segments = edge.path
+        ? edge.segments.map(segment => segment.points)
+        : viewportBounds
         ? clipTrailSegmentsToViewport(edge.segments, viewportBounds, lineWidth)
         : edge.segments.map(segment => segment.points);
 
@@ -129,7 +125,7 @@ function drawTrailEdges(context, edge, color, lineWidth, viewportBounds, gameCon
 }
 
 function strokeTrail(context, edge, segments, viewportBounds) {
-    if (!viewportBounds && edge.path) {
+    if (edge.path) {
         context.stroke(edge.path);
         return;
     }

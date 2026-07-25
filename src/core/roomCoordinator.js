@@ -399,7 +399,8 @@ function serializeSocketData(socket) {
     const data = socket && socket.data || {};
     return {
         captureOverlapAuditEnabled: Boolean(data.captureOverlapAuditEnabled),
-        networkDiagnosticsEnabled: Boolean(data.networkDiagnosticsEnabled)
+        networkDiagnosticsEnabled: Boolean(data.networkDiagnosticsEnabled),
+        snapshotSchema: data.snapshotSchema
     };
 }
 

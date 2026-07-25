@@ -1,5 +1,6 @@
 import { finiteOrNull } from "./snapshotDiagnostics.js";
 import { createCopyOnWriteTransaction } from "./copyOnWriteTransaction.js";
+import { expandCompactTrailUpdate } from "./snapshotTrailWireFormat.js";
 import {
     arePointsEqual,
     calculateRingArea,
@@ -27,7 +28,7 @@ const captureAreaRegressionTolerance = 1;
 const captureAreaRegressionRatioTolerance = 0.001;
 
 /**
- * Owns the schema-2 geometry caches and applies each geometry payload as one
+ * Owns the negotiated snapshot geometry caches and applies each payload as one
  * transaction. Failed territory definitions, trail patches or capture replays
  * restore every cache and pending-operation collection to its prior state.
  */
@@ -1003,7 +1004,17 @@ export function createSnapshotGeometryApplication(networkConfig = {}, callbacks 
     }
 
     function updateTrailCache(trails, applyResult, snapshotSequence) {
-        for (const [id, update] of Object.entries(trails || {})) {
+        for (const [id, rawUpdate] of Object.entries(trails || {})) {
+            const update = expandCompactTrailUpdate(
+                rawUpdate,
+                networkConfig.coordinatePrecision
+            );
+
+            if (!update) {
+                markCacheInvalid(applyResult, "trails", id);
+                continue;
+            }
+
             const cachedTrail = entityCache.trails[id];
             const assembly = entityCache.trailAssemblies[id];
             const newestTrail = getNewestTrailState(cachedTrail, assembly);

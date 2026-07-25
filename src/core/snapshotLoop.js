@@ -13,10 +13,12 @@ const {
     getSocketSnapshotEpoch,
     resetSocketSnapshotState
 } = require("./snapshotState");
+const { getSocketSnapshotSchema } = require("./snapshotProtocol");
 const {
     countArrayItems,
     countInvalidations,
     countObjectKeys,
+    countPlayerPositions,
     createSnapshotBreakdown,
     isPayloadOutlier,
     measureSnapshotPayload
@@ -104,7 +106,7 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
         }
 
         if (!socket.data.snapshotState) {
-            socket.data.snapshotState = createClientSnapshotState();
+            socket.data.snapshotState = createSocketSnapshotState(socket);
         }
 
         if (retryPendingReliableSnapshot(socket)) {
@@ -237,7 +239,7 @@ function sendVolatileSnapshotWithoutReliableGeometry(
     pending = null,
     sharedFrame = null
 ) {
-    const clientState = socket.data.snapshotState || createClientSnapshotState();
+    const clientState = socket.data.snapshotState || createSocketSnapshotState(socket);
     const stateDraftStartedAt = isNetworkDiagnosticsEnabled(socket)
         ? performance.now()
         : null;
@@ -277,7 +279,7 @@ function shouldDeferTerritoryGeometry(territories) {
 }
 
 function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
-    return {
+    const volatileSnapshot = {
         ...snapshot,
         playerInfo: {},
         territoryIds: filterKnownIds(snapshot.territoryIds, clientState.territories),
@@ -292,6 +294,14 @@ function createVolatileSnapshotForPendingReliableState(snapshot, clientState) {
         payloadBudget: null,
         preserveTrails: true
     };
+
+    if (volatileSnapshot.schema >= 3) {
+        delete volatileSnapshot.leaderboard;
+        delete volatileSnapshot.mode;
+        delete volatileSnapshot.roomConfig;
+    }
+
+    return volatileSnapshot;
 }
 
 function filterKnownIds(ids, knownStates) {
@@ -441,7 +451,7 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         basePayloadBytes: payloadMeasurement.bytes,
         payloadMeasureMs: payloadMeasurement.measureMs,
         snapshotBreakdown,
-        playerCount: countObjectKeys(snapshot.players),
+        playerCount: countPlayerPositions(snapshot.players),
         territoryCount: countArrayItems(snapshot.territoryIds),
         trailCount: countArrayItems(snapshot.trailIds),
         preserveTrails: Boolean(snapshot.preserveTrails),
@@ -593,12 +603,18 @@ function invalidateSnapshotCache(socket, invalidations) {
         return;
     }
     if (!socket.data.snapshotState) {
-        socket.data.snapshotState = createClientSnapshotState();
+        socket.data.snapshotState = createSocketSnapshotState(socket);
     }
     invalidateSnapshotState(socket.data.snapshotState, invalidations);
     if (socket.data.pendingReliableSnapshot) {
         socket.data.pendingReliableSnapshot = null;
     }
+}
+
+function createSocketSnapshotState(socket) {
+    return createClientSnapshotState({
+        snapshotSchema: getSocketSnapshotSchema(socket)
+    });
 }
 
 function hasAnyInvalidation(invalidations) {
@@ -649,13 +665,31 @@ function getReliableSnapshotRetryMs() {
 }
 
 function shouldSendReliably(snapshot) {
-    return hasEntries(snapshot.playerInfo)
+    return hasChangedCachedGlobals(snapshot)
+        || hasEntries(snapshot.playerInfo)
         || hasEntries(snapshot.territories)
         || hasEntries(snapshot.territoryOps)
         || hasItems(snapshot.removedTerritoryIds)
         || hasItems(snapshot.removedTrailIds)
         || hasEntries(snapshot.trailRemovals)
         || hasReliableTrailUpdate(snapshot.trails);
+}
+
+function hasChangedCachedGlobals(snapshot) {
+    return Boolean(
+        snapshot
+        && snapshot.schema >= 3
+        && (
+            hasOwn(snapshot, "leaderboard")
+            || hasOwn(snapshot, "mode")
+            || hasOwn(snapshot, "roomConfig")
+        )
+    );
+}
+
+function hasOwn(value, key) {
+    return Boolean(value)
+        && Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function hasEntries(value) {
@@ -667,7 +701,11 @@ function hasItems(value) {
 }
 
 function hasFullTrailUpdate(trails) {
-    return Object.values(trails || {}).some(trail => trail && trail.full);
+    return Object.values(trails || {}).some(trail => (
+        Array.isArray(trail)
+            ? trail[0] === 1
+            : Boolean(trail && trail.full)
+    ));
 }
 
 function hasReliableTrailUpdate(trails) {

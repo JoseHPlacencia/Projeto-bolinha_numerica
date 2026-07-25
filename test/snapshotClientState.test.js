@@ -10,6 +10,7 @@ const {
 test("snapshot state draft isolates writes until materialization", () => {
     const confirmed = createClientSnapshotState();
 
+    confirmed.globalState.set("leaderboard", { signature: "initial" });
     confirmed.playerInfo.set("player", { version: 1 });
     confirmed.territories.set("player", { version: 2 });
     confirmed.trails.set("player", { generation: 1 });
@@ -24,6 +25,7 @@ test("snapshot state draft isolates writes until materialization", () => {
     assert.equal(draft.territories.get("player").version, 2);
     assert.equal(draft.territoryPoints instanceof Map, true);
 
+    draft.globalState.set("leaderboard", { signature: "updated" });
     draft.territories.set("player", { version: 3 });
     draft.trails.delete("player");
     draft.territoryVisibility.clear();
@@ -32,6 +34,7 @@ test("snapshot state draft isolates writes until materialization", () => {
     draft.nextTerritoryPointId = 3;
 
     assert.equal(confirmed.territories.get("player").version, 2);
+    assert.equal(confirmed.globalState.get("leaderboard").signature, "initial");
     assert.equal(confirmed.trails.has("player"), true);
     assert.equal(confirmed.territoryVisibility.has("player"), true);
     assert.equal(confirmed.trailVisibility.has("remote"), false);
@@ -41,6 +44,7 @@ test("snapshot state draft isolates writes until materialization", () => {
     const committed = materializeClientSnapshotStateDraft(draft);
 
     assert.equal(isClientSnapshotStateDraft(committed), false);
+    assert.equal(committed.globalState.get("leaderboard").signature, "updated");
     assert.equal(committed.territories.get("player").version, 3);
     assert.equal(committed.trails.has("player"), false);
     assert.equal(committed.territoryVisibility.size, 0);
@@ -62,6 +66,7 @@ test("snapshot state draft preserves untouched map references", () => {
     );
 
     assert.strictEqual(untouched.playerInfo, confirmed.playerInfo);
+    assert.strictEqual(untouched.globalState, confirmed.globalState);
     assert.strictEqual(untouched.territories, confirmed.territories);
     assert.strictEqual(untouched.trails, confirmed.trails);
     assert.strictEqual(untouched.territoryVisibility, confirmed.territoryVisibility);

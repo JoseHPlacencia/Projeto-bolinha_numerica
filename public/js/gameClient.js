@@ -6,6 +6,7 @@ import { createNetworkDiagnostics } from "./networkDiagnostics.js";
 import { createMinimapRenderer } from "./renderers/minimapRenderer.js";
 import { createRoomUi } from "./roomUi.js";
 import { createSnapshotInterpolator } from "./snapshotInterpolator.js";
+import { createSnapshotSocketAuth } from "./snapshotProtocol.js";
 import { createWorldRenderer } from "./worldRenderer.js";
 import { createRenderFrameLimiter } from "./renderSettings.js";
 
@@ -14,6 +15,7 @@ const DEFAULT_MINIMAP_FRAME_RATE = 15;
 export function startClient(gameConfig, options = {}) {
     const socket = io({
         autoConnect: false,
+        auth: createSnapshotSocketAuth(),
         transports: gameConfig.socket.transports
     });
     const canvas = document.getElementById("gameCanvas");
@@ -82,13 +84,8 @@ export function startClient(gameConfig, options = {}) {
     });
 
     socket.on("gameState", (snapshot, acknowledge) => {
-        applyRoomConfig(snapshot && snapshot.roomConfig);
         syncSpectatorFromSnapshot(snapshot);
         const applyResult = processSnapshotSafely(snapshot);
-
-        if (snapshot.numbers && snapshot.numbers.theme) {
-            numberHud.updateTheme(snapshot.numbers.theme, snapshot.numbers.themeEndsIn || 0);
-        }
 
         if (typeof acknowledge === "function") {
             acknowledge(createSnapshotAcknowledgement(applyResult));
@@ -98,6 +95,11 @@ export function startClient(gameConfig, options = {}) {
 
         if (applyResult && applyResult.applied === false) {
             return;
+        }
+
+        applyRoomConfig(snapshot && snapshot.roomConfig);
+        if (snapshot.numbers && snapshot.numbers.theme) {
+            numberHud.updateTheme(snapshot.numbers.theme, snapshot.numbers.themeEndsIn || 0);
         }
 
         renderer.processSnapshot(snapshot);
