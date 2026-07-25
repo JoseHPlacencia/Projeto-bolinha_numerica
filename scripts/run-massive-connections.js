@@ -679,6 +679,13 @@ function createMassiveConnectionDiagnostic(options, plan) {
 
         const counters = diagnostics.counters || {};
         const bytes = diagnostics.bytes || {};
+        const instrumentation = diagnostics.instrumentation || {};
+        stage.events.gatewayAdaptiveCompressionBypasses += finiteCounter(
+            counters.adaptiveCompressionBypassCount
+        );
+        stage.events.gatewayBypassedSnapshotBytes += finiteCounter(
+            bytes.bypassedSnapshotBytes
+        );
         stage.events.gatewayCompressionCalls += finiteCounter(
             counters.compressionCallCount
         );
@@ -716,6 +723,11 @@ function createMassiveConnectionDiagnostic(options, plan) {
         }
         if (typeof diagnostics.transport === "string" && diagnostics.transport) {
             stage.gatewayTransports.add(diagnostics.transport);
+        }
+        if (typeof instrumentation.adaptiveSnapshotCompressionEnabled === "boolean") {
+            stage.gatewayAdaptiveCompressionModes.add(
+                instrumentation.adaptiveSnapshotCompressionEnabled
+            );
         }
 
         const samples = diagnostics.samples || {};
@@ -827,6 +839,8 @@ function createMassiveConnectionDiagnostic(options, plan) {
             countersAtStart: { ...counters },
             events: {
                 gameOvers: 0,
+                gatewayAdaptiveCompressionBypasses: 0,
+                gatewayBypassedSnapshotBytes: 0,
                 gatewayCompressedSnapshotBytes: 0,
                 gatewayCompressionCalls: 0,
                 gatewayCompressionCount: 0,
@@ -858,6 +872,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
             health: [],
             healthFailures: new Map(),
             gamePhaseSeries: new Map(),
+            gatewayAdaptiveCompressionModes: new Set(),
             gatewayCompressionLevels: new Set(),
             gatewayTransports: new Set(),
             generatorAtStart: createGeneratorSample(),
@@ -965,10 +980,32 @@ function createMassiveConnectionDiagnostic(options, plan) {
         }
         metrics.generator = summarizeGenerator(stage.generatorAtStart);
         metrics.gatewayTransport = {
+            adaptiveBypassRatio: stage.events.gatewaySnapshotEmitAttempts > 0
+                ? round(
+                    stage.events.gatewayAdaptiveCompressionBypasses
+                    / stage.events.gatewaySnapshotEmitAttempts
+                )
+                : null,
+            adaptiveCompressionEnabled: [...stage.gatewayAdaptiveCompressionModes],
             compressedToUncompressedRatio: stage.events.gatewayUncompressedSnapshotBytes > 0
                 ? round(
                     stage.events.gatewayCompressedSnapshotBytes
                     / stage.events.gatewayUncompressedSnapshotBytes
+                )
+                : null,
+            estimatedWireToLogicalRatio: (
+                stage.events.gatewayUncompressedSnapshotBytes
+                + stage.events.gatewayBypassedSnapshotBytes
+            ) > 0
+                ? round(
+                    (
+                        stage.events.gatewayCompressedSnapshotBytes
+                        + stage.events.gatewayBypassedSnapshotBytes
+                    )
+                    / (
+                        stage.events.gatewayUncompressedSnapshotBytes
+                        + stage.events.gatewayBypassedSnapshotBytes
+                    )
                 )
                 : null,
             compressionLevels: [...stage.gatewayCompressionLevels].sort((left, right) => (

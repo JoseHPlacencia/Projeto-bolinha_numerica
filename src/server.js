@@ -111,4 +111,8 @@ function logServerStart() {
         "Socket compression: perMessageDeflate "
         + `level ${config.socket.perMessageDeflate.zlibDeflateOptions.level}`
     );
+    console.log(
+        "Adaptive snapshot compression: "
+        + (config.socket.adaptiveSnapshotCompressionEnabled ? "enabled" : "disabled")
+    );
 }

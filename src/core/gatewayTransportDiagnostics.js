@@ -71,6 +71,12 @@ function recordGatewaySocketEmission(socket, eventName, options, emit) {
     const writableBefore = !transport || transport.writable !== false;
 
     state.interval.counters.snapshotEmitAttempts++;
+    if (options && options.adaptiveCompressionBypass) {
+        state.interval.counters.adaptiveCompressionBypassCount++;
+        state.interval.bytes.bypassedSnapshotBytes += finiteNonNegative(
+            options.snapshotPayloadBytes
+        );
+    }
     if (volatile && !writableBefore) {
         state.interval.counters.volatileDropCount++;
     }
@@ -98,6 +104,7 @@ function takeGatewayTransportDiagnostics(socket) {
 
     return {
         bytes: {
+            bypassedSnapshotBytes: interval.bytes.bypassedSnapshotBytes,
             compressedSnapshotBytes: interval.bytes.compressedSnapshotBytes,
             physicalBytesWritten,
             uncompressedSnapshotBytes: interval.bytes.uncompressedSnapshotBytes
@@ -116,6 +123,9 @@ function describeInstrumentation(state) {
     const extensions = webSocket && webSocket._extensions;
 
     return {
+        adaptiveSnapshotCompressionEnabled: Boolean(
+            config.socket.adaptiveSnapshotCompressionEnabled
+        ),
         compressionHooked: Boolean(state.compressionHook),
         extensionNames: extensions && typeof extensions === "object"
             ? Object.keys(extensions)
@@ -358,10 +368,12 @@ function getByteLength(value) {
 function createInterval() {
     return {
         bytes: {
+            bypassedSnapshotBytes: 0,
             compressedSnapshotBytes: 0,
             uncompressedSnapshotBytes: 0
         },
         counters: {
+            adaptiveCompressionBypassCount: 0,
             compressionCallCount: 0,
             compressionCount: 0,
             compressionErrorCount: 0,
@@ -392,6 +404,11 @@ function copySamples(samples) {
 
 function addFiniteSample(target, value) {
     if (Number.isFinite(Number(value))) target.push(Number(value));
+}
+
+function finiteNonNegative(value) {
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) && numericValue >= 0 ? numericValue : 0;
 }
 
 module.exports = {

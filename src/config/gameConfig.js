@@ -1,5 +1,8 @@
 const { resolveServerCoreCount } = require("./serverRuntime");
-const { resolveSocketCompressionLevel } = require("./socketRuntime");
+const {
+    resolveAdaptiveSnapshotCompressionEnabled,
+    resolveSocketCompressionLevel
+} = require("./socketRuntime");
 const {
     resolveMenuBackgroundSnapshotRate
 } = require("./menuBackgroundRuntime");
@@ -35,6 +38,7 @@ const server = Object.freeze({
 });
 
 const socket = Object.freeze({
+    adaptiveSnapshotCompressionEnabled: resolveAdaptiveSnapshotCompressionEnabled(),
     transports: socketTransports,
     perMessageDeflate: Object.freeze({
         threshold: 256,
