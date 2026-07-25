@@ -506,7 +506,18 @@ test("network diagnostics keeps normalized bounded history and resets independen
         networkDiagnostics: { basePayloadBytes: 200 }
     }));
     interpolator.processSnapshot(createSnapshot(3, 3000, {
-        networkDiagnostics: { basePayloadBytes: "invalid" }
+        networkDiagnostics: {
+            basePayloadBytes: "invalid",
+            snapshotStateCommitMs: 0.02,
+            snapshotStateDraftMs: 0.01,
+            snapshotStateTerritoryPointCount: 3000,
+            lastSnapshotStateCommit: {
+                at: 2990,
+                ageMs: 10,
+                durationMs: 0.03,
+                reliableId: 4
+            }
+        }
     }));
 
     const diagnostics = interpolator.getNetworkDiagnostics();
@@ -515,6 +526,10 @@ test("network diagnostics keeps normalized bounded history and resets independen
     assert.equal(diagnostics.summary.samples, 2);
     assert.equal(diagnostics.summary.maxPayloadBytes, 200);
     assert.equal(diagnostics.current.lastServer.basePayloadBytes, null);
+    assert.equal(diagnostics.current.lastServer.snapshotStateCommitMs, 0.02);
+    assert.equal(diagnostics.current.lastServer.snapshotStateDraftMs, 0.01);
+    assert.equal(diagnostics.current.lastServer.snapshotStateTerritoryPointCount, 3000);
+    assert.equal(diagnostics.current.lastServer.lastSnapshotStateCommit.durationMs, 0.03);
 
     interpolator.reset();
 

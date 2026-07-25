@@ -1,11 +1,14 @@
 const { performance } = require("node:perf_hooks");
 const config = require("../config/gameConfig");
 const {
-    cloneClientSnapshotState,
-    createClientSnapshotState,
     createSnapshot,
     createSnapshotSharedFrame
 } = require("./snapshotSerializer");
+const {
+    createClientSnapshotState,
+    createClientSnapshotStateDraft,
+    materializeClientSnapshotStateDraft
+} = require("./snapshotClientState");
 const {
     getSocketSnapshotEpoch,
     resetSocketSnapshotState
@@ -136,7 +139,13 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
             continue;
         }
 
-        const nextSnapshotState = cloneClientSnapshotState(socket.data.snapshotState);
+        const stateDraftStartedAt = isNetworkDiagnosticsEnabled(socket)
+            ? performance.now()
+            : null;
+        const nextSnapshotState = createClientSnapshotStateDraft(socket.data.snapshotState);
+        const stateDraftMs = stateDraftStartedAt === null
+            ? null
+            : performance.now() - stateDraftStartedAt;
         const measuredSnapshot = createMeasuredSnapshot(
             players,
             territories,
@@ -147,6 +156,7 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
             isNetworkDiagnosticsEnabled(socket),
             getSharedFrame()
         );
+        measuredSnapshot.stateDraftMs = stateDraftMs;
         const snapshot = measuredSnapshot.snapshot;
         assignSnapshotSequence(socket, snapshot);
         const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDiagnostics);
@@ -160,7 +170,11 @@ function sendSnapshot(io, players, territories, roomCode, numberSystem, runtimeC
             continue;
         }
 
-        socket.data.snapshotState = nextSnapshotState;
+        socket.data.snapshotState = materializeSnapshotState(
+            socket,
+            nextSnapshotState,
+            sendDiagnostics
+        );
         emitVolatileSnapshot(socket, snapshot, "volatile", null, sendDiagnostics);
     }
 }
@@ -224,7 +238,13 @@ function sendVolatileSnapshotWithoutReliableGeometry(
     sharedFrame = null
 ) {
     const clientState = socket.data.snapshotState || createClientSnapshotState();
-    const temporaryState = cloneClientSnapshotState(clientState);
+    const stateDraftStartedAt = isNetworkDiagnosticsEnabled(socket)
+        ? performance.now()
+        : null;
+    const temporaryState = createClientSnapshotStateDraft(clientState);
+    const stateDraftMs = stateDraftStartedAt === null
+        ? null
+        : performance.now() - stateDraftStartedAt;
     const measuredSnapshot = createMeasuredSnapshot(
         players,
         territories,
@@ -235,6 +255,7 @@ function sendVolatileSnapshotWithoutReliableGeometry(
         isNetworkDiagnosticsEnabled(socket),
         sharedFrame
     );
+    measuredSnapshot.stateDraftMs = stateDraftMs;
     const snapshot = measuredSnapshot.snapshot;
     assignSnapshotSequence(socket, snapshot);
     const sendDiagnostics = createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDiagnostics);
@@ -342,7 +363,12 @@ function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { appl
 
     recordReliableSnapshotAcknowledgement(socket, pending, acknowledgement);
     if (!acknowledgement || acknowledgement.applied !== false) {
-        socket.data.snapshotState = pending.snapshotState;
+        socket.data.snapshotState = materializeSnapshotState(
+            socket,
+            pending.snapshotState,
+            null,
+            pending.id
+        );
         socket.data.pendingReliableSnapshot = null;
         return;
     }
@@ -350,7 +376,12 @@ function acknowledgeReliableSnapshot(socket, pendingId, acknowledgement = { appl
         resetSocketSnapshotState(socket);
         return;
     }
-    socket.data.snapshotState = pending.snapshotState;
+    socket.data.snapshotState = materializeSnapshotState(
+        socket,
+        pending.snapshotState,
+        null,
+        pending.id
+    );
     invalidateSnapshotState(socket.data.snapshotState, acknowledgement.invalidations);
     socket.data.pendingReliableSnapshot = null;
 }
@@ -397,6 +428,15 @@ function createNetworkDiagnosticsSnapshot(socket, snapshot, sendType, pending = 
         loopDriftMs: finiteOrNull(sendDiagnostics && sendDiagnostics.loopDriftMs),
         gameLoop: normalizeGameLoopDiagnostics(sendDiagnostics && sendDiagnostics.gameLoop),
         snapshotBuildMs: finiteOrNull(sendDiagnostics && sendDiagnostics.snapshotBuildMs),
+        snapshotStateDraftMs: finiteOrNull(sendDiagnostics && sendDiagnostics.snapshotStateDraftMs),
+        snapshotStateCommitMs: finiteOrNull(sendDiagnostics && sendDiagnostics.snapshotStateCommitMs),
+        snapshotStateTerritoryPointCount: countMapItems(
+            socket.data.snapshotState && socket.data.snapshotState.territoryPoints
+        ),
+        lastSnapshotStateCommit: normalizeSnapshotStateCommitDiagnostic(
+            socket.data.networkDiagnosticsLastSnapshotStateCommit,
+            now
+        ),
         snapshotTime: snapshot.time,
         basePayloadBytes: payloadMeasurement.bytes,
         payloadMeasureMs: payloadMeasurement.measureMs,
@@ -449,6 +489,19 @@ function normalizeSnapshotCacheInvalidationDiagnostic(value, now) {
     };
 }
 
+function normalizeSnapshotStateCommitDiagnostic(value, now) {
+    if (!value || typeof value !== "object") {
+        return null;
+    }
+
+    return {
+        at: finiteOrNull(value.at),
+        ageMs: Number.isFinite(value.at) ? Math.max(0, now - value.at) : null,
+        durationMs: finiteOrNull(value.durationMs),
+        reliableId: finiteOrNull(value.reliableId)
+    };
+}
+
 function createMeasuredSnapshot(
     players,
     territories,
@@ -493,8 +546,31 @@ function createSnapshotSendDiagnostics(measuredSnapshot, loopDiagnostics, roomDi
             ? loopDiagnostics.tickDriftMs
             : null,
         gameLoop: cloneGameLoopDiagnostics(roomDiagnostics && roomDiagnostics.gameLoop),
-        snapshotBuildMs: measuredSnapshot.buildMs
+        snapshotBuildMs: measuredSnapshot.buildMs,
+        snapshotStateDraftMs: measuredSnapshot.stateDraftMs,
+        snapshotStateCommitMs: null
     };
+}
+
+function materializeSnapshotState(socket, snapshotState, sendDiagnostics = null, reliableId = null) {
+    const shouldMeasure = isNetworkDiagnosticsEnabled(socket);
+    const startedAt = shouldMeasure ? performance.now() : null;
+    const materializedState = materializeClientSnapshotStateDraft(snapshotState);
+
+    if (!shouldMeasure) {
+        return materializedState;
+    }
+
+    const durationMs = performance.now() - startedAt;
+    if (sendDiagnostics) {
+        sendDiagnostics.snapshotStateCommitMs = durationMs;
+    }
+    socket.data.networkDiagnosticsLastSnapshotStateCommit = {
+        at: Date.now(),
+        durationMs,
+        reliableId
+    };
+    return materializedState;
 }
 
 function recordReliableSnapshotAcknowledgement(socket, pending, acknowledgement) {
@@ -607,6 +683,10 @@ function isNetworkDiagnosticsEnabled(socket) {
 
 function finiteOrNull(value) {
     return Number.isFinite(value) ? value : null;
+}
+
+function countMapItems(value) {
+    return value && Number.isInteger(value.size) ? value.size : 0;
 }
 
 module.exports = startSnapshotLoop;

@@ -21,6 +21,9 @@ const {
     createSnapshotSharedFrame
 } = require("../src/core/snapshotSerializer");
 const {
+    isClientSnapshotStateDraft
+} = require("../src/core/snapshotClientState");
+const {
     createSocket,
     createCutTerritoryState,
     createRectanglePolygon,
@@ -104,6 +107,125 @@ test("snapshot loop shares room-wide serialization without sharing client delta 
     assert.strictEqual(firstSnapshot.players[first.id], secondSnapshot.players[first.id]);
     assert.notStrictEqual(firstSnapshot.playerInfo, secondSnapshot.playerInfo);
     assert.notStrictEqual(firstSocket.data.snapshotState, secondSocket.data.snapshotState);
+});
+
+test("snapshot loop commits transactional state only after reliable acknowledgement", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const confirmedState = createClientSnapshotState();
+    const socket = createSocket(player.id, {
+        roomCode: "ROOM",
+        snapshotState: confirmedState
+    });
+    const io = { sockets: { sockets: new Map([[socket.id, socket]]) } };
+    const emissions = [];
+    let acknowledge = null;
+
+    socket.emit = (event, payload, callback) => {
+        emissions.push({ event, payload, volatile: false });
+        if (typeof callback === "function") {
+            acknowledge = callback;
+        }
+    };
+    socket.volatile = {
+        emit(event, payload) {
+            emissions.push({ event, payload, volatile: true });
+        }
+    };
+
+    initializePlayerTerritory(territories, player);
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    assert.strictEqual(socket.data.snapshotState, confirmedState);
+    assert.equal(confirmedState.territories.size, 0);
+    assert.equal(confirmedState.territoryPoints.size, 0);
+    assert.equal(isClientSnapshotStateDraft(socket.data.pendingReliableSnapshot.snapshotState), true);
+    assert.ok(socket.data.pendingReliableSnapshot.snapshotState.territoryPoints.size > 0);
+
+    player.x = 50;
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    assert.strictEqual(socket.data.snapshotState, confirmedState);
+    assert.equal(confirmedState.territories.size, 0);
+    assert.equal(emissions.at(-1).volatile, true);
+    assert.equal(emissions.at(-1).payload.preserveTrails, true);
+
+    acknowledge(null, { applied: true });
+
+    assert.equal(socket.data.pendingReliableSnapshot, null);
+    assert.equal(isClientSnapshotStateDraft(socket.data.snapshotState), false);
+    assert.equal(socket.data.snapshotState.territories.has(player.id), true);
+    assert.ok(socket.data.snapshotState.territoryPoints.size > 0);
+});
+
+test("selective rejection invalidates materialized transactional geometry", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const socket = createSocket(player.id, { roomCode: "ROOM" });
+    const io = { sockets: { sockets: new Map([[socket.id, socket]]) } };
+    let acknowledge = null;
+
+    socket.emit = (_event, _payload, callback) => {
+        if (typeof callback === "function") {
+            acknowledge = callback;
+        }
+    };
+
+    initializePlayerTerritory(territories, player);
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+    acknowledge(null, {
+        applied: false,
+        invalidations: {
+            playerInfo: [],
+            territories: [player.id],
+            trails: []
+        }
+    });
+
+    assert.equal(socket.data.pendingReliableSnapshot, null);
+    assert.equal(isClientSnapshotStateDraft(socket.data.snapshotState), false);
+    assert.equal(socket.data.snapshotState.playerInfo.has(player.id), true);
+    assert.equal(socket.data.snapshotState.territories.has(player.id), false);
+    assert.equal(socket.data.snapshotState.territoryPoints.size, 0);
+    assert.equal(socket.data.snapshotState.nextTerritoryPointId, 1);
+});
+
+test("volatile snapshots reuse untouched confirmed geometry maps", () => {
+    const player = new Player("viewer", { x: 0, y: 0 });
+    const players = new Map([[player.id, player]]);
+    const territories = createTerritories();
+    const socket = createSocket(player.id, {
+        networkDiagnosticsEnabled: true,
+        roomCode: "ROOM"
+    });
+    const io = { sockets: { sockets: new Map([[socket.id, socket]]) } };
+
+    initializePlayerTerritory(territories, player);
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    const confirmedTerritories = socket.data.snapshotState.territories;
+    const confirmedTerritoryPoints = socket.data.snapshotState.territoryPoints;
+
+    player.x = 25;
+    sendSnapshot(io, players, territories, "ROOM", null, config);
+
+    const latestSnapshot = socket.emitted.at(-1).payload;
+
+    assert.equal(socket.data.pendingReliableSnapshot, null);
+    assert.strictEqual(socket.data.snapshotState.territories, confirmedTerritories);
+    assert.strictEqual(socket.data.snapshotState.territoryPoints, confirmedTerritoryPoints);
+    assert.equal(Number.isFinite(latestSnapshot.networkDiagnostics.snapshotStateDraftMs), true);
+    assert.equal(Number.isFinite(latestSnapshot.networkDiagnostics.snapshotStateCommitMs), true);
+    assert.equal(
+        latestSnapshot.networkDiagnostics.snapshotStateTerritoryPointCount,
+        confirmedTerritoryPoints.size
+    );
+    assert.equal(
+        Number.isFinite(latestSnapshot.networkDiagnostics.lastSnapshotStateCommit.durationMs),
+        true
+    );
 });
 
 test("shared snapshot frame remains optional for direct serializer callers", () => {

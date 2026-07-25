@@ -4,10 +4,14 @@ const { performance } = require("node:perf_hooks");
 const { deflateRawSync } = require("node:zlib");
 const config = require("../../src/config/gameConfig");
 const {
-    createClientSnapshotState,
     createSnapshot,
     createSnapshotSharedFrame
 } = require("../../src/core/snapshotSerializer");
+const {
+    createClientSnapshotState,
+    createClientSnapshotStateDraft,
+    materializeClientSnapshotStateDraft
+} = require("../../src/core/snapshotClientState");
 const { createPlayer } = require("../../src/entities/player");
 const { initializePlayerTerritory } = require("../../src/state/territories");
 
@@ -128,8 +132,10 @@ function buildScenarioSnapshots(scenario) {
     );
 
     for (const player of scenario.players.values()) {
-        const clientState = getSnapshotState(scenario, player.id);
         const buildStartedAt = performance.now();
+        const clientState = createClientSnapshotStateDraft(
+            getSnapshotState(scenario, player.id)
+        );
         const snapshot = createSnapshot(
             scenario.players,
             scenario.territories,
@@ -138,6 +144,10 @@ function buildScenarioSnapshots(scenario) {
             scenario.numberSystem,
             scenario.runtimeConfig,
             sharedFrame
+        );
+        scenario.snapshotStates.set(
+            player.id,
+            materializeClientSnapshotStateDraft(clientState)
         );
         buildDurations.push(performance.now() - buildStartedAt);
 

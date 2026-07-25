@@ -285,6 +285,12 @@ export function createSnapshotDiagnostics(networkConfig, getDebugState) {
             loopDriftMs: finiteOrNull(value.loopDriftMs),
             gameLoop: normalizeGameLoopDiagnostics(value.gameLoop),
             snapshotBuildMs: finiteOrNull(value.snapshotBuildMs),
+            snapshotStateDraftMs: finiteOrNull(value.snapshotStateDraftMs),
+            snapshotStateCommitMs: finiteOrNull(value.snapshotStateCommitMs),
+            snapshotStateTerritoryPointCount: finiteOrNull(value.snapshotStateTerritoryPointCount),
+            lastSnapshotStateCommit: normalizeSnapshotStateCommitDiagnostic(
+                value.lastSnapshotStateCommit
+            ),
             snapshotTime: finiteOrNull(value.snapshotTime),
             basePayloadBytes: finiteOrNull(value.basePayloadBytes),
             payloadMeasureMs: finiteOrNull(value.payloadMeasureMs),
@@ -305,6 +311,19 @@ export function createSnapshotDiagnostics(networkConfig, getDebugState) {
             lastSnapshotResync: normalizeSnapshotResyncDiagnostic(value.lastSnapshotResync),
             snapshotCacheInvalidationCount: finiteOrNull(value.snapshotCacheInvalidationCount),
             lastSnapshotCacheInvalidation: normalizeSnapshotCacheInvalidationDiagnostic(value.lastSnapshotCacheInvalidation)
+        };
+    }
+
+    function normalizeSnapshotStateCommitDiagnostic(value) {
+        if (!value || typeof value !== "object") {
+            return null;
+        }
+
+        return {
+            at: finiteOrNull(value.at),
+            ageMs: finiteOrNull(value.ageMs),
+            durationMs: finiteOrNull(value.durationMs),
+            reliableId: finiteOrNull(value.reliableId)
         };
     }
 

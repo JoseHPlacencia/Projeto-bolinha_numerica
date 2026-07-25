@@ -2,7 +2,7 @@
 
 const { mkdirSync, writeFileSync } = require("node:fs");
 const path = require("node:path");
-const { performance } = require("node:perf_hooks");
+const { monitorEventLoopDelay, performance } = require("node:perf_hooks");
 const { io } = require("socket.io-client");
 const {
     createConnectionLoadPlan
@@ -67,6 +67,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
         connectMs: new MetricSeries({ seed: options.seed ^ 0xc011ec7 }),
         joinMs: new MetricSeries({ seed: options.seed ^ 0x501ced })
     };
+    const generatorEventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
     let abortReason = null;
     let currentStage = null;
     let fatalError = null;
@@ -81,6 +82,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
     async function run() {
         process.on("SIGINT", handleInterrupt);
         process.on("SIGTERM", handleInterrupt);
+        generatorEventLoopDelay.enable();
         startActivityTimers();
 
         try {
@@ -96,6 +98,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
             currentStage = null;
             stopping = true;
             stopActivityTimers();
+            generatorEventLoopDelay.disable();
             await disconnectAllClients();
             process.off("SIGINT", handleInterrupt);
             process.off("SIGTERM", handleInterrupt);
@@ -141,16 +144,43 @@ function createMassiveConnectionDiagnostic(options, plan) {
             if (abortReason) return;
 
             const room = rooms[allocation.index - 1] || createLoadRoom(allocation.index);
-            while (room.clients.length < allocation.targetPlayers && !abortReason) {
-                await addClient(room);
+            await fillRoom(room, allocation.targetPlayers);
+        }
+    }
+
+    async function fillRoom(room, targetPlayers) {
+        if (room.code === null && room.clients.length < targetPlayers) {
+            await addClient(room);
+        }
+
+        const pending = new Set();
+
+        while (
+            (room.clients.length < targetPlayers || pending.size > 0)
+            && !abortReason
+        ) {
+            while (
+                room.clients.length < targetPlayers
+                && pending.size < options.connectionConcurrency
+                && !abortReason
+            ) {
+                const connection = addClient(room).finally(() => pending.delete(connection));
+                pending.add(connection);
+
                 if (
                     options.connectionIntervalMs > 0
-                    && room.clients.length < allocation.targetPlayers
+                    && room.clients.length < targetPlayers
                 ) {
                     await delay(options.connectionIntervalMs);
                 }
             }
+
+            if (pending.size > 0) {
+                await Promise.race(pending);
+            }
         }
+
+        await Promise.all(pending);
     }
 
     function createLoadRoom(index) {
@@ -220,6 +250,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
             lastSnapshotEpoch: null,
             lastSnapshotReceivedAt: null,
             lastSnapshotSequence: null,
+            lastSnapshotStateCommitAt: null,
             monitor: room.clients.length === 0,
             pendingJoin: null,
             pingInFlight: false,
@@ -433,10 +464,27 @@ function createMassiveConnectionDiagnostic(options, plan) {
         currentStage.series.serverSendIntervalMs.add(diagnostics.serverSendIntervalMs);
         currentStage.series.loopDriftMs.add(diagnostics.loopDriftMs);
         currentStage.series.snapshotBuildMs.add(diagnostics.snapshotBuildMs);
+        currentStage.series.snapshotStateDraftMs.add(diagnostics.snapshotStateDraftMs);
+        currentStage.series.snapshotStateCommitMs.add(diagnostics.snapshotStateCommitMs);
+        currentStage.series.snapshotStateTerritoryPointCount.add(
+            diagnostics.snapshotStateTerritoryPointCount
+        );
         currentStage.series.payloadBytes.add(diagnostics.basePayloadBytes);
         currentStage.series.gameTickMs.add(
             diagnostics.gameLoop && diagnostics.gameLoop.tickDurationMs
         );
+        recordGameLoopPhases(
+            currentStage,
+            diagnostics.gameLoop && diagnostics.gameLoop.phases
+        );
+        if (
+            Number.isFinite(diagnostics.snapshotStateCommitMs)
+            && Number.isFinite(diagnostics.lastSnapshotStateCommit?.at)
+        ) {
+            state.lastSnapshotStateCommitAt = diagnostics.lastSnapshotStateCommit.at;
+        } else {
+            recordReliableSnapshotStateCommit(state, diagnostics.lastSnapshotStateCommit);
+        }
 
         if (
             Number.isFinite(diagnostics.serverSentAt)
@@ -467,6 +515,32 @@ function createMassiveConnectionDiagnostic(options, plan) {
         state.lastDiagnosticSequence = Number.isSafeInteger(diagnosticSequence)
             ? diagnosticSequence
             : null;
+    }
+
+    function recordGameLoopPhases(stage, phases) {
+        for (const [name, durationMs] of Object.entries(phases || {})) {
+            let series = stage.gamePhaseSeries.get(name);
+            if (!series) {
+                series = new MetricSeries({
+                    seed: options.seed ^ hashString(name) ^ stage.plan.index
+                });
+                stage.gamePhaseSeries.set(name, series);
+            }
+            series.add(durationMs);
+        }
+    }
+
+    function recordReliableSnapshotStateCommit(state, commit) {
+        if (
+            !commit
+            || !Number.isFinite(commit.at)
+            || commit.at === state.lastSnapshotStateCommitAt
+        ) {
+            return;
+        }
+
+        state.lastSnapshotStateCommitAt = commit.at;
+        currentStage.series.snapshotStateCommitMs.add(commit.durationMs);
     }
 
     function handleGameOver(state) {
@@ -609,6 +683,8 @@ function createMassiveConnectionDiagnostic(options, plan) {
             },
             health: [],
             healthFailures: new Map(),
+            gamePhaseSeries: new Map(),
+            generatorAtStart: createGeneratorSample(),
             plan: stagePlan,
             rampDurationMs,
             series: createStageSeries(stagePlan.index),
@@ -627,7 +703,10 @@ function createMassiveConnectionDiagnostic(options, plan) {
             serverSendIntervalMs: new MetricSeries({ seed: seed ^ 6 }),
             snapshotBuildMs: new MetricSeries({ seed: seed ^ 7 }),
             snapshotInterArrivalMs: new MetricSeries({ seed: seed ^ 8 }),
-            snapshotLatencyMs: new MetricSeries({ seed: seed ^ 9 })
+            snapshotLatencyMs: new MetricSeries({ seed: seed ^ 9 }),
+            snapshotStateDraftMs: new MetricSeries({ seed: seed ^ 10 }),
+            snapshotStateCommitMs: new MetricSeries({ seed: seed ^ 11 }),
+            snapshotStateTerritoryPointCount: new MetricSeries({ seed: seed ^ 12 })
         };
     }
 
@@ -651,6 +730,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
             ? (counters.connectionFailures + counters.joinFailures)
                 / counters.connectionAttempts
             : 0;
+        const sequenceLossRatio = calculateSequenceLossRatio(stage.events);
 
         stage.series.activePlayers.add(activePlayers);
         stage.health.push({
@@ -658,6 +738,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
             activeRatio: round(activeRatio),
             connectedClients,
             connectionFailureRatio: round(connectionFailureRatio),
+            sequenceLossRatio: round(sequenceLossRatio),
             slowMonitors,
             starvedMonitors,
             timestamp: new Date().toISOString()
@@ -669,6 +750,11 @@ function createMassiveConnectionDiagnostic(options, plan) {
         ));
         checkHealthFailure(stage, "snapshot-starvation", starvedMonitors > 0);
         checkHealthFailure(stage, "round-trip-time", slowMonitors > 0);
+        checkHealthFailure(
+            stage,
+            "snapshot-sequence-loss",
+            sequenceLossRatio > options.abortSequenceLossRatio
+        );
     }
 
     function checkHealthFailure(stage, name, failed) {
@@ -685,6 +771,14 @@ function createMassiveConnectionDiagnostic(options, plan) {
         for (const [name, series] of Object.entries(stage.series)) {
             metrics[name] = series.summarize();
         }
+        metrics.gamePhases = {};
+        for (const [name, series] of stage.gamePhaseSeries.entries()) {
+            metrics.gamePhases[name] = series.summarize();
+        }
+        metrics.generator = summarizeGenerator(stage.generatorAtStart);
+        stage.events.snapshotSequenceLossRatio = round(
+            calculateSequenceLossRatio(stage.events)
+        );
 
         const counterDelta = {};
         for (const [name, value] of Object.entries(counters)) {
@@ -705,6 +799,35 @@ function createMassiveConnectionDiagnostic(options, plan) {
         };
         result.assessment = assessStage(result, options);
         return result;
+    }
+
+    function createGeneratorSample() {
+        generatorEventLoopDelay.reset();
+        return {
+            cpuUsage: process.cpuUsage(),
+            eventLoopUtilization: performance.eventLoopUtilization()
+        };
+    }
+
+    function summarizeGenerator(start) {
+        const cpuUsage = process.cpuUsage(start.cpuUsage);
+        const eventLoopUtilization = performance.eventLoopUtilization(
+            start.eventLoopUtilization
+        );
+        const durationMs = Math.max(1, currentStage
+            ? Date.now() - Date.parse(currentStage.startedAt)
+            : options.stageMs);
+        const memory = process.memoryUsage();
+
+        return {
+            cpuPercentOfOneCore: round(
+                (cpuUsage.user + cpuUsage.system) / 1000 / durationMs * 100
+            ),
+            eventLoopDelayP95Ms: round(generatorEventLoopDelay.percentile(95) / 1e6),
+            eventLoopUtilization: round(eventLoopUtilization.utilization),
+            heapUsedMb: round(memory.heapUsed / 1048576),
+            rssMb: round(memory.rss / 1048576)
+        };
     }
 
     function createReport() {
@@ -809,6 +932,23 @@ function assessStage(stage, options) {
         tick.p99,
         options.warnGameTickMs
     );
+    addIssue(
+        issues,
+        "snapshot-sequence-loss",
+        stage.events.snapshotSequenceLossRatio > options.warnSequenceLossRatio,
+        stage.events.snapshotSequenceLossRatio > options.abortSequenceLossRatio,
+        stage.events.snapshotSequenceLossRatio,
+        options.warnSequenceLossRatio
+    );
+    addIssue(
+        issues,
+        "load-generator-event-loop",
+        stage.metrics.generator.eventLoopDelayP95Ms > options.warnGeneratorEventLoopMs
+            || stage.metrics.generator.eventLoopUtilization > options.warnGeneratorUtilization,
+        false,
+        stage.metrics.generator.eventLoopDelayP95Ms,
+        options.warnGeneratorEventLoopMs
+    );
 
     if (stage.events.unexpectedDisconnects > 0) {
         issues.push(createIssue(
@@ -871,9 +1011,23 @@ function parseArguments(argumentsList) {
         ),
         abortGameTickMs: getNumber(values, "abort-game-tick-ms", 33.334, 1),
         abortRttMs: getNumber(values, "abort-rtt-ms", 500, 1),
+        abortSequenceLossRatio: getNumber(
+            values,
+            "abort-sequence-loss-ratio",
+            0.05,
+            0,
+            1
+        ),
         abortSnapshotGapMs: getInteger(values, "abort-snapshot-gap-ms", 3000, 100),
         allowRemote: getBoolean(values, "allow-remote", false),
         arenaCapacity: getInteger(values, "arena-capacity", 36, 1, 36),
+        connectionConcurrency: getInteger(
+            values,
+            "connection-concurrency",
+            8,
+            1,
+            32
+        ),
         connectionIntervalMs: getInteger(values, "connection-interval-ms", 25, 0),
         connectTimeoutMs: getInteger(values, "connect-timeout-ms", 10000, 100),
         healthIntervalMs: getInteger(values, "health-interval-ms", 1000, 100),
@@ -897,7 +1051,27 @@ function parseArguments(argumentsList) {
         url: values.get("url") || "http://127.0.0.1:3000",
         warnActiveRatio: getNumber(values, "warn-active-ratio", 0.98, 0, 1),
         warnGameTickMs: getNumber(values, "warn-game-tick-ms", 16.667, 1),
+        warnGeneratorEventLoopMs: getNumber(
+            values,
+            "warn-generator-event-loop-ms",
+            50,
+            1
+        ),
+        warnGeneratorUtilization: getNumber(
+            values,
+            "warn-generator-utilization",
+            0.8,
+            0,
+            1
+        ),
         warnRttMs: getNumber(values, "warn-rtt-ms", 250, 1),
+        warnSequenceLossRatio: getNumber(
+            values,
+            "warn-sequence-loss-ratio",
+            0.01,
+            0,
+            1
+        ),
         warnSnapshotIntervalMs: getNumber(
             values,
             "warn-snapshot-interval-ms",
@@ -914,9 +1088,11 @@ function parseArgumentMap(argumentsList) {
         "abort-connection-error-ratio",
         "abort-game-tick-ms",
         "abort-rtt-ms",
+        "abort-sequence-loss-ratio",
         "abort-snapshot-gap-ms",
         "allow-remote",
         "arena-capacity",
+        "connection-concurrency",
         "connection-interval-ms",
         "connect-timeout-ms",
         "health-interval-ms",
@@ -936,7 +1112,10 @@ function parseArgumentMap(argumentsList) {
         "url",
         "warn-active-ratio",
         "warn-game-tick-ms",
+        "warn-generator-event-loop-ms",
+        "warn-generator-utilization",
         "warn-rtt-ms",
+        "warn-sequence-loss-ratio",
         "warn-snapshot-interval-ms"
     ]);
     const values = new Map();
@@ -989,8 +1168,10 @@ function createPublicOptions(options) {
         abortActiveRatio: options.abortActiveRatio,
         abortConnectionErrorRatio: options.abortConnectionErrorRatio,
         abortRttMs: options.abortRttMs,
+        abortSequenceLossRatio: options.abortSequenceLossRatio,
         abortSnapshotGapMs: options.abortSnapshotGapMs,
         arenaCapacity: options.arenaCapacity,
+        connectionConcurrency: options.connectionConcurrency,
         connectionIntervalMs: options.connectionIntervalMs,
         inputIntervalMs: options.inputIntervalMs,
         mapSize: options.mapSize,
@@ -1118,6 +1299,22 @@ function createRandom(seed) {
 
 function normalizeAngle(angle) {
     return Math.atan2(Math.sin(angle), Math.cos(angle));
+}
+
+function calculateSequenceLossRatio(events) {
+    const received = Number(events && events.snapshots) || 0;
+    const missing = Number(events && events.missingSnapshotSequences) || 0;
+    const total = received + missing;
+    return total > 0 ? missing / total : 0;
+}
+
+function hashString(value) {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index++) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
 }
 
 function delay(durationMs) {
