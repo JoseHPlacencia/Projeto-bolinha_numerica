@@ -444,6 +444,13 @@ function destroyRoom(roomCode) {
     return true;
 }
 
+function getRoomManagerDiagnostics() {
+    return {
+        roomCount: rooms.size,
+        socketRoomBindingCount: socketIdToRoomCode.size
+    };
+}
+
 function listRooms() {
     return Array.from(rooms.values())
         .filter(room => !room.hiddenFromList && !room.isSystemRoom)
@@ -505,6 +512,7 @@ module.exports = {
     createBackgroundRoom,
     createRoom,
     getPublicMatchCandidates,
+    getRoomManagerDiagnostics,
     handleRoomPopulationChanged,
     joinRoom,
     leaveRoom,

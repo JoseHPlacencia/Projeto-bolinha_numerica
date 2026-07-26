@@ -2,12 +2,19 @@ const config = require("../config/gameConfig");
 const roomManager = require("./roomManager");
 const { applyPlayerInput } = require("./playerInput");
 const { initializeRoomPlayer } = require("./roomPlayer");
+const {
+    createRuntimeMemorySampler,
+    runDiagnosticGarbageCollection
+} = require("./runtimeMemoryDiagnostics");
 const { invalidateSnapshotCache } = require("./snapshotLoop");
 const { resetSocketSnapshotState } = require("./snapshotState");
 const { redirectSpectatorsAfterPlayerExit } = require("../systems/spectatorSystem");
 const { createVirtualSocketIo } = require("./virtualSocketIo");
 
 function createRoomWorkerRuntime(options = {}) {
+    const sampleMemory = createRuntimeMemorySampler("room-worker", {
+        sampleIntervalMs: 1500
+    });
     const publishEvent = typeof options.publishEvent === "function"
         ? options.publishEvent
         : () => {};
@@ -44,6 +51,8 @@ function createRoomWorkerRuntime(options = {}) {
                 return leaveRoom(payload);
             case "destroyRoom":
                 return destroyRoom(payload.roomCode);
+            case "collectMemoryDiagnostics":
+                return collectMemoryDiagnostics(payload);
             case "getDirectory":
                 return getDirectory();
             default:
@@ -278,10 +287,12 @@ function createRoomWorkerRuntime(options = {}) {
         return roomManager.listRooms();
     }
 
-    function getMetrics() {
+    function getMetrics(options = {}) {
         const listedRooms = new Map(
             roomManager.listRooms().map(room => [room.code, room])
         );
+        const roomManagerDiagnostics = roomManager.getRoomManagerDiagnostics();
+        const transportDiagnostics = virtualTransport.getDiagnostics();
         let botCount = 0;
         let playerCount = 0;
         let tickDurationMs = 0;
@@ -301,11 +312,26 @@ function createRoomWorkerRuntime(options = {}) {
 
         return {
             botCount,
+            connectionCount: transportDiagnostics.socketCount,
+            memory: sampleMemory(options.forceMemorySample === true),
             playerCount,
             roomCount: roomManager.rooms.size,
+            roomBindingCount: roomManagerDiagnostics.socketRoomBindingCount,
             tickDriftMs,
             tickDurationMs,
+            transport: transportDiagnostics,
             updatedAt: Date.now()
+        };
+    }
+
+    function collectMemoryDiagnostics(payload = {}) {
+        const garbageCollection = runDiagnosticGarbageCollection(
+            payload.forceGarbageCollection === true
+        );
+
+        return {
+            garbageCollection,
+            metrics: getMetrics({ forceMemorySample: true })
         };
     }
 

@@ -14,6 +14,12 @@ const {
 const {
     RELIABLE_GAME_STATE_EVENT
 } = require("../src/core/snapshotChannels");
+const {
+    ISOLATE_MEMORY_FIELDS,
+    createServerMemoryDelta,
+    createServerMemorySummary,
+    normalizeMemorySnapshot
+} = require("./lib/serverMemorySummary");
 
 const projectRoot = path.resolve(__dirname, "..");
 const defaultOutput = path.join(
@@ -35,6 +41,10 @@ const PLAYER_COLORS = Object.freeze([
     "#55ff26", "#25ef88", "#22e6e6", "#2aa7ef",
     "#2868ef", "#4931ef", "#8128ef", "#c32aef",
     "#ef2ac5", "#ef2878"
+]);
+const MEMORY_FIELDS = Object.freeze([
+    ...ISOLATE_MEMORY_FIELDS,
+    "rssBytes"
 ]);
 
 main().catch(error => {
@@ -75,10 +85,13 @@ function createMassiveConnectionDiagnostic(options, plan) {
     };
     const generatorEventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
     let abortReason = null;
+    let baselineServerDiagnostics = null;
     let currentStage = null;
     let fatalError = null;
     let inputTimer = null;
     let pingTimer = null;
+    let recoveryMemoryTimeline = [];
+    let recoveryServerDiagnostics = null;
     let stopping = false;
 
     return {
@@ -92,6 +105,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
         startActivityTimers();
 
         try {
+            baselineServerDiagnostics = await collectServerDiagnosticsProbe();
             for (const stagePlan of plan.stages) {
                 if (abortReason) break;
                 const stageReport = await runStage(stagePlan);
@@ -105,7 +119,12 @@ function createMassiveConnectionDiagnostic(options, plan) {
             stopping = true;
             stopActivityTimers();
             generatorEventLoopDelay.disable();
-            await disconnectAllClients();
+            const disconnectedAt = await disconnectAllClients();
+            recoveryMemoryTimeline = await collectRecoveryMemoryTimeline(
+                disconnectedAt
+            );
+            recoveryServerDiagnostics = recoveryMemoryTimeline.at(-1)?.diagnostics
+                || null;
             process.off("SIGINT", handleInterrupt);
             process.off("SIGTERM", handleInterrupt);
         }
@@ -681,6 +700,10 @@ function createMassiveConnectionDiagnostic(options, plan) {
 
             if (currentStage) {
                 currentStage.series.pingRttMs.add(rtt);
+                recordGatewayMemoryMetrics(
+                    currentStage,
+                    response && response.gatewayMemory
+                );
                 recordGatewayTransportMetrics(
                     currentStage,
                     response && response.gatewayDiagnostics
@@ -765,17 +788,33 @@ function createMassiveConnectionDiagnostic(options, plan) {
         }
     }
 
+    function recordGatewayMemoryMetrics(stage, rawMemory) {
+        const memory = normalizeMemorySnapshot(rawMemory);
+        if (!memory || memory.sampledAt <= stage.gatewayMemorySampledAt) return;
+
+        stage.gatewayMemorySampledAt = memory.sampledAt;
+        recordMemoryMetrics(stage.gatewayMemorySeries, memory);
+    }
+
     function recordWorkerIpcMetrics(stage, workerDiagnostics) {
         if (!Array.isArray(workerDiagnostics)) return;
 
         for (const worker of workerDiagnostics) {
             const workerId = Number(worker && worker.id);
             const metrics = worker && worker.metrics;
-            const ipc = metrics && metrics.ipc;
 
-            if (!Number.isInteger(workerId) || !ipc || typeof ipc !== "object") {
+            if (!Number.isInteger(workerId) || !metrics || typeof metrics !== "object") {
                 continue;
             }
+
+            recordWorkerMemoryMetrics(
+                stage,
+                workerId,
+                metrics.memory
+            );
+
+            const ipc = metrics.ipc;
+            if (!ipc || typeof ipc !== "object") continue;
 
             const current = {
                 acknowledgementBatchCount: finiteCounter(ipc.acknowledgementBatchCount),
@@ -847,7 +886,35 @@ function createMassiveConnectionDiagnostic(options, plan) {
         }
     }
 
+    function recordWorkerMemoryMetrics(stage, workerId, rawMemory) {
+        const memory = normalizeMemorySnapshot(rawMemory);
+        const previousSampledAt = stage.workerMemorySampledAt.get(workerId) || 0;
+
+        if (!memory || memory.sampledAt <= previousSampledAt) return;
+
+        let series = stage.workerMemorySeries.get(workerId);
+        if (!series) {
+            series = createMemorySeries(
+                options.seed
+                ^ Math.imul(stage.plan.index, 0x6d2b79f5)
+                ^ Math.imul(workerId, 0x1b873593)
+            );
+            stage.workerMemorySeries.set(workerId, series);
+        }
+
+        stage.workerMemorySampledAt.set(workerId, memory.sampledAt);
+        recordMemoryMetrics(series, memory);
+    }
+
+    function recordMemoryMetrics(series, memory) {
+        for (const field of MEMORY_FIELDS) {
+            series[field].add(memory[field]);
+        }
+    }
+
     function createStageState(stagePlan, rampDurationMs) {
+        const memorySeed = options.seed ^ Math.imul(stagePlan.index, 0x45d9f3b);
+
         return {
             countersAtStart: { ...counters },
             events: {
@@ -885,6 +952,8 @@ function createMassiveConnectionDiagnostic(options, plan) {
             gamePhaseSeries: new Map(),
             gatewayCompressionLevels: new Set(),
             gatewayCompressionThresholds: new Set(),
+            gatewayMemorySampledAt: 0,
+            gatewayMemorySeries: createMemorySeries(memorySeed),
             gatewayNoContextTakeoverModes: new Set(),
             gatewayTransports: new Set(),
             generatorAtStart: createGeneratorSample(),
@@ -892,8 +961,24 @@ function createMassiveConnectionDiagnostic(options, plan) {
             rampDurationMs,
             series: createStageSeries(stagePlan.index),
             startedAt: new Date().toISOString(),
-            workerIpcCounters: new Map()
+            workerIpcCounters: new Map(),
+            workerMemorySampledAt: new Map(),
+            workerMemorySeries: new Map()
         };
+    }
+
+    function createMemorySeries(seed) {
+        return Object.fromEntries(MEMORY_FIELDS.map((field, index) => [
+            field,
+            new MetricSeries({ seed: seed ^ Math.imul(index + 1, 0x9e3779b1) })
+        ]));
+    }
+
+    function summarizeMemorySeries(series) {
+        return Object.fromEntries(MEMORY_FIELDS.map(field => [
+            field,
+            series[field].summarize()
+        ]));
     }
 
     function createStageSeries(stageIndex) {
@@ -1015,6 +1100,17 @@ function createMassiveConnectionDiagnostic(options, plan) {
             serverNoContextTakeover: [...stage.gatewayNoContextTakeoverModes],
             transports: [...stage.gatewayTransports].sort()
         };
+        metrics.serverMemory = {
+            gateway: summarizeMemorySeries(stage.gatewayMemorySeries),
+            workers: Object.fromEntries(
+                [...stage.workerMemorySeries.entries()]
+                    .sort(([leftId], [rightId]) => leftId - rightId)
+                    .map(([workerId, series]) => [
+                        workerId,
+                        summarizeMemorySeries(series)
+                    ])
+            )
+        };
         stage.events.snapshotSequenceLossRatio = round(
             calculateSequenceLossRatio(stage.events)
         );
@@ -1074,9 +1170,15 @@ function createMassiveConnectionDiagnostic(options, plan) {
         const status = fatalError || abortReason || statuses.includes("fail")
             ? "fail"
             : statuses.includes("warn") ? "warn" : "pass";
+        const baselineMemory = createServerMemorySummary(
+            baselineServerDiagnostics
+        );
+        const postRecoveryMemory = createServerMemorySummary(
+            recoveryServerDiagnostics
+        );
 
         return {
-            schema: 1,
+            schema: 2,
             generatedAt: new Date().toISOString(),
             status,
             abortReason,
@@ -1086,6 +1188,29 @@ function createMassiveConnectionDiagnostic(options, plan) {
             } : null,
             options: createPublicOptions(options),
             plan,
+            serverMemory: {
+                baseline: baselineMemory,
+                deltaAfterRecovery: createServerMemoryDelta(
+                    baselineMemory,
+                    postRecoveryMemory
+                ),
+                postRecovery: postRecoveryMemory,
+                probeErrors: [
+                    baselineServerDiagnostics && baselineServerDiagnostics.error,
+                    ...recoveryMemoryTimeline.map(entry => (
+                        entry.diagnostics && entry.diagnostics.error
+                    ))
+                ].filter(Boolean),
+                recoveryMs: options.recoveryMs,
+                timeline: recoveryMemoryTimeline.map(entry => ({
+                    garbageCollection: entry.diagnostics
+                        && entry.diagnostics.garbageCollection
+                        || null,
+                    idleMs: entry.idleMs,
+                    memory: createServerMemorySummary(entry.diagnostics),
+                    phase: entry.phase || null
+                }))
+            },
             connections: {
                 clientsCreated: clients.length,
                 counters,
@@ -1103,6 +1228,135 @@ function createMassiveConnectionDiagnostic(options, plan) {
         };
     }
 
+    function collectServerDiagnosticsProbe(forceGarbageCollection = false) {
+        return new Promise(resolve => {
+            const socket = io(options.url, {
+                auth: { snapshotSchema: MAX_SNAPSHOT_SCHEMA },
+                forceNew: true,
+                reconnection: false,
+                timeout: options.connectTimeoutMs,
+                transports: options.transport === "default"
+                    ? undefined
+                    : [options.transport]
+            });
+            const workerMemoryDeadline = Date.now() + 3000;
+            let finished = false;
+            let retryTimer = null;
+            let lastResponse = null;
+            const timeout = setTimeout(
+                () => finish(
+                    lastResponse
+                        ? {
+                            ...lastResponse,
+                            error: "server memory probe timed out waiting for worker metrics"
+                        }
+                        : { error: "server memory probe timed out" }
+                ),
+                options.connectTimeoutMs + 4000
+            );
+
+            socket.once("connect", () => {
+                socket.emit("networkDiagnostics", {
+                    enabled: true,
+                    snapshotDetails: false
+                }, response => {
+                    lastResponse = response || lastResponse;
+                    requestPing();
+                });
+            });
+            socket.once("connect_error", error => {
+                finish({
+                    error: error && error.message
+                        ? `server memory probe failed: ${error.message}`
+                        : "server memory probe failed"
+                });
+            });
+
+            function requestPing() {
+                if (finished) return;
+
+                socket.emit("networkDiagnosticsPing", {
+                    clientSentAt: Date.now(),
+                    forceGarbageCollection
+                }, response => {
+                    if (finished) return;
+                    lastResponse = response || lastResponse;
+
+                    if (
+                        hasCompleteWorkerMemory(response)
+                        || Date.now() >= workerMemoryDeadline
+                    ) {
+                        finish(
+                            response
+                            || lastResponse
+                            || { error: "server memory probe returned no data" }
+                        );
+                        return;
+                    }
+
+                    retryTimer = setTimeout(requestPing, 500);
+                });
+            }
+
+            function finish(result) {
+                if (finished) return;
+                finished = true;
+                clearTimeout(timeout);
+                if (retryTimer) clearTimeout(retryTimer);
+                socket.disconnect();
+                resolve(result);
+            }
+        });
+    }
+
+    function hasCompleteWorkerMemory(response) {
+        const workers = response && response.workerDiagnostics;
+        if (!Array.isArray(workers)) return Boolean(response && response.gatewayMemory);
+
+        return Boolean(response.gatewayMemory) && workers.every(worker => (
+            !worker
+            || worker.ready === false
+            || Boolean(worker.metrics && worker.metrics.memory)
+        ));
+    }
+
+    async function collectRecoveryMemoryTimeline(disconnectedAt) {
+        const checkpoints = [...new Set([
+            0,
+            Math.min(5000, options.recoveryMs),
+            options.recoveryMs
+        ])].sort((left, right) => left - right);
+        const timeline = [];
+
+        for (const checkpointMs of checkpoints) {
+            const elapsedMs = Date.now() - disconnectedAt;
+            if (checkpointMs > elapsedMs) {
+                await delay(checkpointMs - elapsedMs);
+            }
+
+            const isFinalCheckpoint = checkpointMs === checkpoints[checkpoints.length - 1];
+            const forceGarbageCollection = options.forceGcAfterRecovery
+                && isFinalCheckpoint;
+            const diagnostics = await collectServerDiagnosticsProbe(false);
+            timeline.push({
+                diagnostics,
+                idleMs: Date.now() - disconnectedAt,
+                phase: forceGarbageCollection ? "before-forced-gc" : null
+            });
+
+            if (forceGarbageCollection) {
+                const forcedDiagnostics = await collectServerDiagnosticsProbe(true);
+                timeline.push({
+                    diagnostics: forcedDiagnostics,
+                    idleMs: Date.now() - disconnectedAt,
+                    phase: "after-forced-gc"
+                });
+            }
+        }
+
+        return timeline;
+    }
+
     async function disconnectAllClients() {
         for (let offset = 0; offset < clients.length; offset += 100) {
             for (const state of clients.slice(offset, offset + 100)) {
@@ -1116,7 +1370,7 @@ function createMassiveConnectionDiagnostic(options, plan) {
             }
             if (offset + 100 < clients.length) await delay(20);
         }
-        if (options.recoveryMs > 0) await delay(options.recoveryMs);
+        return Date.now();
     }
 
     function countClients(predicate) {
@@ -1269,6 +1523,7 @@ function parseArguments(argumentsList) {
         ),
         connectionIntervalMs: getInteger(values, "connection-interval-ms", 25, 0),
         connectTimeoutMs: getInteger(values, "connect-timeout-ms", 10000, 100),
+        forceGcAfterRecovery: getBoolean(values, "force-gc-after-recovery", false),
         healthIntervalMs: getInteger(values, "health-interval-ms", 1000, 100),
         inputIntervalMs: getInteger(values, "input-interval-ms", 250, 34),
         mapSize: getNumber(values, "map-size", 2, 0.5, 2),
@@ -1334,6 +1589,7 @@ function parseArgumentMap(argumentsList) {
         "connection-concurrency",
         "connection-interval-ms",
         "connect-timeout-ms",
+        "force-gc-after-recovery",
         "health-interval-ms",
         "input-interval-ms",
         "map-size",
@@ -1412,11 +1668,13 @@ function createPublicOptions(options) {
         arenaCapacity: options.arenaCapacity,
         connectionConcurrency: options.connectionConcurrency,
         connectionIntervalMs: options.connectionIntervalMs,
+        forceGcAfterRecovery: options.forceGcAfterRecovery,
         inputIntervalMs: options.inputIntervalMs,
         mapSize: options.mapSize,
         maxRooms: options.maxRooms,
         pingIntervalMs: options.pingIntervalMs,
         ramp: options.ramp,
+        recoveryMs: options.recoveryMs,
         settleMs: options.settleMs,
         stageMs: options.stageMs,
         transport: options.transport,
@@ -1458,7 +1716,18 @@ function createMarkdownReport(report) {
         + `${stage.metrics.gameTickMs.p99 ?? "-"} | `
         + `${stage.metrics.gatewayCompressionTotalMs.p99 ?? "-"} | `
         + `${stage.metrics.gatewayTransportBusyDurationMs.p99 ?? "-"} | `
+        + `${formatMemoryMb(stage.metrics.serverMemory?.gateway?.rssBytes?.p99)} | `
         + `${stage.assessment.status} |`
+    )).join("\n");
+    const baselineMemory = report.serverMemory && report.serverMemory.baseline;
+    const postRecoveryMemory = report.serverMemory && report.serverMemory.postRecovery;
+    const memoryDelta = report.serverMemory && report.serverMemory.deltaAfterRecovery;
+    const memoryTimelineRows = (report.serverMemory?.timeline || []).map(entry => (
+        `| ${entry.idleMs} | ${entry.phase || "-"} `
+        + `| ${formatMemoryMb(entry.memory?.processRssBytes)} `
+        + `| ${formatMemoryMb(entry.memory?.isolateTotals?.heapUsedBytes)} `
+        + `| ${entry.memory?.roomCount ?? "-"} | ${entry.memory?.playerCount ?? "-"} `
+        + `| ${entry.memory?.connectionCount ?? "-"} | ${entry.memory?.roomBindingCount ?? "-"} |`
     )).join("\n");
 
     return `# Diagnóstico de conexões massivas
@@ -1470,9 +1739,28 @@ Limite por arena: ${report.plan.arenaCapacity}
 Limite planejado: ${report.plan.maximumPlayers} jogadores em ${report.plan.maxRooms} arenas  
 Interrupção automática: ${report.abortReason || "não"}
 
-| Jogadores | Arenas | Ativos mín. | RTT p99 ms | Snapshot p99 ms | Tick p99 ms | Zlib total p99 ms | Transporte ocupado p99 ms | Estado |
-| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-${rows || "| - | - | - | - | - | - | - | - | sem estágios concluídos |"}
+| Jogadores | Arenas | Ativos mín. | RTT p99 ms | Snapshot p99 ms | Tick p99 ms | Zlib total p99 ms | Transporte ocupado p99 ms | RSS p99 MiB | Estado |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+${rows || "| - | - | - | - | - | - | - | - | - | sem estágios concluídos |"}
+
+## Memória após recuperação
+
+- espera ociosa: ${report.serverMemory?.recoveryMs ?? 0} ms
+- RSS inicial/final/delta: ${formatMemoryMb(baselineMemory?.processRssBytes)} /
+  ${formatMemoryMb(postRecoveryMemory?.processRssBytes)} /
+  ${formatSignedMemoryMb(memoryDelta?.processRssBytes)} MiB
+- heap usado dos isolates inicial/final/delta:
+  ${formatMemoryMb(baselineMemory?.isolateTotals?.heapUsedBytes)} /
+  ${formatMemoryMb(postRecoveryMemory?.isolateTotals?.heapUsedBytes)} /
+  ${formatSignedMemoryMb(memoryDelta?.isolateTotals?.heapUsedBytes)} MiB
+- salas/jogadores após recuperação:
+  ${postRecoveryMemory?.roomCount ?? "n/a"} / ${postRecoveryMemory?.playerCount ?? "n/a"}
+- conexões/vínculos após recuperação:
+  ${postRecoveryMemory?.connectionCount ?? "n/a"} / ${postRecoveryMemory?.roomBindingCount ?? "n/a"}
+
+| Ocioso ms | Fase | RSS MiB | Heap usado dos isolates MiB | Salas | Jogadores | Conexões | Vínculos |
+| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+${memoryTimelineRows || "| - | - | - | - | - | - | - | - |"}
 
 O gerador cria jogadores reais do protocolo, confirma snapshots confiáveis, envia
 viewport e mudanças graduais de direção, e distribui a carga sem ultrapassar o
@@ -1491,6 +1779,9 @@ function printSummary(report, output) {
             + `zlib p99 ${stage.metrics.gatewayCompressionTotalMs.p99 ?? "n/a"} ms, `
             + `transport busy p99 `
             + `${stage.metrics.gatewayTransportBusyDurationMs.p99 ?? "n/a"} ms, `
+            + `RSS p99 ${formatMemoryMb(
+                stage.metrics.serverMemory?.gateway?.rssBytes?.p99
+            )} MiB, `
             + `${stage.assessment.status}.\n`
         );
     }
@@ -1498,6 +1789,18 @@ function printSummary(report, output) {
         process.stdout.write(`Abort reason: ${report.abortReason}\n`);
     }
     process.stdout.write(`Report: ${output}\n`);
+}
+
+function formatMemoryMb(bytes) {
+    const numericValue = Number(bytes);
+    return Number.isFinite(numericValue)
+        ? round(numericValue / 1048576)
+        : "n/a";
+}
+
+function formatSignedMemoryMb(bytes) {
+    const value = formatMemoryMb(bytes);
+    return typeof value === "number" && value > 0 ? `+${value}` : value;
 }
 
 function getInteger(values, name, fallback, minimum, maximum = Number.MAX_SAFE_INTEGER) {

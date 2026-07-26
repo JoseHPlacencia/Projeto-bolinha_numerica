@@ -108,6 +108,14 @@ function logServerStart() {
         + `(gateway + BOTS, ${config.server.roomWorkerCount} room workers)`
     );
     console.log(
+        "Idle room worker recycling: "
+        + (
+            config.server.roomWorkerIdleRecycleMs > 0
+                ? `${config.server.roomWorkerIdleRecycleMs} ms`
+                : "disabled"
+        )
+    );
+    console.log(
         "Socket compression: perMessageDeflate "
         + `level ${config.socket.perMessageDeflate.zlibDeflateOptions.level}, `
         + `threshold ${config.socket.perMessageDeflate.threshold} bytes, `

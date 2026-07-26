@@ -1,4 +1,7 @@
-const { resolveServerCoreCount } = require("./serverRuntime");
+const {
+    resolveRoomWorkerIdleRecycleMs,
+    resolveServerCoreCount
+} = require("./serverRuntime");
 const {
     resolveSocketCompressionLevel,
     resolveSocketCompressionThreshold
@@ -34,6 +37,7 @@ const serverCoreCount = resolveServerCoreCount();
 const server = Object.freeze({
     coreCount: serverCoreCount,
     port: Number(process.env.PORT) || 3000,
+    roomWorkerIdleRecycleMs: resolveRoomWorkerIdleRecycleMs(),
     roomWorkerCount: serverCoreCount - 1
 });
 

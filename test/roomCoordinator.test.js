@@ -195,6 +195,64 @@ test("room worker batch preserves shared snapshot frame references across IPC", 
     }
 });
 
+test("room coordinator recycles a previously active worker only after it becomes idle", async () => {
+    const coordinator = createRoomCoordinator({
+        localRoomManager: { createBackgroundRoom() {} },
+        workerCount: 1,
+        workerIdleRecycleMs: 50
+    });
+    const owner = { data: {}, id: "idle-recycle-owner" };
+
+    coordinator.on("workerEvent", ({ event, workerId }) => {
+        if (event.acknowledgementId) {
+            coordinator.acknowledge(workerId, {
+                acknowledgement: { applied: true },
+                acknowledgementId: event.acknowledgementId
+            });
+        }
+        if (event.deliveryId) {
+            coordinator.confirmEventDelivery(workerId, event.deliveryId);
+        }
+    });
+    coordinator.on("workerEventBatch", ({ events, workerId }) => {
+        const deliveryIds = events.map(event => event.deliveryId).filter(Boolean);
+        if (deliveryIds.length > 0) {
+            coordinator.confirmEventDeliveries(workerId, deliveryIds);
+        }
+        for (const event of events) {
+            if (!event.acknowledgementId) continue;
+            coordinator.acknowledge(workerId, {
+                acknowledgement: { applied: true },
+                acknowledgementId: event.acknowledgementId
+            });
+        }
+    });
+
+    try {
+        await coordinator.start();
+        const originalWorker = coordinator.workers.get(1);
+        const created = await coordinator.createAndJoinRoom(owner, {
+            playerOptions: { name: "Owner" },
+            roomOptions: { difficulty: "medium", isPrivate: false }
+        });
+
+        assert.equal(created.success, true);
+        owner.data.roomCode = created.room.code;
+        const leaveResult = await coordinator.leaveRoom(owner);
+        assert.equal(leaveResult.destroyed, true);
+
+        await waitFor(() => {
+            const currentWorker = coordinator.workers.get(1);
+            return currentWorker && currentWorker !== originalWorker && currentWorker.ready;
+        }, 4000);
+
+        assert.equal(coordinator.listRooms().length, 0);
+        assert.equal(coordinator.getWorkerDiagnostics()[0].hasProcessedRoom, false);
+    } finally {
+        await coordinator.close();
+    }
+});
+
 async function waitFor(predicate, timeoutMs) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {

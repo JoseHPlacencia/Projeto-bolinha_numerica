@@ -12,8 +12,14 @@ class RoomCoordinator extends EventEmitter {
         this.isDistributedRoomCoordinator = true;
         this.localRoomManager = options.localRoomManager;
         this.workerCount = normalizeWorkerCount(options.workerCount);
+        this.workerIdleRecycleMs = normalizeIdleRecycleMs(
+            options.workerIdleRecycleMs,
+            config.server.roomWorkerIdleRecycleMs
+        );
         this.workerFactory = options.workerFactory || (workerId => new RoomWorkerClient({ id: workerId }));
         this.workers = new Map();
+        this.workerHasProcessedRoom = new Map();
+        this.workerIdleRecycleTimers = new Map();
         this.workerRoomCodes = new Map();
         this.workerReservations = new Map();
         this.workerMetrics = new Map();
@@ -41,6 +47,9 @@ class RoomCoordinator extends EventEmitter {
     async close() {
         this.closing = true;
         this.started = false;
+        for (const workerId of this.workerIdleRecycleTimers.keys()) {
+            this.clearWorkerIdleRecycle(workerId);
+        }
         const workers = [...this.workers.values()];
         this.workers.clear();
         await Promise.allSettled(workers.map(worker => worker.close()));
@@ -74,6 +83,7 @@ class RoomCoordinator extends EventEmitter {
         const worker = this.selectWorker();
         if (!worker) return { success: false, message: "No room worker is available." };
 
+        this.markWorkerActive(worker.id);
         this.pendingRoomCreations++;
         this.reservedRoomCodes.add(roomCode);
         this.workerReservations.set(worker.id, (this.workerReservations.get(worker.id) || 0) + 1);
@@ -213,7 +223,9 @@ class RoomCoordinator extends EventEmitter {
 
     getWorkerDiagnostics() {
         return [...this.workers.values()].map(worker => ({
+            hasProcessedRoom: this.workerHasProcessedRoom.get(worker.id) === true,
             id: worker.id,
+            idleRecycleScheduled: this.workerIdleRecycleTimers.has(worker.id),
             metrics: this.workerMetrics.get(worker.id) || null,
             ready: worker.ready,
             roomCount: (this.workerRoomCodes.get(worker.id) || new Set()).size,
@@ -221,9 +233,44 @@ class RoomCoordinator extends EventEmitter {
         }));
     }
 
+    async collectWorkerMemoryDiagnostics(forceGarbageCollection = false) {
+        const results = await Promise.all([...this.workers.values()].map(async worker => {
+            if (!worker.ready) {
+                return {
+                    error: "worker unavailable",
+                    id: worker.id
+                };
+            }
+
+            try {
+                const result = await worker.request("collectMemoryDiagnostics", {
+                    forceGarbageCollection: forceGarbageCollection === true
+                });
+
+                if (result && result.metrics) {
+                    this.workerMetrics.set(worker.id, result.metrics);
+                }
+
+                return {
+                    ...result,
+                    id: worker.id
+                };
+            } catch (error) {
+                return {
+                    error: error && error.message || String(error),
+                    id: worker.id
+                };
+            }
+        }));
+
+        return results.sort((left, right) => left.id - right.id);
+    }
+
     async startWorker(workerId) {
         const worker = this.workerFactory(workerId);
+        this.clearWorkerIdleRecycle(workerId);
         this.workers.set(workerId, worker);
+        this.workerHasProcessedRoom.set(workerId, false);
         this.workerRoomCodes.set(workerId, new Set());
         this.workerReservations.set(workerId, 0);
         this.workerMetrics.set(workerId, null);
@@ -233,7 +280,7 @@ class RoomCoordinator extends EventEmitter {
         worker.on("workerEventBatch", events => {
             this.emit("workerEventBatch", { events, workerId });
         });
-        worker.on("metrics", metrics => this.workerMetrics.set(workerId, metrics));
+        worker.on("metrics", metrics => this.handleWorkerMetrics(workerId, worker, metrics));
         worker.on("workerError", error => this.emit("workerError", { error, workerId }));
         worker.on("workerExit", details => this.handleWorkerExit(workerId, worker, details));
 
@@ -243,7 +290,9 @@ class RoomCoordinator extends EventEmitter {
     handleWorkerExit(workerId, exitedWorker, details) {
         if (this.workers.get(workerId) !== exitedWorker) return;
 
+        this.clearWorkerIdleRecycle(workerId);
         this.workers.delete(workerId);
+        this.workerHasProcessedRoom.delete(workerId);
         this.workerMetrics.delete(workerId);
         const affectedSocketIds = [];
         for (const [socketId, connectionWorkerId] of this.connectionWorkers) {
@@ -278,6 +327,9 @@ class RoomCoordinator extends EventEmitter {
             this.roomOwners.set(roomCode, workerId);
         }
 
+        if (roomCodes.size > 0) {
+            this.markWorkerActive(workerId);
+        }
         this.workerRoomCodes.set(workerId, roomCodes);
         this.emit("roomsChanged", this.listRooms());
     }
@@ -297,6 +349,7 @@ class RoomCoordinator extends EventEmitter {
     }
 
     registerJoinedConnection(socketId, roomCode, workerId, room) {
+        this.markWorkerActive(workerId);
         this.connectionWorkers.set(socketId, workerId);
         this.roomOwners.set(roomCode, workerId);
 
@@ -354,6 +407,87 @@ class RoomCoordinator extends EventEmitter {
             + measuredTickDurationMs;
     }
 
+    handleWorkerMetrics(workerId, worker, metrics) {
+        if (this.workers.get(workerId) !== worker) return;
+
+        this.workerMetrics.set(workerId, metrics);
+
+        if (hasWorkerRuntimeActivity(metrics)) {
+            this.markWorkerActive(workerId);
+            return;
+        }
+
+        if (this.workerHasProcessedRoom.get(workerId) === true) {
+            this.scheduleWorkerIdleRecycle(workerId, worker);
+        }
+    }
+
+    markWorkerActive(workerId) {
+        this.workerHasProcessedRoom.set(workerId, true);
+        this.clearWorkerIdleRecycle(workerId);
+    }
+
+    scheduleWorkerIdleRecycle(workerId, worker) {
+        if (
+            this.workerIdleRecycleMs <= 0
+            || this.workerIdleRecycleTimers.has(workerId)
+            || !this.isWorkerFullyIdle(workerId, worker)
+        ) {
+            return;
+        }
+
+        const timer = setTimeout(() => {
+            this.workerIdleRecycleTimers.delete(workerId);
+            this.recycleIdleWorker(workerId, worker).catch(error => {
+                this.emit("workerError", { error, workerId });
+            });
+        }, this.workerIdleRecycleMs);
+        timer.unref?.();
+        this.workerIdleRecycleTimers.set(workerId, timer);
+    }
+
+    clearWorkerIdleRecycle(workerId) {
+        const timer = this.workerIdleRecycleTimers.get(workerId);
+        if (!timer) return;
+        clearTimeout(timer);
+        this.workerIdleRecycleTimers.delete(workerId);
+    }
+
+    isWorkerFullyIdle(workerId, worker) {
+        if (
+            this.closing
+            || this.workers.get(workerId) !== worker
+            || !worker.ready
+            || (this.workerRoomCodes.get(workerId) || new Set()).size > 0
+            || (this.workerReservations.get(workerId) || 0) > 0
+            || (worker.pendingRequests && worker.pendingRequests.size > 0)
+            || (worker.pendingAcknowledgements && worker.pendingAcknowledgements.length > 0)
+        ) {
+            return false;
+        }
+
+        for (const connectionWorkerId of this.connectionWorkers.values()) {
+            if (connectionWorkerId === workerId) return false;
+        }
+
+        return !hasWorkerRuntimeActivity(this.workerMetrics.get(workerId));
+    }
+
+    async recycleIdleWorker(workerId, worker) {
+        if (!this.isWorkerFullyIdle(workerId, worker)) {
+            return false;
+        }
+
+        this.workerHasProcessedRoom.set(workerId, false);
+        await worker.close();
+
+        if (!this.closing && !this.workers.has(workerId)) {
+            await this.startWorker(workerId);
+        }
+
+        return true;
+    }
+
     getConnectionWorker(socketId) {
         return this.workers.get(this.connectionWorkers.get(socketId)) || null;
     }
@@ -389,6 +523,39 @@ function normalizeWorkerCount(rawWorkerCount) {
         throw new RangeError("Room worker count must be an integer from 1 to 3.");
     }
     return workerCount;
+}
+
+function normalizeIdleRecycleMs(rawValue, fallback) {
+    const value = rawValue === undefined ? fallback : rawValue;
+    const idleRecycleMs = Number(value);
+
+    if (!Number.isInteger(idleRecycleMs) || idleRecycleMs < 0) {
+        throw new RangeError("Room worker idle recycle time must be a non-negative integer.");
+    }
+
+    return idleRecycleMs;
+}
+
+function hasWorkerRuntimeActivity(metrics) {
+    if (!metrics || typeof metrics !== "object") {
+        return true;
+    }
+
+    const transport = metrics.transport || {};
+    const ipc = metrics.ipc || {};
+    return [
+        metrics.connectionCount,
+        metrics.playerCount,
+        metrics.roomBindingCount,
+        metrics.roomCount,
+        transport.acknowledgementCount,
+        transport.roomCount,
+        transport.roomMembershipCount,
+        transport.socketCount,
+        ipc.pendingEventBatchSize,
+        ipc.pendingVolatileEventCount,
+        ipc.volatileInFlightCount
+    ].some(value => finiteNonNegative(value) > 0);
 }
 
 function normalizeRoomCode(roomCode) {

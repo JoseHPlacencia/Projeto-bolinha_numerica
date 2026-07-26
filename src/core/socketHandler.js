@@ -11,6 +11,12 @@ const {
     setGatewayTransportDiagnosticsEnabled,
     takeGatewayTransportDiagnostics
 } = require("./gatewayTransportDiagnostics");
+const {
+    createRuntimeMemorySampler,
+    runDiagnosticGarbageCollection
+} = require("./runtimeMemoryDiagnostics");
+
+const sampleGatewayMemory = createRuntimeMemorySampler("gateway");
 
 function registerSocket(io, roomManager) {
     if (roomManager && roomManager.isDistributedRoomCoordinator === true) {
@@ -78,6 +84,7 @@ function registerNetworkDiagnosticsEvents(socket) {
                 captureOverlapAudit,
                 enabled,
                 gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
+                gatewayMemory: sampleGatewayMemory(),
                 snapshotDetailsEnabled,
                 serverTime: Date.now(),
                 transport: getSocketTransportName(socket)
@@ -87,12 +94,21 @@ function registerNetworkDiagnosticsEvents(socket) {
 
     socket.on("networkDiagnosticsPing", (rawPayload, acknowledge) => {
         if (!diagnosticsGuard.canHandleInput() || typeof acknowledge !== "function") return;
+        const forceGarbageCollection = rawPayload
+            && rawPayload.forceGarbageCollection === true;
+        const gatewayGarbageCollection = runDiagnosticGarbageCollection(
+            forceGarbageCollection
+        );
 
         acknowledge({
             clientSentAt: rawPayload && rawPayload.clientSentAt,
             captureOverlapAudit: Boolean(socket.data.captureOverlapAuditEnabled),
             diagnosticsEnabled: Boolean(socket.data.networkTransportDiagnosticsEnabled),
+            garbageCollection: forceGarbageCollection
+                ? { gateway: gatewayGarbageCollection, workers: null }
+                : null,
             gatewayDiagnostics: takeGatewayTransportDiagnostics(socket),
+            gatewayMemory: sampleGatewayMemory(forceGarbageCollection),
             snapshotDetailsEnabled: Boolean(socket.data.networkDiagnosticsEnabled),
             serverTime: Date.now(),
             transport: getSocketTransportName(socket)

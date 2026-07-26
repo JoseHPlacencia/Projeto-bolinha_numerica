@@ -52,11 +52,27 @@ function createVirtualSocketIo(options = {}) {
     return {
         acknowledge,
         ensureSocket,
+        getDiagnostics,
         getSocket: socketId => sockets.get(socketId) || null,
         io,
         removeSocket,
         sockets
     };
+
+    function getDiagnostics() {
+        let roomMembershipCount = 0;
+
+        for (const socketIds of roomSocketIds.values()) {
+            roomMembershipCount += socketIds.size;
+        }
+
+        return {
+            acknowledgementCount: acknowledgementCallbacks.size,
+            roomCount: roomSocketIds.size,
+            roomMembershipCount,
+            socketCount: sockets.size
+        };
+    }
 
     function ensureSocket(socketId, initialData = {}) {
         let socket = sockets.get(socketId);
